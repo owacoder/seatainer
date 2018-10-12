@@ -1,0 +1,398 @@
+#ifndef CCELEMENT_H
+#define CCELEMENT_H
+
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define C11
+
+#define CC_COPY(container) CC_COPY_EX((container), NULL, NULL)
+#define CC_COPY_EX(container, constructor, destructor) \
+    (_Generic((container), HVector: cc_v_copy, \
+                           HLinkedList: cc_ll_copy, \
+                           HDoublyLinkedList: cc_dll_copy)((container), (constructor), (destructor)))
+
+#define CC_FOR_EACH(container, callback) CC_FOR_EACH_EX((container), (callback), NULL)
+#define CC_FOR_EACH_EX(container, callback, userdata) \
+    (_Generic((container), HVector: cc_v_iterate, \
+                           HLinkedList: cc_ll_iterate \
+                           HDoublyLinkedList: cc_dll_iterate)((container), (callback), (userdata)))
+
+#define CC_R_FOR_EACH(container, callback) CC_FOR_EACH_EX((container), (callback), NULL)
+#define CC_R_FOR_EACH_EX(container, callback, userdata) \
+    (_Generic((container), HVector: cc_v_riterate, \
+                           HDoublyLinkedList: cc_dll_riterate)((container), (callback), (userdata)))
+
+#define CC_DESTROY(item) CC_DESTROY_EX((item), NULL)
+#define CC_DESTROY_EX(item, destructor) \
+    (_Generic((item), HElementData: cc_el_destroy((HElementData) (item)), \
+                      HContainerElementMetaData: cc_el_kill_metadata((HContainerElementMetaData) (item)), \
+                      HVector: cc_v_destroy((HVector) (item), (destructor)), \
+                      HLinkedList: cc_ll_destroy((HLinkedList) (item), (destructor)), \
+                      HDoublyLinkedList: cc_dll_destroy((HDoublyLinkedList) (item), (destructor))))
+
+#define CC_ASSIGN(element, item) \
+    (_Generic((item), char: cc_el_assign_char, \
+                      signed char: cc_el_assign_signed_char, \
+                      unsigned char: cc_el_assign_unsigned_char, \
+                      signed short: cc_el_assign_signed_short, \
+                      unsigned short: cc_el_assign_unsigned_short, \
+                      signed int: cc_el_assign_signed_int, \
+                      unsigned int: cc_el_assign_unsigned_int, \
+                      signed long: cc_el_assign_signed_long, \
+                      unsigned long: cc_el_assign_unsigned_long, \
+                      signed long long: cc_el_assign_signed_long_long, \
+                      unsigned long long: cc_el_assign_unsigned_long_long, \
+                      float: cc_el_assign_float, \
+                      double: cc_el_assign_double, \
+                      void *: cc_el_assign_voidp, \
+                      HVector: cc_el_assign_vector, \
+                      HLinkedList: cc_el_assign_linked_list, \
+                      HDoublyLinkedList: cc_el_assign_doubly_linked_list)((element), (item)))
+
+#define CC_INSERT_AFTER(container, iterator, data) CC_INSERT_AFTER_EX((container), (iterator), (data), NULL)
+#define CC_INSERT_AFTER_EX(container, iterator, data, constructor) \
+    (_Generic((container), HVector: cc_v_insert((container), (iterator)+1, (data), (constructor)), \
+                           HLinkedList: cc_ll_insert_after((container), (iterator), (data), (constructor)), \
+                           HDoublyLinkedList: cc_dll_insert_after((container), (iterator), (data), (constructor))))
+
+#endif
+
+/* C89/C99/C11 keywords */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+#define C99
+#define INLINE inline
+#define RESTRICT restrict
+#define INLINE_DEFINITION(x) x
+#endif
+
+#define C89
+#ifndef INLINE
+#define INLINE
+#endif
+#ifndef RESTRICT
+#define RESTRICT
+#endif
+#ifndef INLINE_DEFINITION
+#define INLINE_DEFINITION(x) ;
+#endif
+
+/* Memory management */
+#ifndef MALLOC
+#define MALLOC(count,objsize) malloc((count)*(objsize))
+#endif
+
+#ifndef REALLOC
+#define REALLOC(ptr,count,objsize) realloc((ptr), (count)*(objsize))
+#endif
+
+#ifndef CALLOC
+#define CALLOC(count,objsize) calloc((count),(objsize))
+#endif
+
+#ifndef FREE
+#define FREE(ptr) free((ptr))
+#endif
+
+/* Min/Max */
+#ifndef MAX
+#define MAX(x, y) ((x) < (y)? (y): (x))
+#endif
+
+#ifndef MIN
+#define MIN(x, y) ((x) < (y)? (x): (y))
+#endif
+
+/* Return values (error codes) */
+#define CC_LESS_THAN -1 /* Left < Right */
+#define CC_OK 0 /* Success, equality */
+#define CC_GREATER_THAN 1 /* Left > Right */
+#define CC_FAILURE 2 /* Failure to perform operation */
+#define CC_NO_SUCH_METHOD 3 /* No method found to perform operation */
+#define CC_NO_MEM 8 /* Out of memory; could not allocate */
+#define CC_BAD_PARAM 9 /* Bad parameter provided */
+#define CC_TYPE_MISMATCH 10 /* Type mismatch, cannot work with provided element types */
+
+/* Direction parameters */
+#define CC_FORWARD 0
+#define CC_BACKWARD 1
+
+/* Error handlers */
+#ifdef CC_TYPE_MISMATCH_ABORT
+#define CC_TYPE_MISMATCH_HANDLER(message, expected, got) do {fprintf(stderr, "%s (%s:%d) - expected %s, but %s was provided: %s\n", __FUNCTION__, __FILE__, __LINE__, cc_el_typename((expected)), cc_el_typename((got)), (message)); abort();} while (0)
+#else
+#define CC_TYPE_MISMATCH_HANDLER(message, expected, got) return CC_TYPE_MISMATCH
+#endif
+
+#ifdef CC_NO_MEM_ABORT
+#define CC_NO_MEM_HANDLER(message) do {fprintf(stderr, "%s (%s:%d): %s\n", __FUNCTION__, __FILE__, __LINE__, (message)); abort();} while (0)
+#else
+#define CC_NO_MEM_HANDLER(message) return CC_NO_MEM
+#endif
+
+#ifdef CC_BAD_PARAM_ABORT
+#define CC_BAD_PARAM_HANDLER(message) do {fprintf(stderr, "%s (%s:%d): %s\n", __FUNCTION__, __FILE__, __LINE__, (message)); abort();} while (0)
+#else
+#define CC_BAD_PARAM_HANDLER(message) return CC_BAD_PARAM
+#endif
+
+#ifdef CC_NO_SUCH_METHOD_ABORT
+#define CC_NO_SUCH_METHOD_HANDLER(message) do {fprintf(stderr, "%s (%s:%d): %s\n", __FUNCTION__, __FILE__, __LINE__, (message)); abort();} while (0)
+#else
+#define CC_NO_SUCH_METHOD_HANDLER(message) return CC_NO_SUCH_METHOD
+#endif
+
+/* Internal convenience macros */
+#define CC_RETURN_ON_ERROR(x) \
+    do { \
+        int ret = CC_OK; \
+        ret = (x); \
+        if (ret != CC_OK) \
+            return ret; \
+    } while(0)
+
+#define CC_CLEANUP_ON_ERROR(x, cleanup) \
+    do { \
+        int ret = CC_OK; \
+        ret = (x); \
+        if (ret != CC_OK) \
+        { \
+            cleanup; \
+        } \
+    } while(0)
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+    typedef enum
+    {
+        El_Null,
+        El_Char,
+        El_SignedChar,
+        El_UnsignedChar,
+        El_SignedShort,
+        El_UnsignedShort,
+        El_SignedInt,
+        El_UnsignedInt,
+        El_SignedLong,
+        El_UnsignedLong,
+        El_SignedLongLong,
+        El_UnsignedLongLong,
+        El_Float,
+        El_Double,
+        El_CString, /* TODO: broken right now */
+        El_VoidPtr,
+        El_Vector,
+        El_LinkedList,
+        El_DoublyLinkedList
+    } ContainerElementType;
+
+    typedef void *Iterator;
+
+    struct Vector;
+    typedef struct Vector *HVector;
+
+    struct LinkedList;
+    typedef struct LinkedList *HLinkedList;
+
+    struct DoublyLinkedList;
+    typedef struct DoublyLinkedList *HDoublyLinkedList;
+
+    struct ElementData;
+    typedef struct ElementData *HElementData;
+    typedef const struct ElementData *HConstElementData;
+
+    struct ContainerElementMetaData;
+    typedef struct ContainerElementMetaData *HContainerElementMetaData;
+
+    /* Regarding callback invariants:
+     *
+     *     Constructors: may allocate and fail, but must _NOT_ adjust the storage pointer
+     *     Copy constructors: may allocate and fail, but must _NOT_ modify the source and must _NOT_ adjust the destination's storage pointer
+     *     Compare: may allocate and fail, but must _NOT_ modify either parameter
+     *     Destructors: no failure reporting mechanism is available, so failure _MUST_ terminate the program (or provide some other means of working around the error)
+     *
+     */
+    typedef int (*ElementDataCallback)(HElementData data);
+    typedef int (*ExtendedElementDataCallback)(HElementData data, void *userdata);
+    typedef int (*ElementDualDataCallback)(HElementData lhs, HElementData rhs);
+
+    /* Returns the (either internal or external) storage location pointing to the actual data */
+    void *cc_el_storage_location(HElementData data);
+    /* Returns a reference to the pointer pointing to the actual data
+     * Thus the HElementData can be used as a reference to the actual data site, allowing modification (cc_el_assign_xxx() family of functions)
+     * If the storage pointer is NULL, an internal memory block will be used to store the value (that memory is only accessible through `cc_el_storage_location()`)
+     *
+     * _DO NOT CALL_ in a user-defined callback (constructor, copy-constructor, or destructor)
+     */
+    void **cc_el_storage_location_ptr(HElementData data);
+
+    /* Initializes new element handle. Does _NOT_ take ownership of the metadata!
+     * If the return value is NULL, returns the error in `*err`, if provided. If the return value is non-null, *err is not modified
+     * The element is also constructed, using `construct` if non-null, or the metadata constructor otherwise
+     */
+    HElementData cc_el_init(ContainerElementType type, HContainerElementMetaData metadata, ElementDataCallback construct, int *err);
+    /* Initializes a new element at the specified buffer
+     * Returns CC_BAD_PARAM if the buffer is not big enough, or a constructor response error code
+     * Returns CC_OK if all went well
+     */
+    int cc_el_init_at(void *buf, size_t buffer_size, ContainerElementType type, HContainerElementMetaData metadata, ElementDataCallback construct);
+    /* Performs a move (shallow copy) of the data from src to dest. `src` is then cleared to the default-constructed type and should still be freed with cc_el_destroy()
+     * Returns the constructor response error code
+     * Returns CC_OK if all went well
+     */
+    int cc_el_move(HElementData dest, HElementData src);
+    /* Performs a copy of the data from src to dest
+     * Returns the constructor response error code
+     * Returns CC_OK if all went well
+     */
+    int cc_el_copy_contents(HElementData dest, HConstElementData src);
+    /* Destroys an element and invalidates the specified handle. The handle should no longer be used
+     * Returns CC_OK */
+    int cc_el_destroy(HElementData data);
+    /* Destroys an element that was used as a reference and invalidates the specified handle. The handle should no longer be used
+     * Returns CC_OK */
+    INLINE int cc_el_destroy_reference(HElementData data) INLINE_DEFINITION({
+        *cc_el_storage_location_ptr(data) = NULL;
+        return cc_el_destroy(data);
+    })
+    /* Returns the size of one element */
+    size_t cc_el_sizeof();
+
+    /* Returns to assign data to the specified element
+     */
+    int cc_el_assign_char(HElementData data, char d);
+    int cc_el_assign_signed_char(HElementData data, signed char d);
+    int cc_el_assign_unsigned_char(HElementData data, unsigned char d);
+    int cc_el_assign_signed_short(HElementData data, signed short d);
+    int cc_el_assign_unsigned_short(HElementData data, unsigned short d);
+    int cc_el_assign_signed_int(HElementData data, signed int d);
+    int cc_el_assign_unsigned_int(HElementData data, unsigned int d);
+    int cc_el_assign_signed_long(HElementData data, signed long d);
+    int cc_el_assign_unsigned_long(HElementData data, unsigned long d);
+    int cc_el_assign_signed_long_long(HElementData data, signed long long d);
+    int cc_el_assign_unsigned_long_long(HElementData data, unsigned long long d);
+    int cc_el_assign_float(HElementData data, float d);
+    int cc_el_assign_double(HElementData data, double d);
+    int cc_el_assign_cstring(HElementData data, const char *c);
+    int cc_el_assign_voidp(HElementData data, void *p);
+    int cc_el_assign_vector(HElementData, HVector p);
+    int cc_el_assign_linked_list(HElementData data, HLinkedList d);
+    int cc_el_assign_doubly_linked_list(HElementData data, HDoublyLinkedList d);
+
+    /* Functions to extract data from the specified element
+     */
+    char *cc_el_get_char(HElementData data);
+    signed char *cc_el_get_signed_char(HElementData data);
+    unsigned char *cc_el_get_unsigned_char(HElementData data);
+    signed short *cc_el_get_signed_short(HElementData data);
+    unsigned short *cc_el_get_unsigned_short(HElementData data);
+    signed int *cc_el_get_signed_int(HElementData data);
+    unsigned int *cc_el_get_unsigned_int(HElementData data);
+    signed long *cc_el_get_signed_long(HElementData data);
+    unsigned long *cc_el_get_unsigned_long(HElementData data);
+    signed long long *cc_el_get_signed_long_long(HElementData data);
+    unsigned long long *cc_el_get_unsigned_long_long(HElementData data);
+    float *cc_el_get_float(HElementData data);
+    double *cc_el_get_double(HElementData data);
+    const char **cc_el_get_cstring(HElementData data);
+    void **cc_el_get_voidp(HElementData data);
+    HVector *cc_el_get_vector(HElementData data);
+    HLinkedList *cc_el_get_linked_list(HElementData data);
+    HDoublyLinkedList *cc_el_get_doubly_linked_list(HElementData data);
+
+    /* Returns the typename associated with the container type
+     */
+    const char *cc_el_typename(ContainerElementType type);
+
+    /* Returns the default construction callback for the specified type
+     */
+    ElementDataCallback cc_el_constructor(ContainerElementType type);
+    /* Returns the default copy-construction callback for the specified type
+     */
+    ElementDualDataCallback cc_el_copy_constructor(ContainerElementType type);
+    /* Returns the default destruction callback for the specified type
+     */
+    ElementDataCallback cc_el_destructor(ContainerElementType type);
+    /* Returns the default comparison callback for the specified type
+     */
+    ElementDualDataCallback cc_el_compare(ContainerElementType type);
+
+    /* Returns the specified construction callback for the metadata block
+     */
+    ElementDataCallback cc_el_constructor_in(HContainerElementMetaData metadata);
+    /* Returns the specified copy-construction callback for the metadata block
+     */
+    ElementDualDataCallback cc_el_copy_constructor_in(HContainerElementMetaData metadata);
+    /* Returns the specified destruction callback for the metadata block
+     */
+    ElementDataCallback cc_el_destructor_in(HContainerElementMetaData metadata);
+    /* Returns the specified comparison callback for the metadata block
+     */
+    ElementDualDataCallback cc_el_compare_in(HContainerElementMetaData metadata);
+
+    /* Call the specified function in the metadata block for the given data, if it exists, otherwise return 0
+     */
+    int cc_el_call_constructor_in(HContainerElementMetaData metadata, HElementData data);
+    int cc_el_call_copy_constructor_in(HContainerElementMetaData metadata, HElementData dest, HElementData src);
+    int cc_el_call_destructor_in(HContainerElementMetaData metadata, HElementData data);
+    int cc_el_call_compare_in(HContainerElementMetaData metadata, HElementData lhs, HElementData rhs);
+
+    /* Returns the size of the data type specified
+     */
+    size_t cc_el_size_of_type(ContainerElementType type);
+
+    /* Makes the default metadata block for the specified type
+     *
+     * Returns NULL if allocation failed
+     */
+    HContainerElementMetaData cc_el_make_metadata(ContainerElementType type);
+
+    /* Copies the metadata block to another metadata block
+     */
+    void cc_el_copy_metadata(HContainerElementMetaData dest, const HContainerElementMetaData src);
+
+    /* Destroys the metadata block for the specified type
+     */
+    void cc_el_kill_metadata(HContainerElementMetaData metadata);
+
+    /* Returns the type specified in the element block
+     *
+     * No NULL checks are performed
+     */
+    ContainerElementType cc_el_type(HConstElementData data);
+
+    /* Returns the type specified in the metadata block
+     *
+     * No NULL checks are performed
+     */
+    ContainerElementType cc_el_metadata_type(const HContainerElementMetaData metadata);
+
+    /* Returns the size of the type specified in the metadata block
+     *
+     * No NULL checks are performed
+     */
+    size_t cc_el_metadata_type_size(const HContainerElementMetaData metadata);
+
+    /* Returns non-zero if both metadata blocks have compatible (equal) types
+     *
+     * No NULL checks are performed
+     */
+    int cc_el_compatible_metadata(const HContainerElementMetaData lhs,
+                                  const HContainerElementMetaData rhs);
+
+    /* Returns non-zero if the element matches the metadata block's type
+     *
+     * No NULL checks are performed
+     */
+    int cc_el_compatible_metadata_element(const HContainerElementMetaData lhs,
+                                          HConstElementData data);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* CCELEMENT_H */
