@@ -1,4 +1,5 @@
 #include "ccdbllst.h"
+#include "utility.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -17,7 +18,13 @@ struct DoublyLinkedListNode
 #else
     HElementData data;
 #endif
+
+#ifdef CC_COUNT_ELEMENT_ACCESSES
+
+#endif
 };
+
+typedef struct DoublyLinkedListNode *HDoublyLinkedListNode;
 
 struct DoublyLinkedList
 {
@@ -32,6 +39,39 @@ struct DoublyLinkedList
     HElementData buffer;
 #endif
 };
+
+/* Precondition: list must be non-empty */
+static void cc_dll_insert_new_head(HDoublyLinkedList list, HDoublyLinkedListNode node)
+{
+    node->prev = NULL;
+    node->next = list->head;
+    list->head->prev = node;
+    list->head = node;
+}
+/* Precondition: list must be non-empty */
+static void cc_dll_insert_new_tail(HDoublyLinkedList list, HDoublyLinkedListNode node)
+{
+    node->next = NULL;
+    node->prev = list->tail;
+    list->tail->next = node;
+    list->tail = node;
+}
+/* Precondition: list must be non-empty and node must be a part of list */
+/* Postcondition: list no longer references node */
+static void cc_dll_remove_node(HDoublyLinkedList list, HDoublyLinkedListNode node)
+{
+    if (node->prev)
+        node->prev->next = node->next;
+
+    if (node->next)
+        node->next->prev = node->prev;
+
+    if (node == list->head)
+        list->head = node->next;
+
+    if (node == list->tail)
+        list->tail = node->prev;
+}
 
 #ifdef C99
 extern inline int cc_dll_push_front(HDoublyLinkedList list, HConstElementData data, ElementDataCallback construct);
@@ -179,12 +219,7 @@ int cc_dll_insert_after(HDoublyLinkedList list, Iterator after, HConstElementDat
         list->head = list->tail = ptr;
     }
     else if (after == list->tail) /* End of list */
-    {
-        ll_after->next = ptr;
-        ptr->prev = ll_after;
-        ptr->next = NULL;
-        list->tail = ptr;
-    }
+        cc_dll_insert_new_tail(list, ptr);
     else if (after) /* Must be in the middle of the list */
     {
         /* It is guaranteed that the prior and succeeding elements exist, since this must be an insertion between two elements */
@@ -198,12 +233,7 @@ int cc_dll_insert_after(HDoublyLinkedList list, Iterator after, HConstElementDat
         ptr->prev = ll_after;
     }
     else /* Beginning of list */
-    {
-        list->head->prev = ptr;
-        ptr->next = list->head;
-        ptr->prev = NULL;
-        list->head = ptr;
-    }
+        cc_dll_insert_new_head(list, ptr);
 
     list->size += 1;
 
@@ -225,17 +255,7 @@ int cc_dll_erase(HDoublyLinkedList list, Iterator element, ElementDataCallback d
 {
     HDoublyLinkedListNode node = element;
 
-    if (node->prev)
-        node->prev->next = node->next;
-
-    if (node->next)
-        node->next->prev = node->prev;
-
-    if (node == list->head)
-        list->head = node->next;
-
-    if (node == list->tail)
-        list->tail = node->prev;
+    cc_dll_remove_node(list, node);
 
     list->size -= 1;
 
@@ -259,11 +279,11 @@ int cc_dll_erase(HDoublyLinkedList list, Iterator element, ElementDataCallback d
     return CC_OK;
 }
 
-int cc_dll_find(HDoublyLinkedList list, Iterator start, int direction, HConstElementData data, ElementDualDataCallback compare, Iterator *out)
+int cc_dll_find(HDoublyLinkedList list, Iterator start, unsigned flags, HConstElementData data, ElementDualDataCallback compare, Iterator *out)
 {
     HDoublyLinkedListNode node = start;
 
-    for (; node; node = direction == CC_FORWARD? node->next: node->prev)
+    for (; node; node = CC_DIRECTION(flags) == CC_FORWARD? node->next: node->prev)
     {
 #ifdef C99
         *cc_el_storage_location_ptr(list->buffer) = node->data;
@@ -288,38 +308,57 @@ int cc_dll_find(HDoublyLinkedList list, Iterator start, int direction, HConstEle
     }
 
     *out = node;
-    return CC_OK;
-}
 
-int cc_dll_iterate(HDoublyLinkedList list, ExtendedElementDataCallback callback, void *userdata)
-{
-    HDoublyLinkedListNode node = list->head;
+    HDoublyLinkedListNode *handle_location = CC_DIRECTION(flags) == CC_FORWARD? &list->head: &list->tail;
+    HDoublyLinkedListNode swap = NULL;
 
-    if (!callback)
-        CC_BAD_PARAM_HANDLER("callback must be callable");
+    switch (CC_ORGANIZATION(flags))
+    {
+        default:
+        case CC_ORGANIZE_NONE: break;
+        case CC_ORGANIZE_MTF: /* Move to front (or back, if direction is backwards) */
+            if (*handle_location != node)
+            {
+                if (CC_DIRECTION(flags) == CC_FORWARD)
+                    swap = list->head;
+                else
+                    swap = list->tail;
+            }
+            break;
+        case CC_ORGANIZE_TRANSPOSE: /* Transpose with nearest element */
+            if (*handle_location != node)
+            {
+                if (CC_DIRECTION(flags) == CC_FORWARD)
+                    swap = node->next;
+                else
+                    swap = node->prev;
+            }
+            break;
+    }
 
-    for (; node; node = node->next)
+    if (swap)
     {
 #ifdef C99
-        *cc_el_storage_location_ptr(list->buffer) = node->data;
-
-        CC_RETURN_ON_ERROR(callback(list->buffer, userdata));
+        memswap(node->data, swap->data, cc_el_metadata_type_size(list->metadata));
 #else
-        CC_RETURN_ON_ERROR(callback(node->data, userdata));
+        HElementData handle = node->data;
+        node->data = swap->data;
+        swap->data = handle;
 #endif
     }
 
     return CC_OK;
 }
 
-int cc_dll_riterate(HDoublyLinkedList list, ExtendedElementDataCallback callback, void *userdata)
+int cc_dll_iterate(HDoublyLinkedList list, unsigned flags, ExtendedElementDataCallback callback, void *userdata)
 {
-    HDoublyLinkedListNode node = list->tail;
+    int direction = CC_DIRECTION(flags);
+    HDoublyLinkedListNode node = direction == CC_FORWARD? list->head: list->tail;
 
     if (!callback)
         CC_BAD_PARAM_HANDLER("callback must be callable");
 
-    for (; node; node = node->prev)
+    for (; node; node = direction == CC_FORWARD? node->next: node->prev)
     {
 #ifdef C99
         *cc_el_storage_location_ptr(list->buffer) = node->data;
@@ -375,9 +414,6 @@ int cc_dll_node_data(HDoublyLinkedList list, Iterator node, HElementData out)
 #ifdef C99
     *cc_el_storage_location_ptr(out) = ll_node->data;
 #else
-    if (!cc_el_compatible_metadata_element(list->metadata, out))
-        CC_TYPE_MISMATCH_HANDLER("cannot get element", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(out));
-
     *cc_el_storage_location_ptr(out) = *cc_el_storage_location_ptr(ll_node->data);
 #endif
 

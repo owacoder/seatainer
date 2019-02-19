@@ -258,28 +258,14 @@ int cc_v_find(HVector list, Iterator start, int direction, HConstElementData dat
     return CC_OK;
 }
 
-int cc_v_iterate(HVector list, ExtendedElementDataCallback callback, void *userdata)
+int cc_v_iterate(HVector list, unsigned flags, ExtendedElementDataCallback callback, void *userdata)
 {
     if (!callback)
         CC_BAD_PARAM_HANDLER("callback must be callable");
 
+    int direction = CC_DIRECTION(flags);
     Iterator i;
-    for (i = cc_v_begin(list); i != NULL; i = cc_v_next(list, i))
-    {
-        *cc_el_storage_location_ptr(list->buffer) = i;
-        CC_RETURN_ON_ERROR(callback(list->buffer, userdata));
-    }
-
-    return CC_OK;
-}
-
-int cc_v_riterate(HVector list, ExtendedElementDataCallback callback, void *userdata)
-{
-    if (!callback)
-        CC_BAD_PARAM_HANDLER("callback must be callable");
-
-    Iterator i;
-    for (i = cc_v_rbegin(list); i != NULL; i = cc_v_rnext(list, i))
+    for (i = direction == CC_FORWARD? cc_v_begin(list): cc_v_rbegin(list); i != NULL; i = direction == CC_FORWARD? cc_v_next(list, i): cc_v_rnext(list, i))
     {
         *cc_el_storage_location_ptr(list->buffer) = i;
         CC_RETURN_ON_ERROR(callback(list->buffer, userdata));

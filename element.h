@@ -119,6 +119,17 @@
 #define CC_FORWARD 0
 #define CC_BACKWARD 1
 
+/* Linear self-organizing flags */
+#define CC_ORGANIZE_NONE (0 << 1)
+/* CC_ORGANIZE_MTF = Move found element to front (or back, depending on direction flag) of list */
+#define CC_ORGANIZE_MTF (1 << 1)
+#define CC_ORGANIZE_TRANSPOSE (2 << 1)
+#define CC_ORGANIZE_COUNT (3 << 1)
+
+/* value extraction from flags */
+#define CC_DIRECTION(flags) ((flags) & 1)
+#define CC_ORGANIZATION(flags) ((flags) & (3 << 1))
+
 /* Error handlers */
 #ifdef CC_TYPE_MISMATCH_ABORT
 #define CC_TYPE_MISMATCH_HANDLER(message, expected, got) do {fprintf(stderr, "%s (%s:%d) - expected %s, but %s was provided: %s\n", __FUNCTION__, __FILE__, __LINE__, cc_el_typename((expected)), cc_el_typename((got)), (message)); abort();} while (0)

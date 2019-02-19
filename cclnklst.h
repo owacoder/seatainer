@@ -13,15 +13,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-    struct LinkedListNode;
-
-    /* The type to be used for referring to a linked list node
-     *
-     * A NULL pointer means an empty list
-     *
-     */
-    typedef struct LinkedListNode *HLinkedListNode;
-
     struct LinkedList;
 
     /* The type to be used for referring to a linked list
@@ -118,7 +109,7 @@ extern "C" {
      */
     int cc_ll_find(HLinkedList list, Iterator start, HConstElementData data, ElementDualDataCallback compare, Iterator *out);
 
-    /* Iterates through the entire linked list
+    /* Forward iterates through the entire linked list
      *
      * Calls the provided callback (with specified userdata) for each element
      *

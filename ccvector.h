@@ -126,19 +126,13 @@ extern "C" {
      *
      * Calls the provided callback (with specified userdata) for each element
      *
-     * Returns CC_OK on success
-     * Returns CC_BAD_PARAM if `callback` is NULL
-     */
-    int cc_v_iterate(HVector list, ExtendedElementDataCallback callback, void *userdata);
-
-    /* Reverse iterates through the entire vector
-     *
-     * Calls the provided callback (with specified userdata) for each element
+     * supported in `flags`:
+     *   - direction: either CC_FORWARD or CC_BACKWARD
      *
      * Returns CC_OK on success
      * Returns CC_BAD_PARAM if `callback` is NULL
      */
-    int cc_v_riterate(HVector list, ExtendedElementDataCallback callback, void *userdata);
+    int cc_v_iterate(HVector list, unsigned flags, ExtendedElementDataCallback callback, void *userdata);
 
     /* Returns a reference to the value of the specified element in `out`
      *

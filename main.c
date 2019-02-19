@@ -17,6 +17,14 @@ int cb(HElementData data, void *userdata)
     return 0;
 }
 
+int printInt(HElementData data, void *userdata)
+{
+    (void) userdata;
+    printf("%d ", *cc_el_get_signed_int(data));
+
+    return 0;
+}
+
 void test_ll(size_t cnt)
 {
     puts("test_ll");
@@ -88,13 +96,13 @@ void test_dll(size_t cnt)
         printf("element was not found\n");
 
     long long sum = 0;
-    cc_dll_iterate(list, cb, &sum);
+    cc_dll_iterate(list, CC_FORWARD, cb, &sum);
     sum = 0;
-    cc_dll_riterate(list, cb, &sum);
+    cc_dll_iterate(list, CC_BACKWARD, cb, &sum);
     printf("sum is %d\n", (int) sum);
     cc_dll_destroy(list, NULL);
 
-    cc_dll_iterate(list2, cb, &sum);
+    cc_dll_iterate(list2, CC_FORWARD, cb, &sum);
     cc_dll_destroy(list2, NULL);
     cc_el_destroy(data);
 }
@@ -130,13 +138,13 @@ void test_v(size_t cnt)
         printf("element was not found\n");
 
     long long sum = 0;
-    cc_v_iterate(list, cb, &sum);
+    cc_v_iterate(list, CC_FORWARD, cb, &sum);
     sum = 0;
-    cc_v_riterate(list, cb, &sum);
+    cc_v_iterate(list, CC_BACKWARD, cb, &sum);
     printf("sum is %d\n", (int) sum);
     cc_v_destroy(list, NULL);
 
-    cc_v_iterate(list2, cb, &sum);
+    cc_v_iterate(list2, CC_FORWARD, cb, &sum);
     cc_v_destroy(list2, NULL);
     cc_el_destroy(data);
 }
@@ -148,7 +156,7 @@ void test_vv(size_t cnt)
     HVector list = cc_v_init(El_Vector), list2, sub = cc_v_init(El_SignedInt);
     HElementData data = cc_el_init(El_Vector, NULL, NULL, NULL);
 
-    cc_el_assign_unsigned_int(data, 42);
+    cc_el_assign_signed_int(data, 42);
     cc_v_push_back(sub, data, NULL);
 
     cc_el_assign_vector(data, sub);
@@ -171,14 +179,53 @@ void test_vv(size_t cnt)
     cc_el_destroy(data);
 }
 
+void test_small_dll()
+{
+    puts("test_small_dll");
+
+    HDoublyLinkedList list = cc_dll_init(El_SignedInt);
+    HElementData data = cc_el_init(El_SignedInt, NULL, NULL, NULL);
+
+    for (int i = 0; i < 5; ++i)
+    {
+        cc_el_assign_signed_int(data, i);
+        cc_dll_push_back(list, data, NULL);
+    }
+
+    cc_dll_iterate(list, CC_FORWARD, printInt, NULL);
+    puts("");
+
+    cc_el_assign_signed_int(data, 2);
+    Iterator find;
+    cc_dll_find(list, cc_dll_begin(list), CC_FORWARD | CC_ORGANIZE_TRANSPOSE, data, NULL, &find);
+
+    if (!find)
+        puts("not found");
+    else
+        puts("found");
+
+    cc_dll_iterate(list, CC_FORWARD, printInt, NULL);
+    puts("");
+    cc_dll_iterate(list, CC_BACKWARD, printInt, NULL);
+    puts("");
+
+    cc_el_destroy(data);
+    cc_dll_destroy(list, NULL);
+}
+
 int main()
 {
     const size_t cnt = 400000;
 
+#if 0
     test_ll(cnt);
     test_dll(cnt);
     test_v(cnt);
     test_vv(cnt);
+#endif
+
+
+    test_small_dll();
 
     return 0;
 }

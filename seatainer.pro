@@ -12,10 +12,15 @@ SOURCES += main.c \
     ccdbllst.c \
     cclnklst.c \
     ccvector.c \
-    element.c
+    element.c \
+    utility.c
 
 HEADERS += \
     ccdbllst.h \
     cclnklst.h \
     ccvector.h \
-    element.h
+    element.h \
+    utility.h
+
+DISTFILES += \
+    README.md

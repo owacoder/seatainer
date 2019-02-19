@@ -19,6 +19,8 @@ struct LinkedListNode
 #endif
 };
 
+typedef struct LinkedListNode *HLinkedListNode;
+
 struct LinkedList
 {
     HLinkedListNode head;

@@ -13,15 +13,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-    struct DoublyLinkedListNode;
-
-    /* The type to be used for referring to a linked list node
-     *
-     * A NULL pointer means an empty list
-     *
-     */
-    typedef struct DoublyLinkedListNode *HDoublyLinkedListNode;
-
     struct DoublyLinkedList;
 
     /* The type to be used for referring to a linked list
@@ -144,31 +135,27 @@ extern "C" {
      *
      * Calls the provided callback (with specified userdata) for each element
      *
-     * `direction`: either CC_FORWARD or CC_BACKWARD
+     * supported in `flags`:
+     *   - direction: either CC_FORWARD or CC_BACKWARD
+     *   - organization: CC_ORGANIZE_xxx
      *
      * The parameter `out` will be set if this function returns CC_OK, but may be NULL, indicating the provided element was not found
      *
      * Returns CC_OK on success
      */
-    int cc_dll_find(HDoublyLinkedList list, Iterator start, int direction, HConstElementData data, ElementDualDataCallback compare, Iterator *out);
+    int cc_dll_find(HDoublyLinkedList list, Iterator start, unsigned flags, HConstElementData data, ElementDualDataCallback compare, Iterator *out);
 
     /* Iterates through the entire linked list
      *
      * Calls the provided callback (with specified userdata) for each element
      *
-     * Returns CC_OK on success
-     * Returns CC_BAD_PARAM if `callback` is NULL
-     */
-    int cc_dll_iterate(HDoublyLinkedList list, ExtendedElementDataCallback callback, void *userdata);
-
-    /* Reverse iterates through the entire linked list
-     *
-     * Calls the provided callback (with specified userdata) for each element
+     * supported in `flags`:
+     *   - direction: either CC_FORWARD or CC_BACKWARD
      *
      * Returns CC_OK on success
      * Returns CC_BAD_PARAM if `callback` is NULL
      */
-    int cc_dll_riterate(HDoublyLinkedList list, ExtendedElementDataCallback callback, void *userdata);
+    int cc_dll_iterate(HDoublyLinkedList list, unsigned flags, ExtendedElementDataCallback callback, void *userdata);
 
     /* Returns the size of the linked list
      *
