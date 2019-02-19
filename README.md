@@ -1,4 +1,5 @@
-# seatainer
+# Seatainer
+
 C Generic container implementation, supporting nested containers
 
 ### Premise
@@ -9,7 +10,40 @@ the container types are checked and determined at runtime, but if you are using 
 
 ### How do I use Seatainer?
 
-First, you'll need to know about Elements. Elements are the foundation for Seatainer.
+#### Elements
+
+##### Introduction
+
+First, you'll need to know about Elements (implemented via the `HElementData` handle). Elements are the foundation for Seatainer.
+
+Elements are a sort of variant type, allowing you to store:
+
+ - The null type (not able to store any value)
+ - All the basic C integral types: `char`, `short`, `int`, `long`, `long long`.
+ - All the basic C floating-point types: `float`, `double`, `long double`
+ - `void *`
+ - The Seatainer container types
+
+The ability to store other containers is what makes Seatainer so powerful. The enum values all start with `El_`
+(i.e. `El_SignedInt`) to designate the element type.
+
+##### So how do you use Elements?
+
+Elements are the interface for interacting with *actual* elements in containers. An example of this is shown below:
+
+    /* Create a "signed int" element */
+    HElementData element = cc_el_init(El_SignedInt, NULL, NULL, NULL);
+
+    /* Then assign a value to it (the int is initialized to 0 unless a custom constructor was provided).
+     * The type will automatically changes to whatever is being assigned (with a few exceptions; please check the error return value of all functions) */
+    cc_el_assign_signed_int(element, 42);
+
+    /* Then you can retrieve the value with the get functions. Note that the get functions return pointers
+     * to the actual data. If the return value is NULL, that means the element does not hold data of that type */
+    printf("%d\n", *cc_el_get_signed_int(element)); /* Note that this is NOT SAFE if we can't guarantee this element contains a signed int */
+
+    /* You can get the type of an element by calling cc_el_type() */
+    ContainerElementType type = cc_el_type(element);
 
 ### What version of C is supported?
 
