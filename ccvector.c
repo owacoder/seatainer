@@ -240,7 +240,6 @@ int cc_v_find(HVector list, Iterator start, int direction, HConstElementData dat
 
     for (; node; node = direction == CC_FORWARD? cc_v_next(list, node): cc_v_rnext(list, node))
     {
-#ifdef C99
         *cc_el_storage_location_ptr(list->buffer) = node;
 
         int ret;
@@ -248,13 +247,6 @@ int cc_v_find(HVector list, Iterator start, int direction, HConstElementData dat
             ret = compare(list->buffer, (HElementData) data);
         else
             ret = cc_el_call_compare_in(list->metadata, list->buffer, (HElementData) data);
-#else
-        int ret;
-        if (compare)
-            ret = compare(node->data, (HElementData) data);
-        else
-            ret = cc_el_call_compare_in(list->metadata, node->data, (HElementData) data);
-#endif
 
         if (ret == CC_OK)
             break;

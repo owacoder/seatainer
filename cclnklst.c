@@ -301,7 +301,7 @@ int cc_ll_node_data(HLinkedList list, Iterator node, HElementData out)
     *cc_el_storage_location_ptr(out) = ll_node->data;
 #else
     if (!cc_el_compatible_metadata_element(list->metadata, out))
-        CC_TYPE_MISMATCH_HANDLER("cannot get element", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(out))
+        CC_TYPE_MISMATCH_HANDLER("cannot get element", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(out));
 
     *cc_el_storage_location_ptr(out) = *cc_el_storage_location_ptr(ll_node->data);
 #endif
