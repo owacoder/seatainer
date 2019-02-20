@@ -86,7 +86,7 @@ extern "C" {
      * The provided callback is used to construct the new element
      *
      * Returns 0 on success
-     * Returns non-zero on failure to allocate, or if `list` is NULL
+     * Returns non-zero on failure to allocate
      *
      * `*list` will be updated on success
      * `*list` will be unchanged on failure
@@ -99,15 +99,35 @@ extern "C" {
         return cc_ll_erase_after(list, NULL, destruct);
     })
 
+    /* Allocates a new element (without ownership taken) appended to the linked list node
+     *
+     * Note that this operation is performed in O(1) time
+     *
+     * The provided callback is used to construct the new element
+     *
+     * Returns 0 on success
+     * Returns non-zero on failure to allocate
+     *
+     * `*list` will be updated on success
+     * `*list` will be unchanged on failure
+     *
+     */
+    INLINE int cc_ll_push_back(HLinkedList list, HConstElementData data, ElementDataCallback construct) INLINE_DEFINITION({
+        return cc_ll_insert_after(list, cc_ll_rbegin(list), data, construct);
+    })
+
     /* Searches the list for the specified element, compared using the provided comparator if possible
      *
      * Calls the provided callback (with specified userdata) for each element
+     *
+     * supported in `flags`:
+     *   - organization: CC_ORGANIZE_NONE, CC_ORGANIZE_MTF
      *
      * The parameter `out` will be set if this function returns CC_OK, but may be NULL, indicating the provided element was not found
      *
      * Returns CC_OK on success
      */
-    int cc_ll_find(HLinkedList list, Iterator start, HConstElementData data, ElementDualDataCallback compare, Iterator *out);
+    int cc_ll_find(HLinkedList list, Iterator start, unsigned flags, HConstElementData data, ElementDualDataCallback compare, Iterator *out);
 
     /* Forward iterates through the entire linked list
      *
@@ -131,6 +151,13 @@ extern "C" {
      *
      */
     Iterator cc_ll_begin(HLinkedList list);
+
+    /* Returns the end element of the linked list
+     *
+     * Note that this operation is performed in O(1) time
+     *
+     */
+    Iterator cc_ll_rbegin(HLinkedList list);
 
     /* Returns the metadata (type and callback information) of the linked list
      *

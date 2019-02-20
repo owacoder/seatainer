@@ -63,7 +63,7 @@ HVector cc_v_init(ContainerElementType type)
     return result;
 }
 
-static HVector cc_v_grow(HVector list, size_t size)
+HVector cc_v_grow(HVector list, size_t size)
 {
     if (list->capacity >= size)
         return list;
@@ -234,11 +234,14 @@ int cc_v_erase(HVector list, size_t element, ElementDataCallback destruct)
     return CC_OK;
 }
 
-int cc_v_find(HVector list, Iterator start, int direction, HConstElementData data, ElementDualDataCallback compare, Iterator *out)
+int cc_v_find(HVector list, Iterator start, unsigned flags, HConstElementData data, ElementDualDataCallback compare, Iterator *out)
 {
     Iterator node = start;
 
-    for (; node; node = direction == CC_FORWARD? cc_v_next(list, node): cc_v_rnext(list, node))
+    if (!cc_el_compatible_metadata_element(list->metadata, data))
+        CC_TYPE_MISMATCH_HANDLER("cannot find element of different type in list", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(data));
+
+    for (; node; node = CC_DIRECTION(flags) == CC_FORWARD? cc_v_next(list, node): cc_v_rnext(list, node))
     {
         *cc_el_storage_location_ptr(list->buffer) = node;
 
@@ -277,6 +280,11 @@ int cc_v_iterate(HVector list, unsigned flags, ExtendedElementDataCallback callb
 size_t cc_v_size_of(HVector list)
 {
     return list->size;
+}
+
+size_t cc_v_capacity_of(HVector list)
+{
+    return list->capacity;
 }
 
 HContainerElementMetaData cc_v_metadata(HVector list)

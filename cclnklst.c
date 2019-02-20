@@ -1,5 +1,7 @@
 #include "cclnklst.h"
 
+#include "utility.h"
+
 #include <string.h>
 #include <stdlib.h>
 
@@ -23,14 +25,16 @@ typedef struct LinkedListNode *HLinkedListNode;
 
 struct LinkedList
 {
-    HLinkedListNode head;
+    HLinkedListNode head, tail;
     size_t size;
 
     HContainerElementMetaData metadata;
 
 #ifdef C99
     /* Constructs on the internal storage, but then can be used as a pointer to another storage block
-     * The internal storage must be destructed when destroying the class, by setting the storage pointer to NULL */
+     * The internal storage must be destructed when destroying the class, by setting the storage pointer to NULL
+     * To do this, call `cc_el_destroy_reference()` on the buffer
+     */
     HElementData buffer;
 #endif
 };
@@ -38,12 +42,16 @@ struct LinkedList
 #ifdef C99
 extern inline int cc_ll_push_front(HLinkedList list, HConstElementData data, ElementDataCallback construct);
 extern inline int cc_ll_pop_front(HLinkedList list, ElementDataCallback destruct);
+extern inline int cc_ll_push_back(HLinkedList list, HConstElementData data, ElementDataCallback construct);
 #else
 int cc_ll_push_front(HLinkedList list, HConstElementData data, ElementDataCallback construct) {
     return cc_ll_insert_after(list, NULL, data, construct);
 }
 int cc_ll_pop_front(HLinkedList list, ElementDataCallback destruct) {
     return cc_ll_erase_after(list, NULL, destruct);
+}
+int cc_ll_push_back(HLinkedList list, HConstElementData data, ElementDataCallback construct) {
+    return cc_ll_insert_after(list, cc_ll_rbegin(list), data, construct);
 }
 #endif
 
@@ -54,7 +62,7 @@ HLinkedList cc_ll_init(ContainerElementType type)
     if (!result)
         return NULL;
 
-    result->head = NULL;
+    result->head = result->tail = NULL;
     result->size = 0;
     result->metadata = cc_el_make_metadata(type);
 
@@ -171,6 +179,9 @@ int cc_ll_insert_after(HLinkedList list, Iterator after, HConstElementData data,
         list->head = ptr;
     }
 
+    if (ll_after == list->tail)
+        list->tail = ptr;
+
     list->size += 1;
 
     return CC_OK;
@@ -198,6 +209,9 @@ int cc_ll_erase_after(HLinkedList list, Iterator after, ElementDataCallback dest
     *begin = node->next;
     list->size -= 1;
 
+    if (list->tail == node)
+        list->tail = (HLinkedListNode) after;
+
 #ifdef C99
     *cc_el_storage_location_ptr(list->buffer) = node->data;
 
@@ -218,9 +232,12 @@ int cc_ll_erase_after(HLinkedList list, Iterator after, ElementDataCallback dest
     return CC_OK;
 }
 
-int cc_ll_find(HLinkedList list, Iterator start, HConstElementData data, ElementDualDataCallback compare, Iterator *out)
+int cc_ll_find(HLinkedList list, Iterator start, unsigned flags, HConstElementData data, ElementDualDataCallback compare, Iterator *out)
 {
-    HLinkedListNode node = start;
+    HLinkedListNode node = start, last = NULL;
+
+    if (!cc_el_compatible_metadata_element(list->metadata, data))
+        CC_TYPE_MISMATCH_HANDLER("cannot find element of different type in list", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(data));
 
     for (; node; node = node->next)
     {
@@ -247,6 +264,34 @@ int cc_ll_find(HLinkedList list, Iterator start, HConstElementData data, Element
     }
 
     *out = node;
+
+    HLinkedListNode swap = NULL;
+
+    switch (CC_ORGANIZATION(flags))
+    {
+        default: CC_BAD_PARAM_HANDLER("unsupported self-organization flag");
+        case CC_ORGANIZE_NONE: break;
+        case CC_ORGANIZE_MTF: /* Move to front (or back, if direction is backwards) */
+            if (list->head != node)
+                swap = list->head;
+            break;
+        case CC_ORGANIZE_TRANSPOSE: /* Transpose with nearest element */
+            if (list->head != node)
+                swap = node->next; // TODO: wrong? it should be the previous node, no?
+            break;
+    }
+
+    if (swap)
+    {
+#ifdef C99
+        memswap(node->data, swap->data, cc_el_metadata_type_size(list->metadata));
+#else
+        HElementData handle = node->data;
+        node->data = swap->data;
+        swap->data = handle;
+#endif
+    }
+
     return CC_OK;
 }
 
@@ -281,6 +326,11 @@ Iterator cc_ll_begin(HLinkedList list)
     return list->head;
 }
 
+Iterator cc_ll_rbegin(HLinkedList list)
+{
+    return list->tail;
+}
+
 HContainerElementMetaData cc_ll_metadata(HLinkedList list)
 {
     return list->metadata;
@@ -302,9 +352,6 @@ int cc_ll_node_data(HLinkedList list, Iterator node, HElementData out)
 #ifdef C99
     *cc_el_storage_location_ptr(out) = ll_node->data;
 #else
-    if (!cc_el_compatible_metadata_element(list->metadata, out))
-        CC_TYPE_MISMATCH_HANDLER("cannot get element", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(out));
-
     *cc_el_storage_location_ptr(out) = *cc_el_storage_location_ptr(ll_node->data);
 #endif
 

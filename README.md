@@ -20,7 +20,7 @@ Elements are a sort of variant type, allowing you to store:
 
  - The null type (not able to store any value)
  - All the basic C integral types: `char`, `short`, `int`, `long`, `long long`.
- - All the basic C floating-point types: `float`, `double`, `long double`
+ - The basic C floating-point types: `float`, `double`. `long double` is not supported.
  - `void *`
  - The Seatainer container types
 
@@ -44,6 +44,37 @@ Elements are the interface for interacting with *actual* elements in containers.
 
     /* You can get the type of an element by calling cc_el_type() */
     ContainerElementType type = cc_el_type(element);
+
+Elements can contain the stored value, or they can reference another storage location. This ability is critical to be able to access real elements in containers.
+
+    /* Access the actual storage location of the type (in this case, a SignedInt) */
+    signed int *signedIntLocation = cc_el_storage_location(element);
+
+    /* Determine whether the location is local or an external reference
+     * (cc_el_storage_location_ptr() is guaranteed to return non-NULL) */
+    signed int *signedIntLocationPtr = *cc_el_storage_location_ptr(element);
+
+    /* Now, if signedIntLocationPtr is NULL, the value is local to the Element.
+     * If it is non-NULL, the value is stored externally, in some other data structure */
+    if (signedIntLocationPtr)
+        puts("signed int element references external location");
+    else
+        puts("signed int data is stored locally in element");
+
+##### Overhead
+
+Based on testing on x86 platforms, the memory overhead is 24 bytes/element on 32-bit platforms, and 32 bytes/element on 64-bit platforms.
+
+#### Containers
+
+##### Introduction
+
+Containers allow you to group data in an easy-to-use way. They allow dynamic resizing, and even allow for constructors, copy-constructors, and destructors.
+This ability allows you to nest containers, such as a vector of vectors of ints, without worrying about memory management.
+
+##### Overhead
+
+
 
 ### What version of C is supported?
 

@@ -98,7 +98,7 @@ extern "C" {
      * The provided callback is used to construct the new element
      *
      * Returns 0 on success
-     * Returns non-zero on failure to allocate, or if `list` is NULL
+     * Returns non-zero on failure to allocate
      *
      * `*list` will be updated on success
      * `*list` will be unchanged on failure
@@ -118,7 +118,7 @@ extern "C" {
      * The provided callback is used to construct the new element
      *
      * Returns 0 on success
-     * Returns non-zero on failure to allocate, or if `list` is NULL
+     * Returns non-zero on failure to allocate
      *
      * `*list` will be updated on success
      * `*list` will be unchanged on failure

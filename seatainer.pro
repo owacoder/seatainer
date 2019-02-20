@@ -13,14 +13,16 @@ SOURCES += main.c \
     cclnklst.c \
     ccvector.c \
     element.c \
-    utility.c
+    utility.c \
+    cchash.c
 
 HEADERS += \
     ccdbllst.h \
     cclnklst.h \
     ccvector.h \
     element.h \
-    utility.h
+    utility.h \
+    cchash.h
 
 DISTFILES += \
     README.md

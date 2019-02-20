@@ -18,10 +18,6 @@ struct DoublyLinkedListNode
 #else
     HElementData data;
 #endif
-
-#ifdef CC_COUNT_ELEMENT_ACCESSES
-
-#endif
 };
 
 typedef struct DoublyLinkedListNode *HDoublyLinkedListNode;
@@ -35,7 +31,9 @@ struct DoublyLinkedList
 
 #ifdef C99
     /* Constructs on the internal storage, but then can be used as a pointer to another storage block
-     * The internal storage must be destructed when destroying the class, by setting the storage pointer to NULL */
+     * The internal storage must be destructed when destroying the class, by setting the storage pointer to NULL
+     * To do this, call `cc_el_destroy_reference()` on the buffer
+     */
     HElementData buffer;
 #endif
 };
@@ -283,6 +281,9 @@ int cc_dll_find(HDoublyLinkedList list, Iterator start, unsigned flags, HConstEl
 {
     HDoublyLinkedListNode node = start;
 
+    if (!cc_el_compatible_metadata_element(list->metadata, data))
+        CC_TYPE_MISMATCH_HANDLER("cannot find element of different type in list", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(data));
+
     for (; node; node = CC_DIRECTION(flags) == CC_FORWARD? node->next: node->prev)
     {
 #ifdef C99
@@ -314,7 +315,7 @@ int cc_dll_find(HDoublyLinkedList list, Iterator start, unsigned flags, HConstEl
 
     switch (CC_ORGANIZATION(flags))
     {
-        default:
+        default: CC_BAD_PARAM_HANDLER("unsupported self-organization flag");
         case CC_ORGANIZE_NONE: break;
         case CC_ORGANIZE_MTF: /* Move to front (or back, if direction is backwards) */
             if (*handle_location != node)
@@ -329,9 +330,9 @@ int cc_dll_find(HDoublyLinkedList list, Iterator start, unsigned flags, HConstEl
             if (*handle_location != node)
             {
                 if (CC_DIRECTION(flags) == CC_FORWARD)
-                    swap = node->next;
-                else
                     swap = node->prev;
+                else
+                    swap = node->next;
             }
             break;
     }

@@ -198,7 +198,8 @@ extern "C" {
         El_VoidPtr,
         El_Vector,
         El_LinkedList,
-        El_DoublyLinkedList
+        El_DoublyLinkedList,
+        El_HashTable
     } ContainerElementType;
 
     typedef void *Iterator;
@@ -211,6 +212,9 @@ extern "C" {
 
     struct DoublyLinkedList;
     typedef struct DoublyLinkedList *HDoublyLinkedList;
+
+    struct HashTable;
+    typedef struct HashTable *HHashTable;
 
     struct ElementData;
     typedef struct ElementData *HElementData;
@@ -229,7 +233,11 @@ extern "C" {
      */
     typedef int (*ElementDataCallback)(HElementData data);
     typedef int (*ExtendedElementDataCallback)(HElementData data, void *userdata);
+    typedef int (*ExtendedElementDualDataCallback)(HElementData data, void *userdata);
     typedef int (*ElementDualDataCallback)(HElementData lhs, HElementData rhs);
+
+    /* Returns the error description as a human-readable string */
+    const char *cc_el_error_reason(int error);
 
     /* Returns the (either internal or external) storage location pointing to the actual data */
     void *cc_el_storage_location(HElementData data);
@@ -274,6 +282,12 @@ extern "C" {
     size_t cc_el_sizeof();
 
     /* Returns to assign data to the specified element
+     *
+     * Returns CC_BAD_PARAM if the element is a reference to an external location
+     *  and the new type is not the same as the currently stored type
+     * Returns CC_OK on success
+     *
+     * The metadata reference is cleared to NULL if the stored type changes
      */
     int cc_el_assign_char(HElementData data, char d);
     int cc_el_assign_signed_char(HElementData data, signed char d);
@@ -293,6 +307,7 @@ extern "C" {
     int cc_el_assign_vector(HElementData, HVector p);
     int cc_el_assign_linked_list(HElementData data, HLinkedList d);
     int cc_el_assign_doubly_linked_list(HElementData data, HDoublyLinkedList d);
+    int cc_el_assign_hash_table(HElementData data, HHashTable d);
 
     /* Functions to extract data from the specified element
      */
@@ -314,6 +329,24 @@ extern "C" {
     HVector *cc_el_get_vector(HElementData data);
     HLinkedList *cc_el_get_linked_list(HElementData data);
     HDoublyLinkedList *cc_el_get_doubly_linked_list(HElementData data);
+    HHashTable *cc_el_get_hash_table(HElementData);
+
+    /* Set the metadata block for the specified element
+     *
+     * Returns CC_TYPE_MISMATCH if the metadata type does not match the current element type
+     * Returns CC_OK on success
+     *
+     * The element does NOT take ownership of the metadata
+     */
+    int cc_el_set_metadata(HElementData data, HContainerElementMetaData meta);
+
+    /* Get the metadata block for the specified element
+     *
+     * Returns NULL if no metadata block is specified.
+     *
+     * The block must not be killed
+     */
+    HContainerElementMetaData cc_el_get_metadata(HConstElementData data);
 
     /* Returns the typename associated with the container type
      */
@@ -344,6 +377,19 @@ extern "C" {
     /* Returns the specified comparison callback for the metadata block
      */
     ElementDualDataCallback cc_el_compare_in(HContainerElementMetaData metadata);
+
+    /* Sets the specified construction callback for the metadata block
+     */
+    void cc_el_set_constructor_in(HContainerElementMetaData metadata, ElementDataCallback constructor);
+    /* Sets the specified copy construction callback for the metadata block
+     */
+    void cc_el_set_copy_constructor_in(HContainerElementMetaData metadata, ElementDualDataCallback copy_constructor);
+    /* Sets the specified destruction callback for the metadata block
+     */
+    void cc_el_set_destructor_in(HContainerElementMetaData metadata, ElementDataCallback destructor);
+    /* Sets the specified copy construction callback for the metadata block
+     */
+    void cc_el_set_copy_constructor_in(HContainerElementMetaData metadata, ElementDualDataCallback copy_constructor);
 
     /* Call the specified function in the metadata block for the given data, if it exists, otherwise return 0
      */
@@ -376,6 +422,26 @@ extern "C" {
      */
     ContainerElementType cc_el_type(HConstElementData data);
 
+    /* Returns the metadata block specifying the contained keys' type information, if the current type is a container.
+     *
+     * This function returns NULL if the current type is not a key/value container
+     *
+     * The metadata block must not be killed.
+     *
+     * No NULL checks are performed
+     */
+    HContainerElementMetaData cc_el_contained_key_metadata(HElementData data);
+
+    /* Returns the metadata block specifying the contained values' type information, if the current type is a container.
+     *
+     * This function returns NULL if the current type is not a container
+     *
+     * The metadata block must not be killed.
+     *
+     * No NULL checks are performed
+     */
+    HContainerElementMetaData cc_el_contained_value_metadata(HElementData data);
+
     /* Returns the type specified in the metadata block
      *
      * No NULL checks are performed
@@ -401,6 +467,19 @@ extern "C" {
      */
     int cc_el_compatible_metadata_element(const HContainerElementMetaData lhs,
                                           HConstElementData data);
+
+    typedef unsigned (*ElementDataHashFunction)(HConstElementData);
+
+    /* Retrieves hash of data in specified output location "hash"
+     *
+     * The data is not modified in any way.
+     *
+     * No NULL checks are performed
+     *
+     * Returns CC_BAD_PARAM if unsupported datatype
+     * Returns CC_OK on success
+     */
+    int cc_el_hash_default(HElementData data, unsigned *hash);
 
 #ifdef __cplusplus
 }

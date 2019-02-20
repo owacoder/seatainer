@@ -12,6 +12,12 @@ extern "C" {
      */
     HVector cc_v_init(ContainerElementType type);
 
+    /* Grows the capacity of the vector to at least `size` elements
+     *
+     * Returns NULL if allocation failed, but `list` will still be valid.
+     */
+    HVector cc_v_grow(HVector list, size_t size);
+
     /* Returns a copy of the vector
      *
      * The provided callback `construct` is used to construct the new elements
@@ -35,6 +41,13 @@ extern "C" {
      *
      */
     size_t cc_v_size_of(HVector list);
+
+    /* Returns the capacity of the vector
+     *
+     * Note that this operation is performed in O(1) time
+     *
+     */
+    size_t cc_v_capacity_of(HVector list);
 
     /* Allocates a new element inserted before the specified vector index
      *
@@ -76,7 +89,7 @@ extern "C" {
      * The provided callback is used to construct the new element
      *
      * Returns 0 on success
-     * Returns non-zero on failure to allocate, or if `list` is NULL
+     * Returns non-zero on failure to allocate
      *
      * `*list` will be updated on success
      * `*list` will be unchanged on failure
@@ -114,13 +127,14 @@ extern "C" {
      *
      * Calls the provided callback (with specified userdata) for each element
      *
-     * `direction`: either CC_FORWARD or CC_BACKWARD
+     * supported in `flags`:
+     *   - direction: either CC_FORWARD or CC_BACKWARD
      *
      * The parameter `out` will be set if this function returns CC_OK, but may be NULL, indicating the provided element was not found
      *
      * Returns CC_OK on success
      */
-    int cc_v_find(HVector list, Iterator start, int direction, HConstElementData data, ElementDualDataCallback compare, Iterator *out);
+    int cc_v_find(HVector list, Iterator start, unsigned flags, HConstElementData data, ElementDualDataCallback compare, Iterator *out);
 
     /* Iterates through the entire vector
      *

@@ -48,7 +48,7 @@ void test_ll(size_t cnt)
 
     Iterator find;
     cc_el_assign_signed_int(data, 102445);
-    cc_ll_find(list, cc_ll_begin(list), data, NULL, &find);
+    cc_ll_find(list, cc_ll_begin(list), 0, data, NULL, &find);
 
     if (find)
         printf("element was found!\n");
@@ -183,34 +183,43 @@ void test_small_dll()
 {
     puts("test_small_dll");
 
-    HDoublyLinkedList list = cc_dll_init(El_SignedInt);
+    unsigned hash;
+    HVector list = cc_v_init(El_SignedInt);
     HElementData data = cc_el_init(El_SignedInt, NULL, NULL, NULL);
 
     for (int i = 0; i < 5; ++i)
     {
         cc_el_assign_signed_int(data, i);
-        cc_dll_push_back(list, data, NULL);
+        cc_v_push_back(list, data, NULL);
     }
 
-    cc_dll_iterate(list, CC_FORWARD, printInt, NULL);
+    cc_v_iterate(list, CC_FORWARD, printInt, NULL);
     puts("");
+
+    cc_el_assign_vector(data, list);
+    cc_el_hash_default(data, &hash);
+    printf("%08x\n", hash);
 
     cc_el_assign_signed_int(data, 2);
     Iterator find;
-    cc_dll_find(list, cc_dll_begin(list), CC_FORWARD | CC_ORGANIZE_TRANSPOSE, data, NULL, &find);
+    cc_v_find(list, cc_v_begin(list), CC_FORWARD | CC_ORGANIZE_TRANSPOSE, data, NULL, &find);
 
     if (!find)
         puts("not found");
     else
         puts("found");
 
-    cc_dll_iterate(list, CC_FORWARD, printInt, NULL);
+    cc_el_assign_vector(data, list);
+    cc_el_hash_default(data, &hash);
+    printf("%08x\n", hash);
+
+    cc_v_iterate(list, CC_FORWARD, printInt, NULL);
     puts("");
-    cc_dll_iterate(list, CC_BACKWARD, printInt, NULL);
+    cc_v_iterate(list, CC_BACKWARD, printInt, NULL);
     puts("");
 
     cc_el_destroy(data);
-    cc_dll_destroy(list, NULL);
+    cc_v_destroy(list, NULL);
 }
 
 int main()
