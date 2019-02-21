@@ -44,6 +44,20 @@ extern "C" {
      */
     void cc_ll_swap(HLinkedList lhs, HLinkedList rhs);
 
+    /* Returns the beginning element of the linked list
+     *
+     * Note that this operation is performed in O(1) time
+     *
+     */
+    Iterator cc_ll_begin(HLinkedList list);
+
+    /* Returns the end element of the linked list
+     *
+     * Note that this operation is performed in O(1) time
+     *
+     */
+    Iterator cc_ll_rbegin(HLinkedList list);
+
     /* Allocates a new element (without ownership taken) inserted after the linked list node
      *
      * If `after` is NULL, the new element is inserted at the beginning of the list
@@ -144,20 +158,6 @@ extern "C" {
      *
      */
     size_t cc_ll_size_of(HLinkedList list);
-
-    /* Returns the beginning element of the linked list
-     *
-     * Note that this operation is performed in O(1) time
-     *
-     */
-    Iterator cc_ll_begin(HLinkedList list);
-
-    /* Returns the end element of the linked list
-     *
-     * Note that this operation is performed in O(1) time
-     *
-     */
-    Iterator cc_ll_rbegin(HLinkedList list);
 
     /* Returns the metadata (type and callback information) of the linked list
      *

@@ -234,7 +234,7 @@ int cc_ll_erase_after(HLinkedList list, Iterator after, ElementDataCallback dest
 
 int cc_ll_find(HLinkedList list, Iterator start, unsigned flags, HConstElementData data, ElementDualDataCallback compare, Iterator *out)
 {
-    HLinkedListNode node = start, last = NULL;
+    HLinkedListNode node = start;
 
     if (!cc_el_compatible_metadata_element(list->metadata, data))
         CC_TYPE_MISMATCH_HANDLER("cannot find element of different type in list", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(data));

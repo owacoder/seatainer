@@ -11,6 +11,4 @@ int memswap(void *p, void *q, size_t size);
 
 unsigned pearson_hash(const char *data, size_t size);
 
-
-
 #endif // CCUTILITY_H

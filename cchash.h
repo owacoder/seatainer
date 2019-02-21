@@ -29,6 +29,12 @@ extern "C" {
      */
     void cc_ht_swap(HHashTable lhs, HHashTable rhs);
 
+    /* Returns the load factor (size / capacity) of the hash table
+     *
+     * Note that this operation is performed in O(1) time
+     */
+    float cc_ht_load_factor(HHashTable table);
+
     /* Returns the size of the hash table (how many elements are currently in it)
      *
      * Note that this operation is performed in O(1) time
@@ -47,16 +53,17 @@ extern "C" {
      *
      * Note that this operation is performed in <= O(n) time
      *
-     * The provided callback is used to construct the new element
+     * The provided callback is used to compare keys
      *
      * Returns CC_OK on success
      * Returns CC_NO_MEM on failure to allocate
+     * Returns CC_BAD_PARAM if key is NULL
      * Returns CC_TYPE_MISMATCH if there is a type mismatch
      *
      * `*table` will be updated on success
      * `*table` will be unchanged on failure
      */
-    int cc_ht_insert(HHashTable table, HConstElementData data, ElementDataCallback construct);
+    int cc_ht_insert(HHashTable table, unsigned flags, HConstElementData key, HConstElementData data, ElementDualDataCallback compare);
 
     /* Destroys the specified element in the hash table
      *
@@ -71,17 +78,17 @@ extern "C" {
      * `*table` will be unchanged on failure
      *
      */
-    int cc_ht_erase(HHashTable table, HConstElementData data, ElementDataCallback destruct);
+    int cc_ht_erase(HHashTable table, unsigned flags, HConstElementData data, ElementDataCallback destruct);
 
     /* Returns an iterator to the beginning of the hash table, or NULL if the hash table is empty
      */
-    Iterator cc_ht_begin(HHashTable table);
+    ExIterator cc_ht_begin(HHashTable table);
 
     /* Returns the iterator after `node`, or NULL if `node` is the last element
      */
-    Iterator cc_ht_next(HHashTable table, Iterator node);
+    ExIterator cc_ht_next(HHashTable table, ExIterator node);
 
-    /* Searches the hash table for the specified element, compared using the provided comparator if possible
+    /* Searches the hash table for the specified key, compared using the provided comparator if possible
      *
      * Calls the provided callback (with specified userdata) for each element
      *
@@ -91,7 +98,7 @@ extern "C" {
      *
      * Returns CC_OK on success
      */
-    int cc_ht_find(HHashTable table, Iterator start, unsigned flags, HConstElementData data, ElementDualDataCallback compare, Iterator *out);
+    int cc_ht_find(HHashTable table, Iterator start, unsigned flags, HConstElementData key, ElementDualDataCallback compare, Iterator *out);
 
     /* Iterates through the entire hash table
      *
@@ -111,7 +118,7 @@ extern "C" {
      * Note that this operation is performed in O(1) time
      *
      */
-    int cc_ht_node_key(HHashTable table, Iterator element, HElementData out);
+    int cc_ht_node_key(HHashTable table, ExIterator node, HElementData out);
 
     /* Returns a reference to the value of the specified element in `out`
      *
@@ -120,7 +127,7 @@ extern "C" {
      * Note that this operation is performed in O(1) time
      *
      */
-    int cc_ht_node_data(HHashTable table, Iterator element, HElementData out);
+    int cc_ht_node_data(HHashTable table, ExIterator node, HElementData out);
 
     /* Returns the metadata (type and callback information) of the hash table keys
      *
@@ -153,23 +160,19 @@ extern "C" {
 
     /* Clears the hash table
      *
-     * The provided callback is used to destroy all elements
-     *
      * The size is reset to 0 after this function is called
      *
      * Note that this operation is performed in O(n) time
      */
-    void cc_ht_clear(HHashTable table, ElementDataCallback destruct);
+    void cc_ht_clear(HHashTable table);
 
     /* Destroys the hash table
-     *
-     * The provided callback is used to destroy all elements
      *
      * The handle is invalidated after this function is called
      *
      * Note that this operation is performed in O(n) time
      */
-    void cc_ht_destroy(HHashTable table, ElementDataCallback destruct);
+    void cc_ht_destroy(HHashTable table);
 #ifdef __cplusplus
 }
 #endif

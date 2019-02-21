@@ -62,7 +62,7 @@ unsigned pearson_hash(const char *data, size_t size)
 {
     const unsigned char *lookup = pearson_lookup_table();
 
-    const int chunks = sizeof(unsigned int);
+    const size_t chunks = sizeof(unsigned int);
     unsigned char hash[sizeof(unsigned int)];
     size_t i, j;
     for (j = 0; j < chunks; ++j)

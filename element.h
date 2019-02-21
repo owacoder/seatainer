@@ -14,16 +14,16 @@
                            HLinkedList: cc_ll_copy, \
                            HDoublyLinkedList: cc_dll_copy)((container), (constructor), (destructor)))
 
-#define CC_FOR_EACH(container, callback) CC_FOR_EACH_EX((container), (callback), NULL)
-#define CC_FOR_EACH_EX(container, callback, userdata) \
+#define CC_FOR_EACH(container, flags, callback) CC_FOR_EACH_EX((container), (flags), (callback), NULL)
+#define CC_FOR_EACH_EX(container, flags, callback, userdata) \
     (_Generic((container), HVector: cc_v_iterate, \
                            HLinkedList: cc_ll_iterate \
-                           HDoublyLinkedList: cc_dll_iterate)((container), (callback), (userdata)))
+                           HDoublyLinkedList: cc_dll_iterate)((container), (flags), (callback), (userdata)))
 
-#define CC_R_FOR_EACH(container, callback) CC_FOR_EACH_EX((container), (callback), NULL)
-#define CC_R_FOR_EACH_EX(container, callback, userdata) \
-    (_Generic((container), HVector: cc_v_riterate, \
-                           HDoublyLinkedList: cc_dll_riterate)((container), (callback), (userdata)))
+#define CC_R_FOR_EACH(container, flags, callback) CC_FOR_EACH_EX((container), (flags) | CC_BACKWARD, (callback), NULL)
+#define CC_R_FOR_EACH_EX(container, flags, callback, userdata) \
+    (_Generic((container), HVector: cc_v_iterate, \
+                           HDoublyLinkedList: cc_dll_iterate)((container), (flags) | CC_BACKWARD, (callback), (userdata)))
 
 #define CC_DESTROY(item) CC_DESTROY_EX((item), NULL)
 #define CC_DESTROY_EX(item, destructor) \
@@ -115,7 +115,16 @@
 #define CC_BAD_PARAM 9 /* Bad parameter provided */
 #define CC_TYPE_MISMATCH 10 /* Type mismatch, cannot work with provided element types */
 
-/* Direction parameters */
+/*
+ * Flags layout
+ *
+ * +---...----------------+-----------------------+-------------------+--------------+
+ * |         31-5: Unused | 4: Single/multi-value | 3-1: Organization | 0: Direction |
+ * +---...----------------+-----------------------+-------------------+--------------+
+ *
+ */
+
+/* Direction flags */
 #define CC_FORWARD 0
 #define CC_BACKWARD 1
 
@@ -126,9 +135,14 @@
 #define CC_ORGANIZE_TRANSPOSE (2 << 1)
 #define CC_ORGANIZE_COUNT (3 << 1)
 
+/* Multi- or single-value flags */
+#define CC_SINGLE_VALUE (0 << 4)
+#define CC_MULTI_VALUE (1 << 4)
+
 /* value extraction from flags */
 #define CC_DIRECTION(flags) ((flags) & 1)
-#define CC_ORGANIZATION(flags) ((flags) & (3 << 1))
+#define CC_ORGANIZATION(flags) ((flags) & (7 << 1))
+#define CC_MULTIVALUE(flags) ((flags) & (1 << 4))
 
 /* Error handlers */
 #ifdef CC_TYPE_MISMATCH_ABORT
@@ -203,6 +217,18 @@ extern "C" {
     } ContainerElementType;
 
     typedef void *Iterator;
+
+    typedef struct {
+        void *opaque[4];
+    } ExIterator;
+
+    Iterator cc_el_null_iterator();
+    ExIterator cc_el_null_ex_iterator();
+    ExIterator cc_el_ex_iterator_from_iterator(Iterator iterator);
+
+    /* Returns 1 if equal, 0 if not equal */
+    int ExIteratorEquals(ExIterator lhs, ExIterator rhs);
+    int ExIteratorNonNull(ExIterator it);
 
     struct Vector;
     typedef struct Vector *HVector;
@@ -365,6 +391,9 @@ extern "C" {
      */
     ElementDualDataCallback cc_el_compare(ContainerElementType type);
 
+    /* Returns the userdata specified in the metadata block
+     */
+    void *cc_el_userdata_in(HContainerElementMetaData metadata);
     /* Returns the specified construction callback for the metadata block
      */
     ElementDataCallback cc_el_constructor_in(HContainerElementMetaData metadata);
@@ -378,6 +407,9 @@ extern "C" {
      */
     ElementDualDataCallback cc_el_compare_in(HContainerElementMetaData metadata);
 
+    /* Sets the userdata in the metadata block
+     */
+    void cc_el_set_userdata_in(HContainerElementMetaData metadata, void *userdata);
     /* Sets the specified construction callback for the metadata block
      */
     void cc_el_set_constructor_in(HContainerElementMetaData metadata, ElementDataCallback constructor);
@@ -387,9 +419,9 @@ extern "C" {
     /* Sets the specified destruction callback for the metadata block
      */
     void cc_el_set_destructor_in(HContainerElementMetaData metadata, ElementDataCallback destructor);
-    /* Sets the specified copy construction callback for the metadata block
+    /* Sets the specified comparison callback for the metadata block
      */
-    void cc_el_set_copy_constructor_in(HContainerElementMetaData metadata, ElementDualDataCallback copy_constructor);
+    void cc_el_set_compare_in(HContainerElementMetaData metadata, ElementDualDataCallback compare);
 
     /* Call the specified function in the metadata block for the given data, if it exists, otherwise return 0
      */

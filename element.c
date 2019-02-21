@@ -29,6 +29,35 @@ const char *cc_el_error_reason(int error)
     }
 }
 
+Iterator cc_el_null_iterator()
+{
+    return NULL;
+}
+
+ExIterator cc_el_null_ex_iterator()
+{
+    ExIterator it;
+    memset(it.opaque, 0, sizeof(it.opaque));
+    return it;
+}
+
+ExIterator cc_el_ex_iterator_from_iterator(Iterator iterator)
+{
+    ExIterator it = cc_el_null_ex_iterator();
+    it.opaque[0] = iterator;
+    return it;
+}
+
+int ExIteratorEquals(ExIterator lhs, ExIterator rhs)
+{
+    return !memcmp(lhs.opaque, rhs.opaque, sizeof(lhs.opaque));
+}
+
+int ExIteratorNonNull(ExIterator it)
+{
+    return it.opaque[0] != NULL;
+}
+
 struct ElementData {
     /* Actual internal data is stored in the union */
     union {
@@ -69,6 +98,7 @@ struct ContainerElementMetaData
     ElementDualDataCallback el_compare;
     size_t el_size; /* Size in bytes of contained elements */
     ContainerElementType el_type; /* Type of contained elements */
+    void *el_userdata; /* Userdata, allowed to be used for anything */
 };
 
 static int cc_el_char_constructor(HElementData data)
@@ -333,7 +363,7 @@ static int cc_el_hash_table_copy_constructor(HElementData lhs, HElementData rhs)
     HHashTable *r = cc_el_storage_location(rhs);
 
     if (*l)
-        cc_ht_destroy(*l, NULL);
+        cc_ht_destroy(*l);
 
     *l = cc_ht_copy(*r, NULL, NULL);
     if (!*l)
@@ -377,7 +407,7 @@ static int cc_el_hash_table_destructor(HElementData data)
     HHashTable *d = cc_el_storage_location(data);
 
     if (*d)
-        cc_ht_destroy(*d, NULL);
+        cc_ht_destroy(*d);
 
     return CC_OK;
 }
@@ -535,6 +565,9 @@ const char *cc_el_typename(ContainerElementType type)
                            "double", "const char *", "void *", "vector",
                            "linked list", "doubly linked list", "hash table"};
 
+    if (type >= sizeof(types)/sizeof(types[0]))
+        return "unknown type";
+
     return types[type];
 }
 
@@ -634,6 +667,16 @@ ElementDualDataCallback cc_el_compare(ContainerElementType type)
         case El_DoublyLinkedList: return cc_el_doubly_linked_list_compare;
         case El_HashTable: return cc_el_hash_table_compare;
     }
+}
+
+void *cc_el_userdata_in(HContainerElementMetaData metadata)
+{
+    return metadata->el_userdata;
+}
+
+void cc_el_set_userdata_in(HContainerElementMetaData metadata, void *userdata)
+{
+    metadata->el_userdata = userdata;
 }
 
 ElementDataCallback cc_el_constructor_in(HContainerElementMetaData metadata)
@@ -1088,6 +1131,7 @@ HContainerElementMetaData cc_el_make_metadata(ContainerElementType type)
     result->el_compare = cc_el_compare(type);
     result->el_type = type;
     result->el_size = cc_el_size_of_type(type);
+    result->el_userdata = NULL;
 
     return result;
 }
