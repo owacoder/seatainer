@@ -74,7 +74,16 @@ This ability allows you to nest containers, such as a vector of vectors of ints,
 
 ##### Overhead
 
+Most containers have very low memory overhead, Don't be scared by the mention of element overhead above.
 
+The per-element memory overhead for each container is listed below, for 32- and 64-bit systems:
+
+ - Linked list - C89, 24/32 bytes per element, in addition to actual data. C99 or newer, 4/8 bytes per element in addition to actual data.
+ - Doubly linked list - C89, 28/40 bytes per element, in addition to actual data. C99 or newer, 8/16 bytes per element in addition to actual data.
+ - Vector - No overhead for each element.
+ - Hash table - Same as linked list per element, but incurs additional overhead.
+ 
+ Of course, the containers will also incur additional costs. Each container usually has at least one Element object, as well as metadata to specify how the data in the container behaves.
 
 ### What version of C is supported?
 
