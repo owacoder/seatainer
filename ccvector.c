@@ -292,6 +292,11 @@ HContainerElementMetaData cc_v_metadata(HVector list)
     return list->metadata;
 }
 
+void *cc_v_raw(HVector list)
+{
+    return list->data;
+}
+
 Iterator cc_v_begin(HVector list)
 {
     return list->size == 0? NULL: list->data;
@@ -368,6 +373,24 @@ int cc_v_compare(HVector lhs, HVector rhs, ElementDualDataCallback cmp)
     return comparison;
 }
 
+// TODO: not implemented properly yet
+int cc_v_sort(HVector list, ElementDualDataCallback cmp)
+{
+    if (!cmp)
+        cmp = cc_el_compare_in(list->metadata);
+
+    if (!cmp)
+        CC_NO_SUCH_METHOD_HANDLER("no comparison handler to sort vector with");
+
+    HElementData elem = cc_el_init(cc_el_metadata_type(list->metadata), list->metadata, NULL, NULL);
+
+    if (!elem)
+        CC_NO_MEM_HANDLER("out of memory");
+
+    // qsort(cc_v_raw(list), cc_v_size_of(list), cc_el_metadata_type_size(list->metadata), (int (*)(const void*, const void*)) cmp);
+    return CC_OK;
+}
+
 void cc_v_clear(HVector list, ElementDataCallback destruct)
 {
     HElementData el = list->buffer;
@@ -397,6 +420,58 @@ void cc_v_destroy(HVector list, ElementDataCallback destruct)
     cc_el_kill_metadata(list->metadata);
     FREE(list->data);
     FREE(list);
+}
+
+const char *cc_v_to_string(HVector list)
+{
+    switch (cc_el_metadata_type(list->metadata))
+    {
+        case El_Char:
+        case El_SignedChar:
+        case El_UnsignedChar:
+            break;
+        default:
+            return NULL;
+    }
+
+    if (list->size == 0)
+        return "";
+
+    if (*((char *) cc_v_rbegin(list)) != 0) /* Last character not NUL */
+    {
+        if (!cc_v_grow(list, cc_v_size_of(list) + 1))
+            return NULL;
+
+        *((char *) cc_v_raw(list) + cc_v_size_of(list)) = 0; /* Set last character to NUL */
+    }
+
+    return cc_v_raw(list);
+}
+
+int cc_v_assign_string_n(HVector list, const char *data, size_t len)
+{
+    switch (cc_el_metadata_type(list->metadata))
+    {
+        case El_Char:
+        case El_SignedChar:
+        case El_UnsignedChar:
+            break;
+        default:
+            CC_TYPE_MISMATCH_HANDLER("cannot assign string to vector", /*expected*/ El_Char, /*actual*/ cc_el_metadata_type(list->metadata));
+    }
+
+    if (!cc_v_grow(list, len))
+        CC_NO_MEM_HANDLER("out of memory");
+
+    list->size = len;
+    memcpy(cc_v_raw(list), data, len);
+
+    return CC_OK;
+}
+
+int cc_v_assign_string(HVector list, const char *data)
+{
+    return cc_v_assign_string_n(list, data, strlen(data));
 }
 
 #ifdef __cplusplus

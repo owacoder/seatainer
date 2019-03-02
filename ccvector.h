@@ -71,7 +71,7 @@ extern "C" {
      *
      * Note that this operation is performed in <= O(n) time
      *
-     * The provided callback is used to destruct the new element
+     * The provided callback is used to destruct the element
      *
      * Returns CC_OK on success
      * Returns CC_TYPE_MISMATCH if there is a type mismatch
@@ -103,9 +103,13 @@ extern "C" {
         return cc_v_erase(list, cc_v_size_of(list) - 1, destruct);
     })
 
-    /* Returns an iterator to the beginning of the vector, or NULL if the vector is empty
+    /* Returns the raw contiguous data pointer
      *
      * WARNING! This function returns a pointer to the raw contiguous memory. Any modification is at your own risk!
+     */
+    void *cc_v_raw(HVector list);
+
+    /* Returns an iterator to the beginning of the vector, or NULL if the vector is empty
      */
     Iterator cc_v_begin(HVector list);
 
@@ -178,6 +182,33 @@ extern "C" {
      *
      */
     int cc_v_compare(HVector lhs, HVector rhs, ElementDualDataCallback cmp);
+
+    /* Sorts the data in a vector using the provided comparison callback
+     *
+     * Uses memcmp() if no comparison function is provided
+     * The order of equivalent elements is unspecified (i.e. the sort is not stable)
+     *
+     * Note that this operation is performed in O(n log n) time
+     *
+     * Returns CC_OK on success
+     */
+    int cc_v_sort(HVector list, ElementDualDataCallback cmp);
+
+    /* Vector to string
+     *
+     * Returns NULL if vector is not of type Char, SignedChar, or UnsignedChar
+     */
+    const char *cc_v_to_string(HVector list);
+
+    /* Assign string to vector
+     *
+     * Vector must have type Char, SignedChar, or UnsignedChar
+     *
+     * Returns CC_OK on success
+     * Returns CC_TYPE_MISMATCH if there is a type mismatch
+     */
+    int cc_v_assign_string_n(HVector list, const char *data, size_t len);
+    int cc_v_assign_string(HVector list, const char *data);
 
     /* Clears the vector
      *

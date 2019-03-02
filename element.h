@@ -105,6 +105,9 @@
 #define MIN(x, y) ((x) < (y)? (x): (y))
 #endif
 
+/* Swap */
+#define CC_SWAP(type, x, y) {type tmp = (x); (x) = (y); (y) = tmp;}
+
 /* Return values (error codes) */
 #define CC_LESS_THAN -1 /* Left < Right */
 #define CC_OK 0 /* Success, equality */
@@ -118,9 +121,9 @@
 /*
  * Flags layout
  *
- * +---...----------------+-----------------------+-------------------+--------------+
- * |         31-5: Unused | 4: Single/multi-value | 3-1: Organization | 0: Direction |
- * +---...----------------+-----------------------+-------------------+--------------+
+ * +---...----------------+-----------------------+------------------------+-----------------------+-------------------+--------------+
+ * |         31-8: Unused | 7-6: Search semantics | 5: Copy/move-semantics | 4: Single/multi-value | 3-1: Organization | 0: Direction |
+ * +---...----------------+-----------------------+------------------------+-----------------------+-------------------+--------------+
  *
  */
 
@@ -139,10 +142,20 @@
 #define CC_SINGLE_VALUE (0 << 4)
 #define CC_MULTI_VALUE (1 << 4)
 
+/* Move-semantics flags */
+#define CC_COPY_VALUE (0 << 5)
+#define CC_MOVE_VALUE (1 << 5)
+
+/* Search-semantics flags */
+#define CC_SEARCH_LINEAR (0 << 6)
+#define CC_SEARCH_BINARY (1 << 6)
+
 /* value extraction from flags */
 #define CC_DIRECTION(flags) ((flags) & 1)
 #define CC_ORGANIZATION(flags) ((flags) & (7 << 1))
 #define CC_MULTIVALUE(flags) ((flags) & (1 << 4))
+#define CC_MOVE_SEMANTICS(flags) ((flags) & (1 << 5))
+#define CC_SEARCH_SEMANTICS(flags) ((flags) & (3 << 6))
 
 /* Error handlers */
 #ifdef CC_TYPE_MISMATCH_ABORT
@@ -259,7 +272,7 @@ extern "C" {
      */
     typedef int (*ElementDataCallback)(HElementData data);
     typedef int (*ExtendedElementDataCallback)(HElementData data, void *userdata);
-    typedef int (*ExtendedElementDualDataCallback)(HElementData data, void *userdata);
+    typedef int (*ExtendedElementDualDataCallback)(HElementData lhs, HElementData rhs, void *userdata);
     typedef int (*ElementDualDataCallback)(HElementData lhs, HElementData rhs);
 
     /* Returns the error description as a human-readable string */
@@ -511,7 +524,7 @@ extern "C" {
      * Returns CC_BAD_PARAM if unsupported datatype
      * Returns CC_OK on success
      */
-    int cc_el_hash_default(HElementData data, unsigned *hash);
+    int cc_el_hash_default(HConstElementData element, unsigned *hash);
 
 #ifdef __cplusplus
 }

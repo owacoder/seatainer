@@ -1195,8 +1195,10 @@ int cc_el_compatible_metadata_element(const HContainerElementMetaData meta,
 }
 
 
-int cc_el_hash_default(HElementData data, unsigned *hash)
+int cc_el_hash_default(HConstElementData element, unsigned *hash)
 {
+    HElementData data = (HElementData) element;
+
     switch (cc_el_type(data))
     {
         default:

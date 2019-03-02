@@ -9,6 +9,9 @@
 extern "C" {
 #endif
 
+#define KEY_ADDR(block, table) (block)
+#define VALUE_ADDR(block, table) ((char *) (block) + MAX(cc_el_metadata_type_size(table->key_meta), cc_el_metadata_type_size(table->value_meta)))
+
 struct HashTable {
     /* bucket_meta contains metadata to be injected into each bucket. The userdata field contains a pointer that points to this hash table,
      * so that element destructors for each bucket can look at the bucket's metadata, then obtain a pointer to this table,
@@ -50,14 +53,14 @@ static void *create_block_pair(HHashTable table, HConstElementData key, HConstEl
         return NULL;
 
     /* Copy key */
-    *cc_el_storage_location_ptr(table->key_buffer) = ptr;
+    *cc_el_storage_location_ptr(table->key_buffer) = KEY_ADDR(ptr, table);
     CC_CLEANUP_ON_ERROR(cc_el_call_constructor_in(table->key_meta, table->key_buffer), goto cleanup;);
     ++fully_initialized;
 
     CC_CLEANUP_ON_ERROR(cc_el_copy_contents(table->key_buffer, key), goto cleanup;);
 
     /* Copy value */
-    *cc_el_storage_location_ptr(table->value_buffer) = (char *) ptr + MAX(cc_el_metadata_type_size(table->key_meta), cc_el_metadata_type_size(table->value_meta));
+    *cc_el_storage_location_ptr(table->value_buffer) = VALUE_ADDR(ptr, table);
     CC_CLEANUP_ON_ERROR(cc_el_call_constructor_in(table->value_meta, table->value_buffer), goto cleanup;);
     ++fully_initialized;
 
@@ -70,14 +73,14 @@ cleanup:
     if (fully_initialized > 1)
     {
         /* Destruct value */
-        *cc_el_storage_location_ptr(table->value_buffer) = (char *) ptr + MAX(cc_el_metadata_type_size(table->key_meta), cc_el_metadata_type_size(table->value_meta));
+        *cc_el_storage_location_ptr(table->value_buffer) = VALUE_ADDR(ptr, table);
         cc_el_call_destructor_in(table->value_meta, table->value_buffer);
     }
 
     if (fully_initialized > 0)
     {
         /* Destruct key */
-        *cc_el_storage_location_ptr(table->key_buffer) = ptr;
+        *cc_el_storage_location_ptr(table->key_buffer) = KEY_ADDR(ptr, table);
         cc_el_call_destructor_in(table->key_meta, table->key_buffer);
     }
 
@@ -88,16 +91,19 @@ cleanup:
 
 static int destroy_raw_block_pair(HHashTable table, void *block)
 {
-    /* Destruct key */
-    *cc_el_storage_location_ptr(table->key_buffer) = block;
-    cc_el_call_destructor_in(table->key_meta, table->key_buffer);
+    if (block)
+    {
+        /* Destruct key */
+        *cc_el_storage_location_ptr(table->key_buffer) = KEY_ADDR(block, table);
+        cc_el_call_destructor_in(table->key_meta, table->key_buffer);
 
-    /* Destruct value */
-    *cc_el_storage_location_ptr(table->value_buffer) = block + cc_el_metadata_type_size(table->key_meta);
-    cc_el_call_destructor_in(table->value_meta, table->value_buffer);
+        /* Destruct value */
+        *cc_el_storage_location_ptr(table->value_buffer) = VALUE_ADDR(block, table);
+        cc_el_call_destructor_in(table->value_meta, table->value_buffer);
 
-    /* Free data block */
-    FREE(block);
+        /* Free data block */
+        FREE(block);
+    }
 
     return 0;
 }
@@ -128,8 +134,8 @@ static int compare_block_pairs_keys_only(HElementData lhs, HElementData rhs)
     HHashTable ltable = cc_el_userdata_in(cc_el_get_metadata(lhs));
     HHashTable rtable = cc_el_userdata_in(cc_el_get_metadata(rhs));
 
-    *cc_el_storage_location_ptr(ltable->key_buffer) = plhs;
-    *cc_el_storage_location_ptr(rtable->key_buffer) = prhs;
+    *cc_el_storage_location_ptr(ltable->key_buffer) = KEY_ADDR(plhs, ltable);
+    *cc_el_storage_location_ptr(rtable->key_buffer) = KEY_ADDR(prhs, rtable);
 
     return cc_el_call_compare_in(ltable->key_meta, ltable->key_buffer, rtable->key_buffer);
 }
@@ -145,15 +151,15 @@ static int compare_block_pairs_full(HElementData lhs, HElementData rhs)
     HHashTable ltable = cc_el_userdata_in(cc_el_get_metadata(lhs));
     HHashTable rtable = cc_el_userdata_in(cc_el_get_metadata(rhs));
 
-    *cc_el_storage_location_ptr(ltable->key_buffer) = plhs;
-    *cc_el_storage_location_ptr(rtable->key_buffer) = prhs;
+    *cc_el_storage_location_ptr(ltable->key_buffer) = KEY_ADDR(plhs, ltable);
+    *cc_el_storage_location_ptr(rtable->key_buffer) = KEY_ADDR(prhs, rtable);
 
     int result = cc_el_call_compare_in(ltable->key_meta, ltable->key_buffer, rtable->key_buffer);
     if (result != 0)
         return result;
 
-    *cc_el_storage_location_ptr(ltable->value_buffer) = (char *) plhs + MAX(cc_el_metadata_type_size(ltable->key_meta), cc_el_metadata_type_size(ltable->value_meta));
-    *cc_el_storage_location_ptr(rtable->value_buffer) = (char *) prhs + MAX(cc_el_metadata_type_size(rtable->key_meta), cc_el_metadata_type_size(rtable->value_meta));
+    *cc_el_storage_location_ptr(ltable->value_buffer) = VALUE_ADDR(plhs, ltable);
+    *cc_el_storage_location_ptr(rtable->value_buffer) = VALUE_ADDR(plhs, ltable);
 
     return cc_el_call_compare_in(ltable->value_meta, ltable->value_buffer, rtable->value_buffer);
 }
@@ -167,21 +173,49 @@ static int destroy_block_pair(HElementData data)
     return destroy_raw_block_pair(table, ptr);
 }
 
-static Iterator find_key_in_bucket(HHashTable table, HLinkedList bucket, Iterator start, HConstElementData key, ElementDualDataCallback compare)
+/* Finds the location of the first key in the bucket with an identical key to `key`, and returns it.
+ * The prior element is returned in `*prior`, or `*prior` is NULL if the first element is equal to the key */
+static Iterator find_first_key_in_bucket(HHashTable table, HLinkedList bucket, HConstElementData key, ElementDualDataCallback compare, Iterator *prior)
 {
-    Iterator it;
-    for (it = start; it; it = cc_ll_next(bucket, it))
+    Iterator it, last = NULL;
+    for (it = cc_ll_begin(bucket); it; last = it, it = cc_ll_next(bucket, it))
     {
         cc_ll_node_data(bucket, it, table->bucket_buffer);
-        int res = compare_block_pair_key(table->bucket_buffer, key, compare);
+        int res = compare_block_pair_key(table->bucket_buffer, (HElementData) key, compare);
 
         if (res == 0)
+        {
+            if (prior)
+                *prior = last;
             return it;
+        }
         else if (res < -1 || res > 1)
             break;
     }
 
+    if (prior)
+        *prior = last;
+
     return NULL;
+}
+
+/* Counts number of identical keys after the first (designated by `start`) in the bucket */
+static size_t count_remaining_keys_in_bucket(HHashTable table, Iterator start, HLinkedList bucket, HConstElementData key, ElementDualDataCallback compare)
+{
+    size_t count = 0;
+    Iterator it;
+    for (it = cc_ll_next(bucket, start); it; it = cc_ll_next(bucket, it))
+    {
+        cc_ll_node_data(bucket, it, table->bucket_buffer);
+        int res = compare_block_pair_key(table->bucket_buffer, (HElementData) key, compare);
+
+        if (res == 0)
+            ++count;
+        else
+            break;
+    }
+
+    return count;
 }
 
 static HHashTable cc_ht_init_with_table_size(ContainerElementType keyType, ContainerElementType valueType, size_t table_size)
@@ -200,6 +234,7 @@ static HHashTable cc_ht_init_with_table_size(ContainerElementType keyType, Conta
             NULL == (table->bucket_buffer = cc_el_init(El_VoidPtr, table->bucket_meta, NULL, NULL)))
         goto cleanup;
 
+    cc_el_set_userdata_in(table->bucket_meta, table);
     cc_el_set_compare_in(table->bucket_meta, compare_block_pairs_full);
     cc_el_set_destructor_in(table->bucket_meta, destroy_block_pair);
 
@@ -285,7 +320,7 @@ int cc_ht_insert(HHashTable table, unsigned flags, HConstElementData key, HConst
 
     /* Then create the bucket, if it doesn't exist already */
     HLinkedList bucket = table->table[hash];
-    Iterator list_iter = NULL;
+    Iterator list_iter = NULL, prior = NULL;
     if (bucket == NULL)
     {
         bucket = table->table[hash] = cc_ll_init(El_VoidPtr);
@@ -297,19 +332,24 @@ int cc_ht_insert(HHashTable table, unsigned flags, HConstElementData key, HConst
     }
     /* If bucket already exists, look for our key in it */
     else
-        list_iter = find_key_in_bucket(table, bucket, cc_ll_begin(bucket), key, compare);
+        list_iter = find_first_key_in_bucket(table, bucket, key, compare, &prior);
 
     /* Then create data block itself */
     void *block = create_block_pair(table, key, data);
     if (!block)
         CC_NO_MEM_HANDLER("out of memory");
 
-    /* If multi-value, insert just after first found identical key (for ease of insertion) */
-    if (CC_MULTIVALUE(flags) == CC_MULTI_VALUE)
+    /* If multi-value, insert just before identical key
+     * This means for multi-value hashes, all keys will be grouped with identical keys (but in undefined order in relation to each other),
+     * and the first key of a multi-value group will always be the most recently inserted.
+     */
+    if (list_iter == NULL || CC_MULTIVALUE(flags) == CC_MULTI_VALUE)
     {
         *cc_el_storage_location_ptr(table->bucket_buffer) = &block;
 
-        CC_CLEANUP_ON_ERROR(cc_ll_insert_after(bucket, list_iter, table->bucket_buffer, NULL), err = ret; goto cleanup;);
+        CC_CLEANUP_ON_ERROR(cc_ll_insert_after(bucket, prior, table->bucket_buffer, NULL), err = ret; goto cleanup;);
+
+        ++table->size;
     }
     /* Or if single-value, just replace block and delete old block */
     else
@@ -329,9 +369,48 @@ cleanup:
     return err;
 }
 
-int cc_ht_erase(HHashTable table, unsigned flags, HConstElementData data, ElementDataCallback destruct)
+int cc_ht_erase(HHashTable table, unsigned flags, HConstElementData key, ElementDualDataCallback compare)
 {
-    return 0;
+    if (!key)
+        CC_BAD_PARAM_HANDLER("no key specified");
+
+    if (!cc_el_compatible_metadata_element(table->key_meta, key))
+        CC_TYPE_MISMATCH_HANDLER("cannot erase element, key is wrong type", /*expected*/ cc_el_metadata_type(table->key_meta), /*actual*/ cc_el_type(key));
+
+    /* First hash the key */
+    unsigned hash;
+    CC_RETURN_ON_ERROR(cc_el_hash_default((HElementData) key, &hash));
+
+    /* Then reduce modulo the table capacity (note: this doesn't give even distribution unless the capacity is a power of two) */
+    hash %= table->capacity;
+
+    /* Then find the bucket (if it doesn't exist, the element is not present) */
+    HLinkedList bucket = table->table[hash];
+    Iterator list_iter = NULL, prior = NULL;
+    if (bucket == NULL)
+        return CC_OK;
+    /* If bucket already exists, look for our key in it */
+    else
+        list_iter = find_first_key_in_bucket(table, bucket, key, compare, &prior);
+
+    if (list_iter == NULL)
+        return CC_OK;
+
+    if (CC_MULTIVALUE(flags) == CC_MULTI_VALUE)
+    {
+        size_t remaining = count_remaining_keys_in_bucket(table, list_iter, bucket, key, compare) + 1;
+
+        table->size -= remaining;
+        while (remaining--)
+            cc_ll_erase_after(bucket, prior, NULL);
+    }
+    else
+    {
+        cc_ll_erase_after(bucket, prior, NULL);
+        --table->size;
+    }
+
+    return CC_OK;
 }
 
 /* Iterator format
@@ -357,6 +436,8 @@ ExIterator cc_ht_begin(HHashTable table)
             result.opaque[0] = *cc_el_get_voidp(table->bucket_buffer);
             result.opaque[1] = list_begin;
             result.opaque[2] = table->table + idx;
+
+            return result;
         }
     }
 
@@ -365,11 +446,11 @@ ExIterator cc_ht_begin(HHashTable table)
 
 ExIterator cc_ht_next(HHashTable table, ExIterator node)
 {
-    size_t idx = (HLinkedList *) node.opaque[1] - table->table;
+    size_t idx = (HLinkedList *) node.opaque[2] - table->table;
     HLinkedList list = table->table[idx];
 
     /* Check remainder of bucket */
-    Iterator list_iter = cc_ll_next(list, node.opaque[2]);
+    Iterator list_iter = cc_ll_next(list, node.opaque[1]);
 
     if (list_iter)
     {
@@ -382,7 +463,7 @@ ExIterator cc_ht_next(HHashTable table, ExIterator node)
     }
 
     /* Bucket is complete, move on to next hash entry */
-    for (; idx < table->capacity; ++idx)
+    for (++idx; idx < table->capacity; ++idx)
     {
         list = table->table[idx];
         if (list && cc_ll_size_of(list))
@@ -394,22 +475,60 @@ ExIterator cc_ht_next(HHashTable table, ExIterator node)
             node.opaque[0] = *cc_el_get_voidp(table->bucket_buffer);
             node.opaque[1] = list_iter;
             node.opaque[2] = table->table + idx;
+
+            return node;
         }
     }
 
     return cc_el_null_ex_iterator();
 }
 
-int cc_ht_find(HHashTable table, Iterator start, unsigned flags, HConstElementData key, ElementDualDataCallback compare, Iterator *out)
+int cc_ht_find(HHashTable table, HConstElementData key, ElementDualDataCallback compare, ExIterator *out)
 {
+    /* Take hash of key */
+    unsigned hash;
+    CC_RETURN_ON_ERROR(cc_el_hash_default((HElementData) key, &hash));
 
+    /* Modulo key by table capacity */
+    hash %= table->capacity;
 
-    return 0;
+    /* Then find location in bucket */
+    HLinkedList bucket = table->table[hash];
+    if (!bucket || !cc_ll_size_of(bucket)) /* Bucket doesn't exist or is empty */
+        goto null;
+
+    Iterator prior;
+    Iterator list_iter = find_first_key_in_bucket(table, bucket, key, compare, &prior);
+
+    if (!list_iter)
+        goto null;
+
+    /* Then build iterator */
+    cc_ll_node_data(bucket, list_iter, table->bucket_buffer);
+
+    out->opaque[0] = *cc_el_get_voidp(table->bucket_buffer);
+    out->opaque[1] = list_iter;
+    out->opaque[2] = table->table + hash;
+
+    return CC_OK;
+
+null:
+    *out = cc_el_null_ex_iterator();
+    return CC_OK;
 }
 
 int cc_ht_iterate(HHashTable table, ExtendedElementDualDataCallback callback, void *userdata)
 {
-    return 0;
+    ExIterator it;
+    for (it = cc_ht_begin(table); ExIteratorNonNull(it); it = cc_ht_next(table, it))
+    {
+        cc_ht_node_key(table, it, table->key_buffer);
+        cc_ht_node_data(table, it, table->value_buffer);
+
+        CC_RETURN_ON_ERROR(callback(table->key_buffer, table->value_buffer, userdata));
+    }
+
+    return CC_OK;
 }
 
 int cc_ht_node_key(HHashTable table, ExIterator node, HElementData out)
@@ -417,7 +536,7 @@ int cc_ht_node_key(HHashTable table, ExIterator node, HElementData out)
     if (!cc_el_compatible_metadata_element(table->key_meta, out))
         CC_TYPE_MISMATCH_HANDLER("cannot get element", /*expected*/ cc_el_metadata_type(table->key_meta), /*actual*/ cc_el_type(out));
 
-    *cc_el_storage_location_ptr(out) = node.opaque[0];
+    *cc_el_storage_location_ptr(out) = KEY_ADDR(node.opaque[0], table);
 
     return CC_OK;
 }
@@ -427,7 +546,7 @@ int cc_ht_node_data(HHashTable table, ExIterator node, HElementData out)
     if (!cc_el_compatible_metadata_element(table->value_meta, out))
         CC_TYPE_MISMATCH_HANDLER("cannot get element", /*expected*/ cc_el_metadata_type(table->value_meta), /*actual*/ cc_el_type(out));
 
-    *cc_el_storage_location_ptr(out) = (char *) node.opaque[0] + MAX(cc_el_metadata_type_size(table->key_meta), cc_el_metadata_type_size(table->value_meta));
+    *cc_el_storage_location_ptr(out) = VALUE_ADDR(node.opaque[0], table);
 
     return CC_OK;
 }
@@ -444,10 +563,6 @@ HContainerElementMetaData cc_ht_value_metadata(HHashTable table)
 
 int cc_ht_compare(HHashTable lhs, HHashTable rhs, ElementDualDataCallback cmp)
 {
-    cc_el_set_compare_in(lhs->bucket_meta, compare_block_pairs_full);
-
-
-
     return 0;
 }
 

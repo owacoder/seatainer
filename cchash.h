@@ -55,6 +55,9 @@ extern "C" {
      *
      * The provided callback is used to compare keys
      *
+     * supported in flags:
+     *   - Multi-value: CC_MULTI_VALUE or CC_SINGLE_VALUE
+     *
      * Returns CC_OK on success
      * Returns CC_NO_MEM on failure to allocate
      * Returns CC_BAD_PARAM if key is NULL
@@ -69,7 +72,8 @@ extern "C" {
      *
      * Note that this operation is performed in <= O(n) time
      *
-     * The provided callback is used to destruct the new element
+     * supported in flags:
+     *   - Multi-value: CC_MULTI_VALUE or CC_SINGLE_VALUE, erases either the most recent or all identical keys
      *
      * Returns CC_OK on success
      * Returns CC_TYPE_MISMATCH if there is a type mismatch
@@ -78,7 +82,7 @@ extern "C" {
      * `*table` will be unchanged on failure
      *
      */
-    int cc_ht_erase(HHashTable table, unsigned flags, HConstElementData data, ElementDataCallback destruct);
+    int cc_ht_erase(HHashTable table, unsigned flags, HConstElementData key, ElementDualDataCallback compare);
 
     /* Returns an iterator to the beginning of the hash table, or NULL if the hash table is empty
      */
@@ -92,13 +96,11 @@ extern "C" {
      *
      * Calls the provided callback (with specified userdata) for each element
      *
-     * `direction`: either CC_FORWARD or CC_BACKWARD
-     *
      * The parameter `out` will be set if this function returns CC_OK, but may be NULL, indicating the provided element was not found
      *
      * Returns CC_OK on success
      */
-    int cc_ht_find(HHashTable table, Iterator start, unsigned flags, HConstElementData key, ElementDualDataCallback compare, Iterator *out);
+    int cc_ht_find(HHashTable table, HConstElementData key, ElementDualDataCallback compare, ExIterator *out);
 
     /* Iterates through the entire hash table
      *

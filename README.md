@@ -74,7 +74,7 @@ This ability allows you to nest containers, such as a vector of vectors of ints,
 
 ##### Overhead
 
-Most containers have very low memory overhead, Don't be scared by the mention of element overhead above.
+Most containers have very low memory overhead; don't be too scared by the mention of element overhead above.
 
 The per-element memory overhead for each container is listed below, for 32- and 64-bit systems:
 
