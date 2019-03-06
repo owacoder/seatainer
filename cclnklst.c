@@ -26,7 +26,7 @@ typedef struct LinkedListNode *HLinkedListNode;
 struct LinkedList
 {
     HLinkedListNode head, tail;
-    size_t size;
+    size_t size; /* Size stored in upper bits, lowest bit specifies whether metadata is owned (0) or external (1) */
 
     HContainerElementMetaData metadata;
 
@@ -40,60 +40,86 @@ struct LinkedList
 };
 
 #ifdef C99
-extern inline int cc_ll_push_front(HLinkedList list, HConstElementData data, ElementDataCallback construct);
+extern inline int cc_ll_push_front(HLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct);
 extern inline int cc_ll_pop_front(HLinkedList list, ElementDataCallback destruct);
-extern inline int cc_ll_push_back(HLinkedList list, HConstElementData data, ElementDataCallback construct);
+extern inline int cc_ll_push_back(HLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct);
 #else
-int cc_ll_push_front(HLinkedList list, HConstElementData data, ElementDataCallback construct) {
-    return cc_ll_insert_after(list, NULL, data, construct);
+int cc_ll_push_front(HLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct) {
+    return cc_ll_insert_after(list, flags, NULL, data, construct);
 }
 int cc_ll_pop_front(HLinkedList list, ElementDataCallback destruct) {
     return cc_ll_erase_after(list, NULL, destruct);
 }
-int cc_ll_push_back(HLinkedList list, HConstElementData data, ElementDataCallback construct) {
-    return cc_ll_insert_after(list, cc_ll_rbegin(list), data, construct);
+int cc_ll_push_back(HLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct) {
+    return cc_ll_insert_after(list, flags, cc_ll_rbegin(list), data, construct);
 }
 #endif
 
-HLinkedList cc_ll_init(ContainerElementType type)
+size_t cc_ll_sizeof()
 {
-    HLinkedList result = MALLOC(sizeof(*result), 1);
+    return sizeof(struct LinkedList);
+}
 
-    if (!result)
-        return NULL;
+static int cc_ll_has_external_metadata(HLinkedList list)
+{
+    return list->size & 1;
+}
 
-    result->head = result->tail = NULL;
-    result->size = 0;
-    result->metadata = cc_el_make_metadata(type);
+static void cc_ll_set_size_of(HLinkedList list, size_t size)
+{
+    list->size = (size << 1) | (list->size & 1);
+}
 
-    if (!result->metadata)
+HLinkedList cc_ll_init(ContainerElementType type, HContainerElementMetaData externalMeta)
+{
+    HLinkedList result = MALLOC(cc_ll_sizeof(), 1);
+
+    if (!result || CC_OK != cc_ll_init_at(result, cc_ll_sizeof(), type, externalMeta))
     {
         FREE(result);
-        result = NULL;
+        return NULL;
     }
+
+    return result;
+}
+
+int cc_ll_init_at(void *buf, size_t buffer_size, ContainerElementType type, HContainerElementMetaData externalMeta)
+{
+    if (buffer_size < cc_ll_sizeof())
+        CC_BAD_PARAM_HANDLER("buffer size too small");
+
+    HLinkedList result = buf;
+
+    result->head = result->tail = NULL;
+    result->size = !!externalMeta;
+    result->metadata = externalMeta? externalMeta: cc_el_make_metadata(type);
+
+    if (!result->metadata)
+        CC_NO_MEM_HANDLER("out of memory");
 
 #ifdef C99
     result->buffer = cc_el_init(type, result->metadata, NULL, NULL);
     if (!result->buffer)
     {
-        cc_el_kill_metadata(result->metadata);
-        FREE(result);
-        result = NULL;
+        if (!externalMeta)
+            cc_el_kill_metadata(result->metadata);
+        CC_NO_MEM_HANDLER("out of memory");
     }
 #endif
 
-    return result;
+    return CC_OK;
 }
 
 HLinkedList cc_ll_copy(HLinkedList list, ElementDataCallback construct, ElementDataCallback destruct)
 {
-    HLinkedList new_list = cc_ll_init(cc_el_metadata_type(list->metadata));
+    HLinkedList new_list = cc_ll_init(cc_el_metadata_type(list->metadata), cc_ll_has_external_metadata(list)? cc_ll_metadata(list): NULL);
     HLinkedListNode old = list->head, node = NULL;
 
     if (!new_list)
         return NULL;
 
-    cc_el_copy_metadata(new_list->metadata, list->metadata); /* Copy metadata (type and callbacks) from old list to this list */
+    if (!cc_ll_has_external_metadata(list))
+        cc_el_copy_metadata(new_list->metadata, list->metadata); /* Copy metadata (type and callbacks) from old list to this list */
 
     while (old)
     {
@@ -106,7 +132,7 @@ HLinkedList cc_ll_copy(HLinkedList list, ElementDataCallback construct, ElementD
         d = (HElementData) old->data;
 #endif
 
-        CC_CLEANUP_ON_ERROR(cc_ll_insert_after(new_list, node, d, construct),
+        CC_CLEANUP_ON_ERROR(cc_ll_insert_after(new_list, CC_COPY_VALUE, node, d, construct),
                             cc_ll_destroy(new_list, destruct); return NULL;); /* Failure to insert, now clean up */
 
         old = old->next;
@@ -123,7 +149,7 @@ void cc_ll_swap(HLinkedList lhs, HLinkedList rhs)
     *rhs = temp;
 }
 
-int cc_ll_insert_after(HLinkedList list, Iterator after, HConstElementData data, ElementDataCallback construct)
+int cc_ll_insert_after(HLinkedList list, unsigned flags, Iterator after, HConstElementData data, ElementDataCallback construct)
 {
     int err;
 
@@ -148,7 +174,12 @@ int cc_ll_insert_after(HLinkedList list, Iterator after, HConstElementData data,
     element_was_constructed = 1;
 
     if (data)
-        CC_CLEANUP_ON_ERROR(cc_el_copy_contents(list->buffer, data), err = ret; goto cleanup;);
+    {
+        if (CC_MOVE_SEMANTICS(flags) == CC_MOVE_VALUE)
+            CC_CLEANUP_ON_ERROR(cc_el_move_contents(list->buffer, data), err = ret; goto cleanup;);
+        else
+            CC_CLEANUP_ON_ERROR(cc_el_copy_contents(list->buffer, data), err = ret; goto cleanup;);
+    }
 #else
     /* TODO: not implemented yet */
     HLinkedListNode ptr = MALLOC(sizeof(*ptr), 1);
@@ -163,7 +194,12 @@ int cc_ll_insert_after(HLinkedList list, Iterator after, HConstElementData data,
     }
 
     if (data)
-        CC_CLEANUP_ON_ERROR(cc_el_copy_contents(ptr->data, data), err = ret; goto cleanup;);
+    {
+        if (CC_MOVE_SEMANTICS(flags) == CC_MOVE_VALUE)
+            CC_CLEANUP_ON_ERROR(cc_el_move_contents(ptr->data, data), err = ret; goto cleanup;);
+        else
+            CC_CLEANUP_ON_ERROR(cc_el_copy_contents(ptr->data, data), err = ret; goto cleanup;);
+    }
 #endif
 
     HLinkedListNode ll_after = after;
@@ -182,7 +218,7 @@ int cc_ll_insert_after(HLinkedList list, Iterator after, HConstElementData data,
     if (ll_after == list->tail)
         list->tail = ptr;
 
-    list->size += 1;
+    cc_ll_set_size_of(list, cc_ll_size_of(list) + 1);
 
     return CC_OK;
 
@@ -207,7 +243,7 @@ int cc_ll_erase_after(HLinkedList list, Iterator after, ElementDataCallback dest
         return CC_OK;
 
     *begin = node->next;
-    list->size -= 1;
+    cc_ll_set_size_of(list, cc_ll_size_of(list) - 1);
 
     if (list->tail == node)
         list->tail = (HLinkedListNode) after;
@@ -220,11 +256,6 @@ int cc_ll_erase_after(HLinkedList list, Iterator after, ElementDataCallback dest
     else
         cc_el_call_destructor_in(list->metadata, list->buffer);
 #else
-    if (destruct)
-        destruct(node->data);
-    else
-        cc_el_call_destructor_in(list->metadata, node->data);
-
     cc_el_destroy(node->data);
 #endif
     FREE(node);
@@ -277,7 +308,7 @@ int cc_ll_find(HLinkedList list, Iterator start, unsigned flags, HConstElementDa
             break;
         case CC_ORGANIZE_TRANSPOSE: /* Transpose with nearest element */
             if (list->head != node)
-                swap = node->next; // TODO: wrong? it should be the previous node, no?
+                swap = node->next; /* TODO: wrong? it should be the previous node, no? */
             break;
     }
 
@@ -293,6 +324,23 @@ int cc_ll_find(HLinkedList list, Iterator start, unsigned flags, HConstElementDa
     }
 
     return CC_OK;
+}
+
+void cc_ll_reverse(HLinkedList list)
+{
+    if (!list->head)
+        return;
+
+    HLinkedListNode prev = NULL, node = list->head;
+    while (node)
+    {
+        HLinkedListNode next = node->next;
+        node->next = prev;
+        prev = node;
+        node = next;
+    }
+
+    list->head = prev;
 }
 
 int cc_ll_iterate(HLinkedList list, ExtendedElementDataCallback callback, void *userdata)
@@ -318,7 +366,7 @@ int cc_ll_iterate(HLinkedList list, ExtendedElementDataCallback callback, void *
 
 size_t cc_ll_size_of(HLinkedList list)
 {
-    return list->size;
+    return list->size >> 1;
 }
 
 Iterator cc_ll_begin(HLinkedList list)
@@ -352,7 +400,7 @@ int cc_ll_node_data(HLinkedList list, Iterator node, HElementData out)
 #ifdef C99
     *cc_el_storage_location_ptr(out) = ll_node->data;
 #else
-    *cc_el_storage_location_ptr(out) = *cc_el_storage_location_ptr(ll_node->data);
+    *cc_el_storage_location_ptr(out) = cc_el_storage_location(ll_node->data);
 #endif
 
     return CC_OK;
@@ -413,11 +461,6 @@ void cc_ll_clear(HLinkedList list, ElementDataCallback destruct)
         else
             cc_el_call_destructor_in(list->metadata, list->buffer);
 #else
-        if (destruct)
-            destruct(node->data);
-        else
-            cc_el_call_destructor_in(list->metadata, node->data);
-
         cc_el_destroy(node->data);
 #endif
 
@@ -428,7 +471,7 @@ void cc_ll_clear(HLinkedList list, ElementDataCallback destruct)
     }
 
     list->head = NULL;
-    list->size = 0;
+    cc_ll_set_size_of(list, 0);
 }
 
 void cc_ll_destroy(HLinkedList list, ElementDataCallback destruct)
@@ -439,7 +482,8 @@ void cc_ll_destroy(HLinkedList list, ElementDataCallback destruct)
     /* Reinitialize buffer to point to original storage (since we constructed it and now need to destruct it) */
     cc_el_destroy_reference(list->buffer);
 #endif
-    cc_el_kill_metadata(list->metadata);
+    if (!cc_ll_has_external_metadata(list))
+        cc_el_kill_metadata(list->metadata);
     FREE(list);
 }
 

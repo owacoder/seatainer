@@ -137,6 +137,7 @@
 #define CC_ORGANIZE_MTF (1 << 1)
 #define CC_ORGANIZE_TRANSPOSE (2 << 1)
 #define CC_ORGANIZE_COUNT (3 << 1)
+#define CC_ORGANIZE_AUTO (4 << 1)
 
 /* Multi- or single-value flags */
 #define CC_SINGLE_VALUE (0 << 4)
@@ -144,6 +145,7 @@
 
 /* Move-semantics flags */
 #define CC_COPY_VALUE (0 << 5)
+/* Moving values works by taking ownership of the data STORED in an HElementData and clearing the reference to it, NOT by taking ownership of the HElementData */
 #define CC_MOVE_VALUE (1 << 5)
 
 /* Search-semantics flags */
@@ -221,8 +223,8 @@ extern "C" {
         El_UnsignedLongLong,
         El_Float,
         El_Double,
-        El_CString, /* TODO: broken right now */
         El_VoidPtr,
+        El_String,
         El_Vector,
         El_LinkedList,
         El_DoublyLinkedList,
@@ -242,6 +244,9 @@ extern "C" {
     /* Returns 1 if equal, 0 if not equal */
     int ExIteratorEquals(ExIterator lhs, ExIterator rhs);
     int ExIteratorNonNull(ExIterator it);
+
+    struct String;
+    typedef struct String *HString;
 
     struct Vector;
     typedef struct Vector *HVector;
@@ -274,6 +279,7 @@ extern "C" {
     typedef int (*ExtendedElementDataCallback)(HElementData data, void *userdata);
     typedef int (*ExtendedElementDualDataCallback)(HElementData lhs, HElementData rhs, void *userdata);
     typedef int (*ElementDualDataCallback)(HElementData lhs, HElementData rhs);
+    typedef int (*StringCompareCallback)(char lhs, char rhs);
 
     /* Returns the error description as a human-readable string */
     const char *cc_el_error_reason(int error);
@@ -302,15 +308,24 @@ extern "C" {
      * Returns the constructor response error code
      * Returns CC_OK if all went well
      */
-    int cc_el_move(HElementData dest, HElementData src);
+    int cc_el_move_contents(HElementData dest, HConstElementData src);
     /* Performs a copy of the data from src to dest
      * Returns the constructor response error code
      * Returns CC_OK if all went well
      */
     int cc_el_copy_contents(HElementData dest, HConstElementData src);
+    /* Destroys an element at a specified location. The handle should no longer be used, but is not freed
+     * Returns CC_OK */
+    int cc_el_destroy_at(HElementData data);
     /* Destroys an element and invalidates the specified handle. The handle should no longer be used
      * Returns CC_OK */
     int cc_el_destroy(HElementData data);
+    /* Destroys an element that was used as a reference and invalidates the specified handle, but does NOT free! The handle should no longer be used
+     * Returns CC_OK */
+    INLINE int cc_el_destroy_reference_at(HElementData data) INLINE_DEFINITION({
+        *cc_el_storage_location_ptr(data) = NULL;
+        return cc_el_destroy_at(data);
+    })
     /* Destroys an element that was used as a reference and invalidates the specified handle. The handle should no longer be used
      * Returns CC_OK */
     INLINE int cc_el_destroy_reference(HElementData data) INLINE_DEFINITION({
@@ -341,8 +356,10 @@ extern "C" {
     int cc_el_assign_unsigned_long_long(HElementData data, unsigned long long d);
     int cc_el_assign_float(HElementData data, float d);
     int cc_el_assign_double(HElementData data, double d);
-    int cc_el_assign_cstring(HElementData data, const char *c);
     int cc_el_assign_voidp(HElementData data, void *p);
+    int cc_el_assign_string(HElementData, HString p);
+    int cc_el_assign_cstring(HElementData data, const char *c);
+    int cc_el_assign_cstring_n(HElementData data, const char *c, size_t len);
     int cc_el_assign_vector(HElementData, HVector p);
     int cc_el_assign_linked_list(HElementData data, HLinkedList d);
     int cc_el_assign_doubly_linked_list(HElementData data, HDoublyLinkedList d);
@@ -365,6 +382,7 @@ extern "C" {
     double *cc_el_get_double(HElementData data);
     const char **cc_el_get_cstring(HElementData data);
     void **cc_el_get_voidp(HElementData data);
+    HString *cc_el_get_string(HElementData data);
     HVector *cc_el_get_vector(HElementData data);
     HLinkedList *cc_el_get_linked_list(HElementData data);
     HDoublyLinkedList *cc_el_get_doubly_linked_list(HElementData data);
@@ -447,17 +465,30 @@ extern "C" {
      */
     size_t cc_el_size_of_type(ContainerElementType type);
 
+    /* Returns the size of a metadata block */
+    size_t cc_el_metadata_sizeof();
+
     /* Makes the default metadata block for the specified type
      *
      * Returns NULL if allocation failed
      */
     HContainerElementMetaData cc_el_make_metadata(ContainerElementType type);
 
+    /* Makes the default metadata block for the specified type at the specified location
+     *
+     * Returns error code on failure, or CC_OK on success
+     */
+    int cc_el_make_metadata_at(void *buf, size_t buffer_size, ContainerElementType type);
+
     /* Copies the metadata block to another metadata block
      */
     void cc_el_copy_metadata(HContainerElementMetaData dest, const HContainerElementMetaData src);
 
-    /* Destroys the metadata block for the specified type
+    /* Destroys the metadata block at the specified location without freeing it
+     */
+    void cc_el_kill_metadata_at(HContainerElementMetaData metadata);
+
+    /* Destroys the metadata block
      */
     void cc_el_kill_metadata(HContainerElementMetaData metadata);
 

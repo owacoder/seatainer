@@ -6,28 +6,74 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+    /* Returns the size of one linked list */
+    size_t cc_ht_sizeof();
+
+    /* Initializes a new hash table with specified key and value types, and specified capacity
+     *
+     * Returns NULL if allocation failed
+     */
+    HHashTable cc_ht_init_with_capacity(ContainerElementType keyType, ContainerElementType valueType, size_t capacity);
+
     /* Initializes a new hash table with specified key and value types
      *
      * Returns NULL if allocation failed
      */
     HHashTable cc_ht_init(ContainerElementType keyType, ContainerElementType valueType);
 
+    /* Initializes a new hash table at the specified buffer
+     * Returns CC_BAD_PARAM if the buffer is not big enough, or a constructor response error code
+     * Returns CC_OK if all went well
+     */
+    int cc_ht_init_at(void *buf, size_t buffer_size, ContainerElementType keyType, ContainerElementType valueType);
+
     /* Returns a copy of the hash table
-     *
-     * The provided callback `construct` is used to construct the new elements
-     * The provided callback `destruct` is used to destruct the elements on failure to allocate, if necessary
      *
      * `table` is never modified
      *
      * Returns NULL if allocation failed
      */
-    HHashTable cc_ht_copy(HHashTable table, ElementDataCallback construct, ElementDataCallback destruct);
+    HHashTable cc_ht_copy(HHashTable table);
+
+    /* Returns a copy of the hash table, giving the new table the specified capacity
+     *
+     * `table` is never modified
+     *
+     * Returns NULL if allocation failed
+     */
+    HHashTable cc_ht_copy_with_capacity(HHashTable table, size_t capacity);
+
+    /* Adjusts load factor to be as close as possible to the specified value
+     *
+     * Returns CC_OK on success
+     * Returns CC_NO_MEM if out of memory
+     */
+    int cc_ht_adjust_load_factor(HHashTable table, float desired_load_factor);
+
+    /* Adjusts capacity to the specified value
+     *
+     * Returns CC_OK on success
+     * Returns CC_NO_MEM if out of memory
+     */
+    int cc_ht_adjust_capacity(HHashTable table, size_t capacity);
 
     /* Swaps two hash tables
      *
      * Guaranteed not to fail
      */
     void cc_ht_swap(HHashTable lhs, HHashTable rhs);
+
+    /* Returns the total number of collisions in the bucket
+     *
+     * Note that this operation is performed in O(n) time
+     */
+    size_t cc_ht_total_collisions(HHashTable table);
+
+    /* Returns the number of collisions for the biggest bucket (essentially the size of the biggest bucket)
+     *
+     * Note that this operation is performed in O(n) time
+     */
+    size_t cc_ht_max_bucket_collisions(HHashTable table);
 
     /* Returns the load factor (size / capacity) of the hash table
      *
@@ -57,6 +103,7 @@ extern "C" {
      *
      * supported in flags:
      *   - Multi-value: CC_MULTI_VALUE or CC_SINGLE_VALUE
+     *   - Auto-organize: resizes the hash table to keep the load factor around 60%
      *
      * Returns CC_OK on success
      * Returns CC_NO_MEM on failure to allocate
@@ -179,4 +226,4 @@ extern "C" {
 }
 #endif
 
-#endif // CCHASH_H
+#endif /* CCHASH_H */

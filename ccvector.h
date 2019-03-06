@@ -6,11 +6,20 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+    /* Returns the size of one linked list */
+    size_t cc_v_sizeof();
+
     /* Initializes a new vector with specified type
      *
      * Returns NULL if allocation failed
      */
     HVector cc_v_init(ContainerElementType type);
+
+    /* Initializes a new vector at the specified buffer
+     * Returns CC_BAD_PARAM if the buffer is not big enough, or a constructor response error code
+     * Returns CC_OK if all went well
+     */
+    int cc_v_init_at(void *buf, size_t buffer_size, ContainerElementType type);
 
     /* Grows the capacity of the vector to at least `size` elements
      *
@@ -65,7 +74,7 @@ extern "C" {
      * `*list` will be unchanged on failure
      *
      */
-    int cc_v_insert(HVector list, size_t before, HConstElementData data, ElementDataCallback construct);
+    int cc_v_insert(HVector list, unsigned flags, size_t before, HConstElementData data, ElementDataCallback construct);
 
     /* Destroys the specified element in the vector
      *
@@ -86,6 +95,9 @@ extern "C" {
      *
      * Note that this operation is performed in amortized O(1) time
      *
+     * supported in flags:
+     *   - Move-semantics: CC_MOVE_VALUE or CC_COPY_VALUE
+     *
      * The provided callback is used to construct the new element
      *
      * Returns 0 on success
@@ -95,8 +107,8 @@ extern "C" {
      * `*list` will be unchanged on failure
      *
      */
-    INLINE int cc_v_push_back(HVector list, HConstElementData data, ElementDataCallback construct) INLINE_DEFINITION({
-        return cc_v_insert(list, cc_v_size_of(list), data, construct);
+    INLINE int cc_v_push_back(HVector list, unsigned flags, HConstElementData data, ElementDataCallback construct) INLINE_DEFINITION({
+        return cc_v_insert(list, flags, cc_v_size_of(list), data, construct);
     })
 
     INLINE int cc_v_pop_back(HVector list, ElementDataCallback destruct) INLINE_DEFINITION({
@@ -152,9 +164,15 @@ extern "C" {
      */
     int cc_v_iterate(HVector list, unsigned flags, ExtendedElementDataCallback callback, void *userdata);
 
+    /* Reverses all the elements in the vector
+     *
+     * This function never fails
+     */
+    void cc_v_reverse(HVector list);
+
     /* Returns a reference to the value of the specified element in `out`
      *
-     * If the element position is out of bounds, CC_BAD_PARAM is returned, otherwise, CC_OK is returned
+     * CC_OK is returned
      *
      * Note that this operation is performed in O(1) time
      *
@@ -183,22 +201,11 @@ extern "C" {
      */
     int cc_v_compare(HVector lhs, HVector rhs, ElementDualDataCallback cmp);
 
-    /* Sorts the data in a vector using the provided comparison callback
-     *
-     * Uses memcmp() if no comparison function is provided
-     * The order of equivalent elements is unspecified (i.e. the sort is not stable)
-     *
-     * Note that this operation is performed in O(n log n) time
-     *
-     * Returns CC_OK on success
-     */
-    int cc_v_sort(HVector list, ElementDualDataCallback cmp);
-
     /* Vector to string
      *
      * Returns NULL if vector is not of type Char, SignedChar, or UnsignedChar
      */
-    const char *cc_v_to_string(HVector list);
+    const char *cc_v_to_cstring(HVector list);
 
     /* Assign string to vector
      *
@@ -207,8 +214,8 @@ extern "C" {
      * Returns CC_OK on success
      * Returns CC_TYPE_MISMATCH if there is a type mismatch
      */
-    int cc_v_assign_string_n(HVector list, const char *data, size_t len);
-    int cc_v_assign_string(HVector list, const char *data);
+    int cc_v_assign_cstring_n(HVector list, const char *data, size_t len);
+    int cc_v_assign_cstring(HVector list, const char *data);
 
     /* Clears the vector
      *
@@ -219,6 +226,16 @@ extern "C" {
      * Note that this operation is performed in O(n) time
      */
     void cc_v_clear(HVector list, ElementDataCallback destruct);
+
+    /* Destroys the vector
+     *
+     * The provided callback is used to destroy all elements
+     *
+     * The handle is invalidated after this function is called, but NOT freed!
+     *
+     * Note that this operation is performed in O(n) time
+     */
+    void cc_v_destroy_at(HVector list, ElementDataCallback destruct);
 
     /* Destroys the vector
      *

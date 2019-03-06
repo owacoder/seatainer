@@ -13,19 +13,20 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-    struct DoublyLinkedList;
-
-    /* The type to be used for referring to a linked list
-     *
-     * This type should be used for linked list operations
-     */
-    typedef struct DoublyLinkedList *HDoublyLinkedList;
+    /* Returns the size of one linked list */
+    size_t cc_dll_sizeof();
 
     /* Initializes a new linked list with specified type
      *
      * Returns NULL if allocation failed
      */
     HDoublyLinkedList cc_dll_init(ContainerElementType type);
+
+    /* Initializes a new linked list at the specified buffer
+     * Returns CC_BAD_PARAM if the buffer is not big enough, or a constructor response error code
+     * Returns CC_OK if all went well
+     */
+    int cc_dll_init_at(void *buf, size_t buffer_size, ContainerElementType type);
 
     /* Returns a copy of the linked list
      *
@@ -64,6 +65,9 @@ extern "C" {
      *
      * Note that this operation is performed in O(1) time
      *
+     * supported in flags:
+     *   - Move-semantics: CC_MOVE_VALUE or CC_COPY_VALUE
+     *
      * The provided callback is used to construct the new element
      *
      * Returns CC_OK on success
@@ -74,7 +78,7 @@ extern "C" {
      * `*list` will be unchanged on failure
      *
      */
-    int cc_dll_insert_after(HDoublyLinkedList list, Iterator after, HConstElementData data, ElementDataCallback construct);
+    int cc_dll_insert_after(HDoublyLinkedList list, unsigned flags, Iterator after, HConstElementData data, ElementDataCallback construct);
 
     /* Destroys the element `element` in the linked list
      *
@@ -95,6 +99,9 @@ extern "C" {
      *
      * Note that this operation is performed in O(1) time
      *
+     * supported in flags:
+     *   - Move-semantics: CC_MOVE_VALUE or CC_COPY_VALUE
+     *
      * The provided callback is used to construct the new element
      *
      * Returns 0 on success
@@ -104,8 +111,8 @@ extern "C" {
      * `*list` will be unchanged on failure
      *
      */
-    INLINE int cc_dll_push_front(HDoublyLinkedList list, HConstElementData data, ElementDataCallback construct) INLINE_DEFINITION({
-        return cc_dll_insert_after(list, NULL, data, construct);
+    INLINE int cc_dll_push_front(HDoublyLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct) INLINE_DEFINITION({
+        return cc_dll_insert_after(list, flags, NULL, data, construct);
     })
     INLINE int cc_dll_pop_front(HDoublyLinkedList list, ElementDataCallback destruct) INLINE_DEFINITION({
         return cc_dll_erase(list, cc_dll_begin(list), destruct);
@@ -115,6 +122,8 @@ extern "C" {
      *
      * Note that this operation is performed in O(1) time
      *
+     * supported in flags:
+     *   - Move-semantics: CC_MOVE_VALUE or CC_COPY_VALUE
      * The provided callback is used to construct the new element
      *
      * Returns 0 on success
@@ -124,8 +133,8 @@ extern "C" {
      * `*list` will be unchanged on failure
      *
      */
-    INLINE int cc_dll_push_back(HDoublyLinkedList list, HConstElementData data, ElementDataCallback construct) INLINE_DEFINITION({
-        return cc_dll_insert_after(list, cc_dll_rbegin(list), data, construct);
+    INLINE int cc_dll_push_back(HDoublyLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct) INLINE_DEFINITION({
+        return cc_dll_insert_after(list, flags, cc_dll_rbegin(list), data, construct);
     })
     INLINE int cc_dll_pop_back(HDoublyLinkedList list, ElementDataCallback destruct) INLINE_DEFINITION({
         return cc_dll_erase(list, cc_dll_rbegin(list), destruct);
@@ -156,6 +165,12 @@ extern "C" {
      * Returns CC_BAD_PARAM if `callback` is NULL
      */
     int cc_dll_iterate(HDoublyLinkedList list, unsigned flags, ExtendedElementDataCallback callback, void *userdata);
+
+    /* Reverses the order of elements in the linked list
+     *
+     * This function never fails
+     */
+    void cc_dll_reverse(HDoublyLinkedList list);
 
     /* Returns the size of the linked list
      *
@@ -209,6 +224,16 @@ extern "C" {
      *
      */
     int cc_dll_compare(HDoublyLinkedList lhs, HDoublyLinkedList rhs, ElementDualDataCallback cmp);
+
+    /* Destroys the linked list at the specified location
+     *
+     * The provided callback is used to destroy all elements
+     *
+     * The handle is invalidated after this function is called, but NOT freed!
+     *
+     * Note that this operation is performed in O(n) time
+     */
+    void cc_dll_destroy_at(HDoublyLinkedList list, ElementDataCallback destruct);
 
     /* Destroys the linked list
      *

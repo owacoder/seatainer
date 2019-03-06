@@ -4,6 +4,7 @@
 #include "ccdbllst.h"
 #include "ccvector.h"
 #include "cchash.h"
+#include "ccstring.h"
 
 #include <assert.h>
 
@@ -30,8 +31,10 @@ int printInt(HElementData data, void *userdata)
 
 int printIntKeyStringValue(HElementData key, HElementData value, void *userdata)
 {
+#if 0
     (void) userdata;
-    printf("%d: %s\n", *cc_el_get_signed_int(key), cc_v_to_string(*cc_el_get_vector(value)));
+    printf("%d: %s\n", *cc_el_get_signed_int(key), cc_s_to_cstring(*cc_el_get_string(value)));
+#endif
 
     return 0;
 }
@@ -40,11 +43,11 @@ void test_ll(size_t cnt)
 {
     puts("test_ll");
 
-    HLinkedList list = cc_ll_init(El_SignedInt), list2;
+    HLinkedList list = cc_ll_init(El_SignedInt, NULL), list2;
     HElementData data = cc_el_init(El_SignedInt, NULL, NULL, NULL);
 
     cc_el_assign_signed_int(data, 23);
-    assert(cc_ll_push_front(list, data, NULL) != CC_TYPE_MISMATCH);
+    assert(cc_ll_push_front(list, 0, data, NULL) != CC_TYPE_MISMATCH);
 
     list2 = cc_ll_copy(list, NULL, NULL);
 
@@ -52,7 +55,7 @@ void test_ll(size_t cnt)
     for (i = 0; i < cnt; ++i)
     {
         cc_el_assign_signed_int(data, i);
-        assert(cc_ll_insert_after(list, cc_ll_begin(list), data, NULL) == CC_OK);
+        assert(cc_ll_insert_after(list, 0, cc_ll_begin(list), data, NULL) == CC_OK);
     }
 
     printf("element is %d bytes\n", (int) cc_el_sizeof());
@@ -69,6 +72,9 @@ void test_ll(size_t cnt)
     long long sum = 0;
     cc_ll_iterate(list, cb, &sum);
     printf("sum is %d\n", (int) sum);
+    cc_ll_iterate(list, printInt, NULL);
+    cc_ll_reverse(list);
+    cc_ll_iterate(list, printInt, NULL);
     cc_ll_destroy(list, NULL);
 
     cc_ll_iterate(list2, cb, &sum);
@@ -84,7 +90,7 @@ void test_dll(size_t cnt)
     HElementData data = cc_el_init(El_SignedInt, NULL, NULL, NULL);
 
     cc_el_assign_signed_int(data, 23);
-    assert(cc_dll_push_front(list, data, NULL) != CC_TYPE_MISMATCH);
+    assert(cc_dll_push_front(list, 0, data, NULL) != CC_TYPE_MISMATCH);
 
     list2 = cc_dll_copy(list, NULL, NULL);
 
@@ -92,7 +98,7 @@ void test_dll(size_t cnt)
     for (i = 0; i < cnt; ++i)
     {
         cc_el_assign_signed_int(data, i);
-        assert(cc_dll_insert_after(list, cc_dll_begin(list), data, NULL) == CC_OK);
+        assert(cc_dll_insert_after(list, 0, cc_dll_begin(list), data, NULL) == CC_OK);
     }
 
     printf("element is %d bytes\n", (int) cc_el_sizeof());
@@ -126,7 +132,7 @@ void test_v(size_t cnt)
     HElementData data = cc_el_init(El_SignedInt, NULL, NULL, NULL);
 
     cc_el_assign_signed_int(data, 23);
-    assert(cc_v_push_back(list, data, NULL) != CC_TYPE_MISMATCH);
+    assert(cc_v_push_back(list, 0, data, NULL) != CC_TYPE_MISMATCH);
 
     list2 = cc_v_copy(list, NULL, NULL);
 
@@ -134,7 +140,7 @@ void test_v(size_t cnt)
     for (i = 0; i < cnt; ++i)
     {
         cc_el_assign_signed_int(data, i);
-        cc_v_push_back(list, data, NULL);
+        cc_v_push_back(list, 0, data, NULL);
     }
 
     printf("element is %d bytes\n", (int) cc_el_sizeof());
@@ -153,6 +159,11 @@ void test_v(size_t cnt)
     sum = 0;
     cc_v_iterate(list, CC_BACKWARD, cb, &sum);
     printf("sum is %d\n", (int) sum);
+
+    cc_v_iterate(list, CC_FORWARD, printInt, NULL);
+    cc_v_reverse(list);
+    cc_v_iterate(list, CC_FORWARD, printInt, NULL);
+
     cc_v_destroy(list, NULL);
 
     cc_v_iterate(list2, CC_FORWARD, cb, &sum);
@@ -168,16 +179,15 @@ void test_v_sort(size_t cnt)
     HElementData data = cc_el_init(El_SignedInt, NULL, NULL, NULL);
 
     cc_el_assign_signed_int(data, 23);
-    assert(cc_v_push_back(list, data, NULL) != CC_TYPE_MISMATCH);
+    assert(cc_v_push_back(list, 0, data, NULL) != CC_TYPE_MISMATCH);
 
     size_t i;
     for (i = 0; i < cnt; ++i)
     {
         cc_el_assign_signed_int(data, rand());
-        cc_v_push_back(list, data, NULL);
+        cc_v_push_back(list, 0, data, NULL);
     }
 
-    cc_v_sort(list, NULL);
     cc_v_iterate(list, CC_FORWARD, printInt, NULL);
 
     cc_v_destroy(list, NULL);
@@ -192,10 +202,10 @@ void test_vv(size_t cnt)
     HElementData data = cc_el_init(El_Vector, NULL, NULL, NULL);
 
     cc_el_assign_signed_int(data, 42);
-    cc_v_push_back(sub, data, NULL);
+    cc_v_push_back(sub, 0, data, NULL);
 
     cc_el_assign_vector(data, sub);
-    assert(cc_v_push_back(list, data, NULL) != CC_TYPE_MISMATCH);
+    assert(cc_v_push_back(list, 0, data, NULL) != CC_TYPE_MISMATCH);
 
     list2 = cc_v_copy(list, NULL, NULL);
 
@@ -203,7 +213,7 @@ void test_vv(size_t cnt)
     for (i = 0; i < cnt; ++i)
     {
         cc_el_assign_vector(data, sub);
-        cc_v_push_back(list, data, NULL);
+        cc_v_push_back(list, 0, data, NULL);
     }
 
     printf("element is %d bytes\n", (int) cc_el_sizeof());
@@ -226,32 +236,40 @@ void test_ht(size_t cnt)
 
     srand(time(NULL));
 
-    HHashTable table = cc_ht_init(El_SignedInt, El_Vector);
+    HHashTable table = cc_ht_init(El_SignedInt, El_String);
     HElementData key = cc_el_init(El_SignedInt, NULL, NULL, NULL);
-    HElementData value = cc_el_init(El_Vector, NULL, NULL, NULL);
-    HVector string = cc_v_init(El_Char);
+    HElementData value = cc_el_init(El_String, NULL, NULL, NULL);
+    HString string = cc_s_init();
 
     cc_el_assign_signed_int(key, 42);
-    cc_v_assign_string(string, strings[rand() % strings_size]);
-    cc_el_assign_vector(value, string);
+    cc_el_assign_cstring(value, strings[rand() % strings_size]);
     cc_ht_insert(table, 0, key, value, NULL);
+    cc_ht_adjust_capacity(table, 1000000);
 
     size_t i;
     for (i = 0; i < cnt; ++i)
     {
-        cc_el_assign_signed_int(key, i < 2? 0: rand());
-        cc_v_assign_string(string, strings[rand() % strings_size]);
-        cc_el_assign_vector(value, string);
-        cc_ht_insert(table, CC_MULTI_VALUE, key, value, NULL);
+        cc_el_assign_signed_int(key, i);
+        cc_el_assign_cstring(value, strings[rand() % strings_size]);
+        cc_ht_insert(table, CC_MULTI_VALUE | CC_MOVE_VALUE, key, value, NULL);
     }
 
-    cc_ht_iterate(table, printIntKeyStringValue, NULL);
+    printf("Hash size: %u\n", cc_ht_size_of(table));
+    printf("Hash total collisions: %u\n", cc_ht_total_collisions(table));
+    printf("Hash most bucket collisions: %u\n", cc_ht_max_bucket_collisions(table));
+    printf("Hash load factor: %f (capacity %u)\n", cc_ht_load_factor(table), cc_ht_capacity_of(table));
+    /* cc_ht_adjust_load_factor(table, 0.41); */
+    printf("Hash total collisions: %u\n", cc_ht_total_collisions(table));
+    printf("Hash most bucket collisions: %u\n", cc_ht_max_bucket_collisions(table));
+    printf("Hash load factor: %f (capacity %u)\n", cc_ht_load_factor(table), cc_ht_capacity_of(table));
+
+    /*cc_ht_iterate(table, printIntKeyStringValue, NULL);
     cc_el_assign_signed_int(key, 0);
     cc_ht_erase(table, CC_MULTI_VALUE, key, NULL);
     puts("");
-    cc_ht_iterate(table, printIntKeyStringValue, NULL);
+    cc_ht_iterate(table, printIntKeyStringValue, NULL);*/
 
-    cc_v_destroy(string, NULL);
+    cc_s_destroy(string);
     cc_ht_destroy(table);
     cc_el_destroy(key);
     cc_el_destroy(value);
@@ -265,10 +283,11 @@ void test_small_dll()
     HDoublyLinkedList list = cc_dll_init(El_SignedInt);
     HElementData data = cc_el_init(El_SignedInt, NULL, NULL, NULL);
 
-    for (int i = 0; i < 5; ++i)
+    int i = 0;
+    for (i = 0; i < 5; ++i)
     {
         cc_el_assign_signed_int(data, i);
-        cc_dll_push_back(list, data, NULL);
+        cc_dll_push_back(list, 0, data, NULL);
     }
 
     cc_dll_iterate(list, CC_FORWARD, printInt, NULL);
@@ -298,12 +317,16 @@ void test_small_dll()
 
 int main()
 {
-    const size_t cnt = 40;
+    const size_t cnt = 800000;
 
+    test_ht(cnt);
+
+#if 0
     srand(time(NULL));
 
     test_v_sort(cnt);
     test_ht(cnt);
+#endif
 
     return 0;
 

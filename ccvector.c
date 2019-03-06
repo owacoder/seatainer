@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include "utility.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -22,12 +24,12 @@ struct Vector
 };
 
 #ifdef C99
-extern inline int cc_v_push_back(HVector list, HConstElementData data, ElementDataCallback construct);
+extern inline int cc_v_push_back(HVector list, unsigned flags, HConstElementData data, ElementDataCallback construct);
 extern inline int cc_v_pop_back(HVector list, ElementDataCallback destruct);
 #else
-int cc_v_push_back(HVector list, HConstElementData data, ElementDataCallback construct)
+int cc_v_push_back(HVector list, unsigned flags, HConstElementData data, ElementDataCallback construct)
 {
-    return cc_v_insert(list, list->size, data, construct);
+    return cc_v_insert(list, flags, list->size, data, construct);
 }
 
 int cc_v_pop_back(HVector list, ElementDataCallback destruct)
@@ -36,31 +38,45 @@ int cc_v_pop_back(HVector list, ElementDataCallback destruct)
 }
 #endif
 
+size_t cc_v_sizeof()
+{
+    return sizeof(struct Vector);
+}
+
 HVector cc_v_init(ContainerElementType type)
 {
-    HVector result = MALLOC(sizeof(*result), 1);
+    HVector result = MALLOC(cc_v_sizeof(), 1);
 
-    if (!result)
+    if (!result || CC_OK != cc_v_init_at(result, cc_v_sizeof(), type))
+    {
+        FREE(result);
         return NULL;
+    }
+
+    return result;
+}
+
+int cc_v_init_at(void *buf, size_t buffer_size, ContainerElementType type)
+{
+    if (buffer_size < cc_v_sizeof())
+        CC_BAD_PARAM_HANDLER("buffer size too small");
+
+    HVector result = buf;
 
     result->data = NULL;
     result->size = result->capacity = 0;
     result->metadata = cc_el_make_metadata(type);
     if (!result->metadata)
-    {
-        FREE(result);
-        result = NULL;
-    }
+        CC_NO_MEM_HANDLER("out of memory");
 
     result->buffer = cc_el_init(type, result->metadata, NULL, NULL);
     if (!result->buffer)
     {
         cc_el_kill_metadata(result->metadata);
-        FREE(result);
-        result = NULL;
+        CC_NO_MEM_HANDLER("out of memory");
     }
 
-    return result;
+    return CC_OK;
 }
 
 HVector cc_v_grow(HVector list, size_t size)
@@ -93,21 +109,6 @@ static void cc_v_move(HVector list, size_t src, size_t dst, size_t count)
         memmove(list->data + dst * element_size, list->data + src * element_size, count * element_size);
     }
 }
-
-#if 0
-static HVector cc_v_construct(HVector list, size_t last_index, ElementDataCallback construct)
-{
-    for (size_t i = list->size; i != last_index; ++i)
-    {
-        if (construct)
-            construct(cc_v_node_data(list, i));
-        else
-            cc_el_call_constructor_in(list->metadata, cc_v_node_data(list, i));
-    }
-
-    return list;
-}
-#endif
 
 HVector cc_v_copy(HVector list, ElementDataCallback construct, ElementDataCallback destruct)
 {
@@ -163,7 +164,7 @@ void cc_v_swap(HVector lhs, HVector rhs)
     *rhs = temp;
 }
 
-int cc_v_insert(HVector list, size_t before, HConstElementData data, ElementDataCallback construct)
+int cc_v_insert(HVector list, unsigned flags, size_t before, HConstElementData data, ElementDataCallback construct)
 {
     int element_was_constructed = 0;
     int err = CC_OK;
@@ -197,7 +198,12 @@ int cc_v_insert(HVector list, size_t before, HConstElementData data, ElementData
 
     /* Copy contents */
     if (data)
-        CC_CLEANUP_ON_ERROR(cc_el_copy_contents(list->buffer, (HElementData) data), err = ret; goto cleanup;);
+    {
+        if (CC_MOVE_SEMANTICS(flags) == CC_MOVE_VALUE)
+            CC_CLEANUP_ON_ERROR(cc_el_move_contents(list->buffer, data), err = ret; goto cleanup;);
+        else
+            CC_CLEANUP_ON_ERROR(cc_el_copy_contents(list->buffer, data), err = ret; goto cleanup;);
+    }
 
     /* Update list size */
     list->size += 1;
@@ -277,6 +283,23 @@ int cc_v_iterate(HVector list, unsigned flags, ExtendedElementDataCallback callb
     return CC_OK;
 }
 
+void cc_v_reverse(HVector list)
+{
+    if (list->size == 0)
+        return;
+
+    size_t min = 0, max = list->size - 1;
+    size_t element_size = cc_el_metadata_type_size(list->metadata);
+
+    while (min < max)
+    {
+        memswap(list->data + min * element_size, list->data + max * element_size, element_size);
+
+        ++min;
+        --max;
+    }
+}
+
 size_t cc_v_size_of(HVector list)
 {
     return list->size;
@@ -327,11 +350,6 @@ Iterator cc_v_rnext(HVector list, Iterator node)
 
 int cc_v_node_data(HVector list, Iterator element, HElementData out)
 {
-    size_t el_size = cc_el_metadata_type_size(list->metadata);
-
-    if (element == NULL || (char *) element >= list->data + list->size * el_size)
-        CC_BAD_PARAM_HANDLER("element out-of-bounds");
-
     if (!cc_el_compatible_metadata_element(list->metadata, out))
         CC_TYPE_MISMATCH_HANDLER("cannot get element", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(out));
 
@@ -373,24 +391,6 @@ int cc_v_compare(HVector lhs, HVector rhs, ElementDualDataCallback cmp)
     return comparison;
 }
 
-// TODO: not implemented properly yet
-int cc_v_sort(HVector list, ElementDualDataCallback cmp)
-{
-    if (!cmp)
-        cmp = cc_el_compare_in(list->metadata);
-
-    if (!cmp)
-        CC_NO_SUCH_METHOD_HANDLER("no comparison handler to sort vector with");
-
-    HElementData elem = cc_el_init(cc_el_metadata_type(list->metadata), list->metadata, NULL, NULL);
-
-    if (!elem)
-        CC_NO_MEM_HANDLER("out of memory");
-
-    // qsort(cc_v_raw(list), cc_v_size_of(list), cc_el_metadata_type_size(list->metadata), (int (*)(const void*, const void*)) cmp);
-    return CC_OK;
-}
-
 void cc_v_clear(HVector list, ElementDataCallback destruct)
 {
     HElementData el = list->buffer;
@@ -411,7 +411,7 @@ void cc_v_clear(HVector list, ElementDataCallback destruct)
     list->size = 0;
 }
 
-void cc_v_destroy(HVector list, ElementDataCallback destruct)
+void cc_v_destroy_at(HVector list, ElementDataCallback destruct)
 {
     cc_v_clear(list, destruct);
 
@@ -419,10 +419,15 @@ void cc_v_destroy(HVector list, ElementDataCallback destruct)
     cc_el_destroy_reference(list->buffer);
     cc_el_kill_metadata(list->metadata);
     FREE(list->data);
+}
+
+void cc_v_destroy(HVector list, ElementDataCallback destruct)
+{
+    cc_v_destroy_at(list, destruct);
     FREE(list);
 }
 
-const char *cc_v_to_string(HVector list)
+const char *cc_v_to_cstring(HVector list)
 {
     switch (cc_el_metadata_type(list->metadata))
     {
@@ -437,18 +442,15 @@ const char *cc_v_to_string(HVector list)
     if (list->size == 0)
         return "";
 
-    if (*((char *) cc_v_rbegin(list)) != 0) /* Last character not NUL */
-    {
-        if (!cc_v_grow(list, cc_v_size_of(list) + 1))
-            return NULL;
+    if (!cc_v_grow(list, cc_v_size_of(list) + 1))
+        return NULL;
 
-        *((char *) cc_v_raw(list) + cc_v_size_of(list)) = 0; /* Set last character to NUL */
-    }
+    *((char *) cc_v_raw(list) + cc_v_size_of(list)) = 0; /* Set last character to NUL */
 
     return cc_v_raw(list);
 }
 
-int cc_v_assign_string_n(HVector list, const char *data, size_t len)
+int cc_v_assign_cstring_n(HVector list, const char *data, size_t len)
 {
     switch (cc_el_metadata_type(list->metadata))
     {
@@ -469,9 +471,9 @@ int cc_v_assign_string_n(HVector list, const char *data, size_t len)
     return CC_OK;
 }
 
-int cc_v_assign_string(HVector list, const char *data)
+int cc_v_assign_cstring(HVector list, const char *data)
 {
-    return cc_v_assign_string_n(list, data, strlen(data));
+    return cc_v_assign_cstring_n(list, data, strlen(data));
 }
 
 #ifdef __cplusplus

@@ -13,19 +13,20 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-    struct LinkedList;
-
-    /* The type to be used for referring to a linked list
-     *
-     * This type should be used for linked list operations
-     */
-    typedef struct LinkedList *HLinkedList;
+    /* Returns the size of one linked list */
+    size_t cc_ll_sizeof();
 
     /* Initializes a new linked list with specified type
      *
      * Returns NULL if allocation failed
      */
-    HLinkedList cc_ll_init(ContainerElementType type);
+    HLinkedList cc_ll_init(ContainerElementType type, HContainerElementMetaData externalMeta);
+
+    /* Initializes a new linked list at the specified buffer
+     * Returns CC_BAD_PARAM if the buffer is not big enough, or a constructor response error code
+     * Returns CC_OK if all went well
+     */
+    int cc_ll_init_at(void *buf, size_t buffer_size, ContainerElementType type, HContainerElementMetaData externalMeta);
 
     /* Returns a copy of the linked list
      *
@@ -64,6 +65,9 @@ extern "C" {
      *
      * Note that this operation is performed in O(1) time
      *
+     * supported in flags:
+     *   - Move-semantics: CC_MOVE_VALUE or CC_COPY_VALUE
+     *
      * The provided callback is used to construct the new element
      *
      * Returns CC_OK on success
@@ -74,7 +78,7 @@ extern "C" {
      * `*list` will be unchanged on failure
      *
      */
-    int cc_ll_insert_after(HLinkedList list, Iterator after, HConstElementData data, ElementDataCallback construct);
+    int cc_ll_insert_after(HLinkedList list, unsigned flags, Iterator after, HConstElementData data, ElementDataCallback construct);
 
     /* Destroys the element after `after` in the linked list
      *
@@ -97,6 +101,9 @@ extern "C" {
      *
      * Note that this operation is performed in O(1) time
      *
+     * supported in flags:
+     *   - Move-semantics: CC_MOVE_VALUE or CC_COPY_VALUE
+     *
      * The provided callback is used to construct the new element
      *
      * Returns 0 on success
@@ -106,8 +113,8 @@ extern "C" {
      * `*list` will be unchanged on failure
      *
      */
-    INLINE int cc_ll_push_front(HLinkedList list, HConstElementData data, ElementDataCallback construct) INLINE_DEFINITION({
-        return cc_ll_insert_after(list, NULL, data, construct);
+    INLINE int cc_ll_push_front(HLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct) INLINE_DEFINITION({
+        return cc_ll_insert_after(list, flags, NULL, data, construct);
     })
     INLINE int cc_ll_pop_front(HLinkedList list, ElementDataCallback destruct) INLINE_DEFINITION({
         return cc_ll_erase_after(list, NULL, destruct);
@@ -117,6 +124,9 @@ extern "C" {
      *
      * Note that this operation is performed in O(1) time
      *
+     * supported in flags:
+     *   - Move-semantics: CC_MOVE_VALUE or CC_COPY_VALUE
+     *
      * The provided callback is used to construct the new element
      *
      * Returns 0 on success
@@ -126,8 +136,8 @@ extern "C" {
      * `*list` will be unchanged on failure
      *
      */
-    INLINE int cc_ll_push_back(HLinkedList list, HConstElementData data, ElementDataCallback construct) INLINE_DEFINITION({
-        return cc_ll_insert_after(list, cc_ll_rbegin(list), data, construct);
+    INLINE int cc_ll_push_back(HLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct) INLINE_DEFINITION({
+        return cc_ll_insert_after(list, flags, cc_ll_rbegin(list), data, construct);
     })
 
     /* Searches the list for the specified element, compared using the provided comparator if possible
@@ -151,6 +161,12 @@ extern "C" {
      * Returns CC_BAD_PARAM if `callback` is NULL
      */
     int cc_ll_iterate(HLinkedList list, ExtendedElementDataCallback callback, void *userdata);
+
+    /* Reverses the order of elements in the linked list
+     *
+     * This function never fails
+     */
+    void cc_ll_reverse(HLinkedList list);
 
     /* Returns the size of the linked list
      *

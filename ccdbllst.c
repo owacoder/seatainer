@@ -72,53 +72,67 @@ static void cc_dll_remove_node(HDoublyLinkedList list, HDoublyLinkedListNode nod
 }
 
 #ifdef C99
-extern inline int cc_dll_push_front(HDoublyLinkedList list, HConstElementData data, ElementDataCallback construct);
+extern inline int cc_dll_push_front(HDoublyLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct);
 extern inline int cc_dll_pop_front(HDoublyLinkedList list, ElementDataCallback destruct);
-extern inline int cc_dll_push_back(HDoublyLinkedList list, HConstElementData data, ElementDataCallback construct);
+extern inline int cc_dll_push_back(HDoublyLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct);
 extern inline int cc_dll_pop_back(HDoublyLinkedList list, ElementDataCallback destruct);
 #else
-int cc_dll_push_front(HDoublyLinkedList list, HConstElementData data, ElementDataCallback construct) {
-    return cc_dll_insert_after(list, NULL, data, construct);
+int cc_dll_push_front(HDoublyLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct) {
+    return cc_dll_insert_after(list, flags, NULL, data, construct);
 }
 int cc_dll_pop_front(HDoublyLinkedList list, ElementDataCallback destruct) {
     return cc_dll_erase(list, list->head, destruct);
 }
-int cc_dll_push_back(HDoublyLinkedList list, HConstElementData data, ElementDataCallback construct) {
-    return cc_dll_insert_after(list, list->tail, data, construct);
+int cc_dll_push_back(HDoublyLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct) {
+    return cc_dll_insert_after(list, flags, list->tail, data, construct);
 }
 int cc_dll_pop_back(HDoublyLinkedList list, ElementDataCallback destruct) {
     return cc_dll_erase(list, list->tail, destruct);
 }
 #endif
 
+size_t cc_dll_sizeof()
+{
+    return sizeof(struct DoublyLinkedList);
+}
+
 HDoublyLinkedList cc_dll_init(ContainerElementType type)
 {
-    HDoublyLinkedList result = MALLOC(sizeof(*result), 1);
+    HDoublyLinkedList result = MALLOC(cc_dll_sizeof(), 1);
 
-    if (!result)
+    if (!result || CC_OK != cc_dll_init_at(result, cc_dll_sizeof(), type))
+    {
+        FREE(result);
         return NULL;
+    }
+
+    return result;
+}
+
+int cc_dll_init_at(void *buf, size_t buffer_size, ContainerElementType type)
+{
+    if (buffer_size < cc_dll_sizeof())
+        CC_BAD_PARAM_HANDLER("buffer size too small");
+
+    HDoublyLinkedList result = buf;
 
     result->head = result->tail = NULL;
     result->size = 0;
     result->metadata = cc_el_make_metadata(type);
 
     if (!result->metadata)
-    {
-        FREE(result);
-        result = NULL;
-    }
+        CC_NO_MEM_HANDLER("out of memory");
 
 #ifdef C99
     result->buffer = cc_el_init(type, result->metadata, NULL, NULL);
     if (!result->buffer)
     {
         cc_el_kill_metadata(result->metadata);
-        FREE(result);
-        result = NULL;
+        CC_NO_MEM_HANDLER("out of memory");
     }
 #endif
 
-    return result;
+    return CC_OK;
 }
 
 HDoublyLinkedList cc_dll_copy(HDoublyLinkedList list, ElementDataCallback construct, ElementDataCallback destruct)
@@ -142,7 +156,7 @@ HDoublyLinkedList cc_dll_copy(HDoublyLinkedList list, ElementDataCallback constr
         d = (HElementData) old->data;
 #endif
 
-        CC_CLEANUP_ON_ERROR(cc_dll_insert_after(new_list, node, d, construct),
+        CC_CLEANUP_ON_ERROR(cc_dll_insert_after(new_list, CC_COPY_VALUE, node, d, construct),
                             cc_dll_destroy(new_list, destruct); return NULL;); /* Failure to insert, now clean up */
 
         old = old->next;
@@ -159,7 +173,7 @@ void cc_dll_swap(HDoublyLinkedList lhs, HDoublyLinkedList rhs)
     *rhs = temp;
 }
 
-int cc_dll_insert_after(HDoublyLinkedList list, Iterator after, HConstElementData data, ElementDataCallback construct)
+int cc_dll_insert_after(HDoublyLinkedList list, unsigned flags, Iterator after, HConstElementData data, ElementDataCallback construct)
 {
     int err;
 
@@ -184,7 +198,12 @@ int cc_dll_insert_after(HDoublyLinkedList list, Iterator after, HConstElementDat
     element_was_constructed = 1;
 
     if (data)
-        CC_CLEANUP_ON_ERROR(cc_el_copy_contents(list->buffer, data), err = ret; goto cleanup;);
+    {
+        if (CC_MOVE_SEMANTICS(flags) == CC_MOVE_VALUE)
+            CC_CLEANUP_ON_ERROR(cc_el_move_contents(list->buffer, data), err = ret; goto cleanup;);
+        else
+            CC_CLEANUP_ON_ERROR(cc_el_copy_contents(list->buffer, data), err = ret; goto cleanup;);
+    }
 #else
     /* TODO: not implemented yet */
     HDoublyLinkedListNode ptr = MALLOC(sizeof(*ptr), 1);
@@ -199,7 +218,12 @@ int cc_dll_insert_after(HDoublyLinkedList list, Iterator after, HConstElementDat
     }
 
     if (data)
-        CC_CLEANUP_ON_ERROR(cc_el_copy_contents(ptr->data, data), err = ret; goto cleanup;);
+    {
+        if (CC_MOVE_SEMANTICS(flags) == CC_MOVE_VALUE)
+            CC_CLEANUP_ON_ERROR(cc_el_move_contents(ptr->data, data), err = ret; goto cleanup;);
+        else
+            CC_CLEANUP_ON_ERROR(cc_el_copy_contents(ptr->data, data), err = ret; goto cleanup;);
+    }
 #endif
 
     HDoublyLinkedListNode ll_after = after;
@@ -265,11 +289,6 @@ int cc_dll_erase(HDoublyLinkedList list, Iterator element, ElementDataCallback d
     else
         cc_el_call_destructor_in(list->metadata, list->buffer);
 #else
-    if (destruct)
-        destruct(node->data);
-    else
-        cc_el_call_destructor_in(list->metadata, node->data);
-
     cc_el_destroy(node->data);
 #endif
     FREE(node);
@@ -371,6 +390,37 @@ int cc_dll_iterate(HDoublyLinkedList list, unsigned flags, ExtendedElementDataCa
     }
 
     return CC_OK;
+}
+
+void cc_dll_reverse(HDoublyLinkedList list)
+{
+    if (!list->head)
+        return;
+
+    /* Reverse forward pointers */
+    HDoublyLinkedListNode prev = NULL, node = list->head;
+    while (node)
+    {
+        HDoublyLinkedListNode next = node->next;
+        node->next = prev;
+        prev = node;
+        node = next;
+    }
+
+    list->head = prev;
+
+    /* Then reverse backward pointers */
+    prev = NULL;
+    node = list->tail;
+    while (node)
+    {
+        HDoublyLinkedListNode next = node->prev;
+        node->prev = prev;
+        prev = node;
+        node = next;
+    }
+
+    list->tail = prev;
 }
 
 size_t cc_dll_size_of(HDoublyLinkedList list)
@@ -476,11 +526,6 @@ void cc_dll_clear(HDoublyLinkedList list, ElementDataCallback destruct)
         else
             cc_el_call_destructor_in(list->metadata, list->buffer);
 #else
-        if (destruct)
-            destruct(node->data);
-        else
-            cc_el_call_destructor_in(list->metadata, node->data);
-
         cc_el_destroy(node->data);
 #endif
 
@@ -494,7 +539,7 @@ void cc_dll_clear(HDoublyLinkedList list, ElementDataCallback destruct)
     list->size = 0;
 }
 
-void cc_dll_destroy(HDoublyLinkedList list, ElementDataCallback destruct)
+void cc_dll_destroy_at(HDoublyLinkedList list, ElementDataCallback destruct)
 {
     cc_dll_clear(list, destruct);
 
@@ -503,6 +548,11 @@ void cc_dll_destroy(HDoublyLinkedList list, ElementDataCallback destruct)
     cc_el_destroy_reference(list->buffer);
 #endif
     cc_el_kill_metadata(list->metadata);
+}
+
+void cc_dll_destroy(HDoublyLinkedList list, ElementDataCallback destruct)
+{
+    cc_dll_destroy_at(list, destruct);
     FREE(list);
 }
 

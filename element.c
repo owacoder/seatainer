@@ -3,9 +3,11 @@
 #include "cclnklst.h"
 #include "ccdbllst.h"
 #include "cchash.h"
+#include "ccstring.h"
 
 #include "utility.h"
 
+#include <string.h>
 #include <memory.h>
 #include <stdlib.h>
 
@@ -312,6 +314,23 @@ static int cc_el_voidp_copy_constructor(HElementData lhs, HElementData rhs)
     return CC_OK;
 }
 
+static int cc_el_string_copy_constructor(HElementData lhs, HElementData rhs)
+{
+    HString *l = cc_el_storage_location(lhs);
+    HString *r = cc_el_storage_location(rhs);
+
+    if (*l)
+        return cc_s_assign_cstring_n(*l, cc_s_raw(*r), cc_s_size_of(*r));
+    else
+    {
+        *l = cc_s_copy(*r);
+        if (!*l)
+            CC_NO_MEM_HANDLER("out of memory");
+    }
+
+    return CC_OK;
+}
+
 static int cc_el_vector_copy_constructor(HElementData lhs, HElementData rhs)
 {
     HVector *l = cc_el_storage_location(lhs);
@@ -365,9 +384,19 @@ static int cc_el_hash_table_copy_constructor(HElementData lhs, HElementData rhs)
     if (*l)
         cc_ht_destroy(*l);
 
-    *l = cc_ht_copy(*r, NULL, NULL);
+    *l = cc_ht_copy(*r);
     if (!*l)
         CC_NO_MEM_HANDLER("out of memory");
+
+    return CC_OK;
+}
+
+static int cc_el_string_destructor(HElementData data)
+{
+    HString *d = cc_el_storage_location(data);
+
+    if (*d)
+        cc_s_destroy(*d);
 
     return CC_OK;
 }
@@ -524,6 +553,14 @@ static int cc_el_voidp_compare(HElementData lhs, HElementData rhs)
     return (*l > *r) - (*l < *r);
 }
 
+static int cc_el_string_compare(HElementData lhs, HElementData rhs)
+{
+    HString *l = cc_el_storage_location(lhs);
+    HString *r = cc_el_storage_location(rhs);
+
+    return cc_s_compare(*l, *r, NULL);
+}
+
 static int cc_el_vector_compare(HElementData lhs, HElementData rhs)
 {
     HVector *l = cc_el_storage_location(lhs);
@@ -562,7 +599,7 @@ const char *cc_el_typename(ContainerElementType type)
                            "signed short", "unsigned short", "signed int",
                            "unsigned int", "signed long", "unsigned long",
                            "signed long long", "unsigned long long", "float",
-                           "double", "const char *", "void *", "vector",
+                           "double", "void *", "string", "vector",
                            "linked list", "doubly linked list", "hash table"};
 
     if (type >= sizeof(types)/sizeof(types[0]))
@@ -590,8 +627,8 @@ ElementDataCallback cc_el_constructor(ContainerElementType type)
         case El_UnsignedLongLong: return cc_el_unsigned_long_long_constructor;
         case El_Float: return cc_el_float_constructor;
         case El_Double: return cc_el_double_constructor;
-        case El_CString: return NULL;
         case El_VoidPtr:
+        case El_String:
         case El_Vector:
         case El_LinkedList:
         case El_DoublyLinkedList:
@@ -619,8 +656,8 @@ ElementDualDataCallback cc_el_copy_constructor(ContainerElementType type)
         case El_UnsignedLongLong: return cc_el_unsigned_long_long_copy_constructor;
         case El_Float: return cc_el_float_copy_constructor;
         case El_Double: return cc_el_double_copy_constructor;
-        case El_CString: return NULL;
         case El_VoidPtr: return cc_el_voidp_copy_constructor;
+        case El_String: return cc_el_string_copy_constructor;
         case El_Vector: return cc_el_vector_copy_constructor;
         case El_LinkedList: return cc_el_linked_list_copy_constructor;
         case El_DoublyLinkedList: return cc_el_doubly_linked_list_copy_constructor;
@@ -633,6 +670,7 @@ ElementDataCallback cc_el_destructor(ContainerElementType type)
     switch (type)
     {
         default: return NULL;
+        case El_String: return cc_el_string_destructor;
         case El_Vector: return cc_el_vector_destructor;
         case El_LinkedList: return cc_el_linked_list_destructor;
         case El_DoublyLinkedList: return cc_el_doubly_linked_list_destructor;
@@ -660,8 +698,8 @@ ElementDualDataCallback cc_el_compare(ContainerElementType type)
         case El_UnsignedLongLong: return cc_el_unsigned_long_long_compare;
         case El_Float: return cc_el_float_compare;
         case El_Double: return cc_el_double_compare;
-        case El_CString: return NULL;
         case El_VoidPtr: return cc_el_voidp_compare;
+        case El_String: return cc_el_string_compare;
         case El_Vector: return cc_el_vector_compare;
         case El_LinkedList: return cc_el_linked_list_compare;
         case El_DoublyLinkedList: return cc_el_doubly_linked_list_compare;
@@ -754,8 +792,8 @@ int cc_el_call_compare_in(HContainerElementMetaData metadata, HElementData lhs, 
 
 int cc_el_init_at(void *buf, size_t buffer_size, ContainerElementType type, HContainerElementMetaData metadata, ElementDataCallback construct)
 {
-    if (buffer_size < sizeof(struct ElementData))
-        return CC_BAD_PARAM;
+    if (buffer_size < cc_el_sizeof())
+        CC_BAD_PARAM_HANDLER("buffer size too small");
 
     HElementData d = buf;
 
@@ -782,11 +820,11 @@ int cc_el_init_at(void *buf, size_t buffer_size, ContainerElementType type, HCon
 
 HElementData cc_el_init(ContainerElementType type, HContainerElementMetaData metadata, ElementDataCallback construct, int *err)
 {
-    HElementData result = MALLOC(sizeof(*result), 1);
+    HElementData result = MALLOC(cc_el_sizeof(), 1);
     if (!result)
         return NULL;
 
-    CC_CLEANUP_ON_ERROR(cc_el_init_at(result, sizeof(*result), type, metadata, construct),
+    CC_CLEANUP_ON_ERROR(cc_el_init_at(result, cc_el_sizeof(), type, metadata, construct),
                         if (err)
                             *err = ret;
                         FREE(result);
@@ -795,8 +833,11 @@ HElementData cc_el_init(ContainerElementType type, HContainerElementMetaData met
     return result;
 }
 
-int cc_el_move(HElementData dest, HElementData src)
+int cc_el_move_contents(HElementData dest, HConstElementData src)
 {
+    if (dest->type != src->type)
+        CC_BAD_PARAM_HANDLER("incompatible types");
+
     /* Destruct destination */
     ElementDataCallback cb = NULL;
 
@@ -809,24 +850,26 @@ int cc_el_move(HElementData dest, HElementData src)
     if (cb)
         cb(dest);
 
-    /* Raw copy */
-    *dest = *src;
+    /* Copy from source to destination */
+    size_t size_to_copy = 0;
+
+    if (dest->meta)
+        size_to_copy = cc_el_metadata_type_size(dest->meta);
+    else
+        size_to_copy = cc_el_size_of_type(dest->type);
+
+    memcpy(cc_el_storage_location(dest), cc_el_storage_location((HElementData) src), size_to_copy);
 
     /* Initialize source again */
-    if (src->_src == NULL)
-    {
-        ElementDataCallback cb = NULL;
-        if (dest->meta)
-            cb = cc_el_constructor_in(dest->meta);
+    cb = NULL;
+    if (dest->meta)
+        cb = cc_el_constructor_in(dest->meta);
 
-        if (!cb)
-            cb = cc_el_constructor(dest->type);
+    if (!cb)
+        cb = cc_el_constructor(dest->type);
 
-        if (cb)
-            return cb(src);
-    }
-    else
-        src->_src = NULL;
+    if (cb)
+        return cb((HElementData) src);
 
     return CC_OK;
 }
@@ -834,7 +877,7 @@ int cc_el_move(HElementData dest, HElementData src)
 int cc_el_copy_contents(HElementData dest, HConstElementData src)
 {
     if (dest->type != src->type)
-        return CC_BAD_PARAM;
+        CC_BAD_PARAM_HANDLER("incompatible types");
 
     ElementDualDataCallback cb = NULL;
     if (dest->meta)
@@ -849,7 +892,7 @@ int cc_el_copy_contents(HElementData dest, HConstElementData src)
     return CC_OK;
 }
 
-int cc_el_destroy(HElementData data)
+int cc_el_destroy_at(HElementData data)
 {
     ElementDataCallback cb = NULL;
     if (data->meta)
@@ -861,13 +904,25 @@ int cc_el_destroy(HElementData data)
     if (cb)
         cb(data);
 
+    return CC_OK;
+}
+
+int cc_el_destroy(HElementData data)
+{
+    cc_el_destroy_at(data);
     FREE(data);
     return CC_OK;
 }
 
 #ifdef C99
+extern inline int cc_el_destroy_reference_at(HElementData data);
 extern inline int cc_el_destroy_reference(HElementData data);
 #else
+int cc_el_destroy_reference_at(HElementData data)
+{
+    *cc_el_storage_location_ptr(data) = NULL;
+    return cc_el_destroy_at(data);
+}
 int cc_el_destroy_reference(HElementData data)
 {
     *cc_el_storage_location_ptr(data) = NULL;
@@ -993,6 +1048,42 @@ int cc_el_assign_voidp(HElementData data, void *p)
     *((void **) cc_el_storage_location(data)) = p;
     return CC_OK;
 }
+int cc_el_assign_string(HElementData data, HString d)
+{
+    CC_RETURN_ON_ERROR(cc_el_update_type_information(data, El_String));
+    HString *ptr = cc_el_storage_location(data);
+    if (d)
+    {
+        *ptr = cc_s_copy(d);
+        if (!*ptr)
+            CC_NO_MEM_HANDLER("out of memory");
+
+        return CC_OK;
+    }
+    else
+        *ptr = NULL;
+    return CC_OK;
+}
+int cc_el_assign_cstring(HElementData data, const char *p)
+{
+    return cc_el_assign_cstring_n(data, p, strlen(p));
+}
+int cc_el_assign_cstring_n(HElementData data, const char *c, size_t len)
+{
+    CC_RETURN_ON_ERROR(cc_el_update_type_information(data, El_String));
+    HString *ptr = cc_el_storage_location(data);
+    if (c)
+    {
+        *ptr = cc_s_init();
+        if (!*ptr)
+            CC_NO_MEM_HANDLER("out of memory");
+
+        return cc_s_assign_cstring_n(*ptr, c, len);
+    }
+    else
+        *ptr = NULL;
+    return CC_OK;
+}
 int cc_el_assign_vector(HElementData data, HVector d)
 {
     CC_RETURN_ON_ERROR(cc_el_update_type_information(data, El_Vector));
@@ -1047,7 +1138,7 @@ int cc_el_assign_hash_table(HElementData data, HHashTable d)
     HHashTable *ptr = cc_el_storage_location(data);
     if (d)
     {
-        *ptr = cc_ht_copy(d, NULL, NULL);
+        *ptr = cc_ht_copy(d);
         if (!*ptr)
             CC_NO_MEM_HANDLER("out of memory");
 
@@ -1072,6 +1163,7 @@ unsigned long long *cc_el_get_unsigned_long_long(HElementData data) {return data
 float *cc_el_get_float(HElementData data) {return data->type == El_Float? (float *) (cc_el_storage_location(data)): NULL;}
 double *cc_el_get_double(HElementData data) {return data->type == El_Double? (double *) (cc_el_storage_location(data)): NULL;}
 void **cc_el_get_voidp(HElementData data) {return data->type == El_VoidPtr? (void **) (cc_el_storage_location(data)): NULL;}
+HString *cc_el_get_string(HElementData data) {return data->type == El_String? (HString *) (cc_el_storage_location(data)): NULL;}
 HVector *cc_el_get_vector(HElementData data) {return data->type == El_Vector? (HVector *) (cc_el_storage_location(data)): NULL;}
 HLinkedList *cc_el_get_linked_list(HElementData data) {return data->type == El_LinkedList? (HLinkedList *) (cc_el_storage_location(data)): NULL;}
 HDoublyLinkedList *cc_el_get_doubly_linked_list(HElementData data) {return data->type == El_DoublyLinkedList? (HDoublyLinkedList *) (cc_el_storage_location(data)): NULL;}
@@ -1109,8 +1201,8 @@ size_t cc_el_size_of_type(ContainerElementType type)
         case El_UnsignedLongLong: return sizeof(unsigned long long);
         case El_Float: return sizeof(float);
         case El_Double: return sizeof(double);
-        case El_CString: return sizeof(const char *);
         case El_VoidPtr: return sizeof(void *);
+        case El_String: return sizeof(HString);
         case El_Vector: return sizeof(HVector);
         case El_LinkedList: return sizeof(HLinkedList);
         case El_DoublyLinkedList: return sizeof(HDoublyLinkedList);
@@ -1118,12 +1210,27 @@ size_t cc_el_size_of_type(ContainerElementType type)
     }
 }
 
+size_t cc_el_metadata_sizeof()
+{
+    return sizeof(struct ContainerElementMetaData);
+}
+
 HContainerElementMetaData cc_el_make_metadata(ContainerElementType type)
 {
     HContainerElementMetaData result = MALLOC(sizeof(*result), 1);
 
-    if (!result)
+    if (!result || CC_OK != cc_el_make_metadata_at(result, cc_el_metadata_sizeof(), type))
         return NULL;
+
+    return result;
+}
+
+int cc_el_make_metadata_at(void *buf, size_t buffer_size, ContainerElementType type)
+{
+    if (buffer_size < cc_el_metadata_sizeof())
+        CC_BAD_PARAM_HANDLER("buffer size too small");
+
+    HContainerElementMetaData result = buf;
 
     result->el_constructor = cc_el_constructor(type);
     result->el_destructor = cc_el_destructor(type);
@@ -1133,7 +1240,7 @@ HContainerElementMetaData cc_el_make_metadata(ContainerElementType type)
     result->el_size = cc_el_size_of_type(type);
     result->el_userdata = NULL;
 
-    return result;
+    return CC_OK;
 }
 
 void cc_el_copy_metadata(HContainerElementMetaData dest, const HContainerElementMetaData src)
@@ -1141,8 +1248,14 @@ void cc_el_copy_metadata(HContainerElementMetaData dest, const HContainerElement
     *dest = *src;
 }
 
+void cc_el_kill_metadata_at(HContainerElementMetaData metadata)
+{
+    (void) metadata;
+}
+
 void cc_el_kill_metadata(HContainerElementMetaData metadata)
 {
+    cc_el_kill_metadata_at(metadata);
     FREE(metadata);
 }
 
@@ -1193,7 +1306,6 @@ int cc_el_compatible_metadata_element(const HContainerElementMetaData meta,
 {
     return meta->el_type == data->type;
 }
-
 
 int cc_el_hash_default(HConstElementData element, unsigned *hash)
 {
@@ -1259,6 +1371,17 @@ int cc_el_hash_default(HConstElementData element, unsigned *hash)
             else
                 *hash = pearson_hash(cc_el_storage_location(data), sizeof(void *));
             break;
+        case El_String:
+        {
+            HString string = *((HString *) cc_el_storage_location(data));
+
+            if (cc_s_size_of(string))
+                *hash = pearson_hash(cc_s_raw(string), cc_s_size_of(string));
+            else
+                *hash = 0;
+
+            break;
+        }
         case El_Vector:
         {
             HVector vector = *((HVector *) cc_el_storage_location(data));
@@ -1281,7 +1404,7 @@ int cc_el_hash_default(HConstElementData element, unsigned *hash)
                 case El_Double:
                 case El_VoidPtr:
                     if (cc_v_size_of(vector))
-                        *hash = pearson_hash(cc_v_begin(vector), cc_v_size_of(vector) * cc_el_metadata_type_size(cc_v_metadata(vector)));
+                        *hash = pearson_hash(cc_v_raw(vector), cc_v_size_of(vector) * cc_el_metadata_type_size(cc_v_metadata(vector)));
                     else
                         *hash = 0;
                     break;

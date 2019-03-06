@@ -1,6 +1,7 @@
 #include "utility.h"
 
 #include <limits.h>
+#include <stdint.h>
 
 int memswap(void *p, void *q, size_t size)
 {
@@ -14,6 +15,71 @@ int memswap(void *p, void *q, size_t size)
     }
 
     return 0;
+}
+
+/* Adapted from https://en.wikipedia.org/wiki/Modular_exponentiation#Right-to-left_binary_method */
+static uint64_t exp_mod(uint64_t base, uint64_t exp, uint64_t mod)
+{
+    uint64_t result = 1;
+
+    for (base %= mod; exp; exp >>= 1)
+    {
+        if (exp & 1)
+            result = (result * base) % mod;
+        base = (base * base) % mod;
+    }
+
+    return result;
+}
+
+/* Adapted from https://en.wikipedia.org/wiki/Miller%E2%80%93Rabin_primality_test#Deterministic_variants */
+int is_prime(size_t number)
+{
+    size_t i, j;
+    static int divisors[] = {3, 5, 7, 11, 13};
+
+    if (number % 2 == 0)
+        return 0;
+
+    for (i = 0; i < sizeof(divisors)/sizeof(*divisors); ++i)
+        if (number % divisors[i] == 0)
+            return 0;
+
+    static int tests[] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37};
+    size_t n;
+    size_t r = 0;
+
+    for (n = number - 1; (n & 1) == 0; n >>= 1)
+        ++r;
+
+    for (i = 0; i < sizeof(tests)/sizeof(*tests); ++i)
+    {
+        uint64_t x = exp_mod(tests[i], n, number);
+
+        if (x == 1 || x == (number - 1))
+            continue;
+
+        for (j = 0; j < r; ++j)
+        {
+            x = (x * x) % number;
+            if (x == (number - 1))
+                goto next;
+        }
+
+        return 0;
+next:;
+    }
+
+    return 1;
+}
+
+size_t next_prime(size_t number)
+{
+    number |= 1;
+    while (!is_prime(number) && number < 0xffffffffu)
+        number += 2;
+
+    return number < 0xffffffffu? number: 0;
 }
 
 static unsigned char *pearson_lookup_table()
