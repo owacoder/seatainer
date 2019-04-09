@@ -5,6 +5,8 @@
 #include "ccvector.h"
 #include "cchash.h"
 #include "ccstring.h"
+#include "io.h"
+#include "platforms.h"
 
 #include <assert.h>
 
@@ -315,8 +317,71 @@ void test_small_dll()
     cc_dll_destroy(list, NULL);
 }
 
+#include "IO/crypto_rand.h"
+#include "IO/hex.h"
+#include "IO/md5.h"
+#include "IO/sha1.h"
+
+void test_io() {
+#if WINDOWS_OS
+    IO io = io_open("F:/Test_Data/test.txt", "w");
+#elif LINUX_OS
+    IO io = io_open("/shared/Test_Data/test.txt", "w");
+#endif
+    if (!io)
+        return;
+
+    io_seek64(io, 1LL << 16, SEEK_SET);
+    io_puts("This is some text", io);
+    io_seek(io, 1, SEEK_SET);
+    io_puts("That", io);
+
+    io_close(io);
+
+    char buffer[100];
+    io = io_open_buffer(buffer, sizeof(buffer), "w");
+    if (!io)
+        return;
+    /* assert(io_puts("Some text", io) == 0); */
+    printf(".%012d.\n", 545);
+    printf("printed %d\n", io_printf(io, "\n.%%%p.\n", io));
+    assert(io_seek(io, 0, SEEK_END) == 0);
+    assert(io_putc(' ', io) == EOF);
+    printf("buffer size = %ld\n", io_tell(io));
+    io_close(io);
+
+    for (size_t i = 0; i < sizeof(buffer); ++i)
+        printf("%d ", buffer[i]);
+
+    printf("\n%.100s\n", buffer);
+
+    io = io_open_crypto_rand();
+    assert(io_read(buffer, 1, sizeof(buffer), io) == sizeof(buffer));
+    io_close(io);
+
+    for (size_t i = 0; i < sizeof(buffer); ++i)
+        printf("%d ", buffer[i]);
+
+    io = io_open_cstring("");
+    IO io2 = io_open_sha1(io, "r");
+
+    size_t read = io_read(buffer, 1, 32, io2);
+    printf("Read %d\n", (int) read);
+    io_rewind(io2);
+    assert(io_read(buffer, 1, 32, io2) != 0);
+
+    for (size_t i = 0; i < read; ++i)
+        printf("%02x", (uint8_t) buffer[i]);
+    puts("");
+
+    io_close(io2);
+    io_close(io);
+}
+
 int main()
 {
+    test_io();
+
     const size_t cnt = 800000;
 
     test_ht(cnt);

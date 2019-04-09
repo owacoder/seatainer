@@ -1,7 +1,230 @@
 #include "utility.h"
+#include "platforms.h"
 
 #include <limits.h>
 #include <stdint.h>
+
+#if WINDOWS_OS
+#include <windows.h>
+#include <winnt.h>
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#if WINDOWS_OS
+#define ATOMIC_CMPXCHG(op)                                                  \
+    Atomic old, current;                                                    \
+                                                                            \
+    do {                                                                    \
+        old = *location;                                                    \
+        current = op;                                                       \
+    } while (atomic_cmpxchg(location, current, old) != old);                \
+                                                                            \
+    return old;
+
+#define ATOMICP_CMPXCHG(op)                                                 \
+    AtomicPointer old, current;                                             \
+                                                                            \
+    do {                                                                    \
+        old = *location;                                                    \
+        current = op;                                                       \
+    } while (atomicp_cmpxchg(location, current, old) != old);               \
+                                                                            \
+    return old;
+
+Atomic atomic_set(volatile Atomic *location, Atomic value)
+{
+    return InterlockedExchange(location, value);
+}
+
+Atomic atomic_add(volatile Atomic *location, Atomic value)
+{
+    return InterlockedExchangeAdd(location, value);
+}
+
+Atomic atomic_sub(volatile Atomic *location, Atomic value)
+{
+    return InterlockedExchangeAdd(location, -value);
+}
+
+Atomic atomic_and(volatile Atomic *location, Atomic value)
+{
+    ATOMIC_CMPXCHG(old & value);
+}
+
+Atomic atomic_or(volatile Atomic *location, Atomic value)
+{
+    ATOMIC_CMPXCHG(old | value);
+}
+
+Atomic atomic_xor(volatile Atomic *location, Atomic value)
+{
+    ATOMIC_CMPXCHG(old ^ value);
+}
+
+Atomic atomic_load(const volatile Atomic *location)
+{
+    return *location;
+    /* Alternately: return atomic_add((volatile Atomic *) location, 0); */
+}
+
+Atomic atomic_cmpxchg(volatile Atomic *location, Atomic value, Atomic compare)
+{
+    return InterlockedCompareExchange(location, value, compare);
+}
+
+int atomic_test_bit(const volatile Atomic *location, unsigned bit)
+{
+    return (atomic_load(location) >> bit) & 1;
+}
+
+int atomic_set_bit(volatile Atomic *location, unsigned bit)
+{
+    ATOMIC_CMPXCHG(old | ((Atomic) 1 << bit));
+}
+
+int atomic_clear_bit(volatile Atomic *location, unsigned bit)
+{
+    ATOMIC_CMPXCHG(old & ~((Atomic) 1 << bit));
+}
+
+int atomic_flip_bit(volatile Atomic *location, unsigned bit)
+{
+    ATOMIC_CMPXCHG(old ^ ((Atomic) 1 << bit));
+}
+
+AtomicPointer atomicp_set(volatile AtomicPointer *location, AtomicPointer value)
+{
+    return InterlockedExchangePointer(location, value);
+}
+
+AtomicPointer atomicp_add(volatile AtomicPointer *location, intptr_t value)
+{
+    ATOMICP_CMPXCHG((char *) old + value);
+}
+
+AtomicPointer atomicp_sub(volatile AtomicPointer *location, intptr_t value)
+{
+    ATOMICP_CMPXCHG((char *) old - value);
+}
+
+AtomicPointer atomicp_load(const volatile AtomicPointer *location)
+{
+    return *location;
+}
+
+AtomicPointer atomicp_cmpxchg(volatile AtomicPointer *location, AtomicPointer value, AtomicPointer compare)
+{
+    return InterlockedCompareExchangePointer(location, value, compare);
+}
+#elif LINUX_OS
+#define ATOMIC_CMPXCHG(op)                                                  \
+    Atomic old, current;                                                    \
+                                                                            \
+    do {                                                                    \
+        old = __sync_fetch_and_or(location, 0);                             \
+        current = op;                                                       \
+    } while (atomic_cmpxchg(location, current, old) != old);                \
+                                                                            \
+    return old;
+
+#define ATOMICP_CMPXCHG(op)                                                 \
+    AtomicPointer old, current;                                             \
+                                                                            \
+    do {                                                                    \
+        old = __sync_fetch_and_or(location, 0);                             \
+        current = op;                                                       \
+    } while (atomicp_cmpxchg(location, current, old) != old);               \
+                                                                            \
+    return old;
+
+Atomic atomic_set(volatile Atomic *location, Atomic value)
+{
+    ATOMIC_CMPXCHG(value);
+}
+
+Atomic atomic_add(volatile Atomic *location, Atomic value)
+{
+    return __sync_fetch_and_add(location, value);
+}
+
+Atomic atomic_sub(volatile Atomic *location, Atomic value)
+{
+    return __sync_fetch_and_sub(location, value);
+}
+
+Atomic atomic_and(volatile Atomic *location, Atomic value)
+{
+    return __sync_fetch_and_and(location, value);
+}
+
+Atomic atomic_or(volatile Atomic *location, Atomic value)
+{
+    return __sync_fetch_and_or(location, value);
+}
+
+Atomic atomic_xor(volatile Atomic *location, Atomic value)
+{
+    return __sync_fetch_and_xor(location, value);
+}
+
+Atomic atomic_load(const volatile Atomic *location)
+{
+    return __sync_fetch_and_or((volatile Atomic *) location, 0);
+}
+
+Atomic atomic_cmpxchg(volatile Atomic *location, Atomic value, Atomic compare)
+{
+    return __sync_val_compare_and_swap(location, compare, value);
+}
+
+int atomic_test_bit(const volatile Atomic *location, unsigned bit)
+{
+    return (atomic_load(location) >> bit) & 1;
+}
+
+int atomic_set_bit(volatile Atomic *location, unsigned bit)
+{
+    ATOMIC_CMPXCHG(old | ((Atomic) 1 << bit));
+}
+
+int atomic_clear_bit(volatile Atomic *location, unsigned bit)
+{
+    ATOMIC_CMPXCHG(old & ~((Atomic) 1 << bit));
+}
+
+int atomic_flip_bit(volatile Atomic *location, unsigned bit)
+{
+    ATOMIC_CMPXCHG(old ^ ((Atomic) 1 << bit));
+}
+
+AtomicPointer atomicp_set(volatile AtomicPointer *location, AtomicPointer value)
+{
+    ATOMICP_CMPXCHG(value);
+}
+
+AtomicPointer atomicp_add(volatile AtomicPointer *location, intptr_t value)
+{
+    ATOMICP_CMPXCHG((char *) old + value);
+}
+
+AtomicPointer atomicp_sub(volatile AtomicPointer *location, intptr_t value)
+{
+    ATOMICP_CMPXCHG((char *) old - value);
+}
+
+AtomicPointer atomicp_load(const volatile AtomicPointer *location)
+{
+    return __sync_fetch_and_or((volatile AtomicPointer *) location, 0);
+}
+
+AtomicPointer atomicp_cmpxchg(volatile AtomicPointer *location, AtomicPointer value, AtomicPointer compare)
+{
+    return __sync_val_compare_and_swap(location, compare, value);
+}
+#endif
 
 int memswap(void *p, void *q, size_t size)
 {
@@ -148,3 +371,232 @@ unsigned pearson_hash(const char *data, size_t size)
 
     return result;
 }
+
+uint32_t rotate_left32(uint32_t v, unsigned amount) {
+    return (v << amount) | (v >> (-amount & 0x1f));
+}
+
+uint32_t rotate_right32(uint32_t v, unsigned amount) {
+    return (v >> amount) | (v << (-amount & 0x1f));
+}
+
+uint64_t rotate_left64(uint64_t v, unsigned amount) {
+    return (v << amount) | (v >> (-amount & 0x3f));
+}
+
+uint64_t rotate_right64(uint64_t v, unsigned amount) {
+    return (v >> amount) | (v << (-amount & 0x3f));
+}
+
+/* PUT FUNCTIONS */
+
+/* NOTE: the big- and little-endian raw cast functions ONLY WORK
+ * if unaligned access is allowed on the platform. Use the safe version otherwise */
+
+/* Little-endian? */
+#if (X86_CPU | AMD64_CPU) && CHAR_BIT == 8
+void u32cpy_le(unsigned char *dst, uint32_t v) {
+    union {
+        unsigned char buf[4];
+        uint32_t i;
+    } d;
+
+    d.i = v;
+    memcpy(dst, d.buf, 4);
+}
+#else
+void u32cpy_le(unsigned char *dst, uint32_t v) {
+    dst[0] = v & 0xff;
+    dst[1] = (v >> 8) & 0xff;
+    dst[2] = (v >> 16) & 0xff;
+    dst[3] = v >> 24;
+}
+#endif
+
+/* Big-endian? */
+#if 0
+void u32cpy_be(unsigned char *dst, uint32_t v) {
+    union {
+        unsigned char buf[4];
+        uint32_t i;
+    } d;
+
+    d.i = v;
+    memcpy(dst, d.buf, 4);
+}
+#else
+void u32cpy_be(unsigned char *dst, uint32_t v) {
+    dst[0] = v >> 24;
+    dst[1] = (v >> 16) & 0xff;
+    dst[2] = (v >> 8) & 0xff;
+    dst[3] = v & 0xff;
+}
+#endif
+
+/* Little-endian? */
+#if (X86_CPU | AMD64_CPU) && CHAR_BIT == 8
+void u64cpy_le(unsigned char *dst, uint64_t v) {
+    union {
+        unsigned char buf[8];
+        uint64_t i;
+    } d;
+
+    d.i = v;
+    memcpy(dst, d.buf, 8);
+}
+#else
+void u64cpy_le(unsigned char *dst, uint64_t v) {
+    dst[0] = v & 0xff;
+    dst[1] = (v >> 8) & 0xff;
+    dst[2] = (v >> 16) & 0xff;
+    dst[3] = (v >> 24) & 0xff;
+    dst[4] = (v >> 32) & 0xff;
+    dst[5] = (v >> 40) & 0xff;
+    dst[6] = (v >> 48) & 0xff;
+    dst[7] = v >> 56;
+}
+#endif
+
+/* Big-endian? */
+#if 0
+void u64cpy_be(unsigned char *dst, uint64_t v) {
+    union {
+        unsigned char buf[8];
+        uint64_t i;
+    } d;
+
+    d.i = v;
+    memcpy(dst, d.buf, 8);
+}
+#else
+void u64cpy_be(unsigned char *dst, uint64_t v) {
+    dst[0] = v >> 56;
+    dst[1] = (v >> 48) & 0xff;
+    dst[2] = (v >> 40) & 0xff;
+    dst[3] = (v >> 32) & 0xff;
+    dst[4] = (v >> 24) & 0xff;
+    dst[5] = (v >> 16) & 0xff;
+    dst[6] = (v >> 8) & 0xff;
+    dst[7] = v & 0xff;
+}
+#endif
+
+/* GET FUNCTIONS */
+
+/* Little-endian? */
+#if (X86_CPU | AMD64_CPU) && CHAR_BIT == 8
+void u32get_le(uint32_t *dst, unsigned char *src) {
+    union {
+        unsigned char buf[4];
+        uint32_t i;
+    } d;
+
+    memcpy(d.buf, src, 4);
+    *dst = d.i;
+}
+#else
+void u32get_le(uint32_t *dst, unsigned char *src) {
+    *dst = src[0] | ((uint32_t) src[1] << 8) | ((uint32_t) src[2] << 16) | ((uint32_t) src[3] << 24);
+}
+#endif
+
+/* Big-endian? */
+#if 0
+void u32get_be(uint32_t *dst, unsigned char *src) {
+    union {
+        unsigned char buf[4];
+        uint32_t i;
+    } d;
+
+    memcpy(d.buf, src, 4);
+    *dst = d.i;
+}
+#else
+void u32get_be(uint32_t *dst, unsigned char *src) {
+    *dst = ((uint32_t) src[0] << 24) | ((uint32_t) src[1] << 16) | ((uint32_t) src[2] << 8) | src[3];
+}
+#endif
+
+/* Little-endian? */
+#if (X86_CPU | AMD64_CPU) && CHAR_BIT == 8
+void u64get_le(uint64_t *dst, unsigned char *src) {
+    union {
+        unsigned char buf[8];
+        uint64_t i;
+    } d;
+
+    memcpy(d.buf, src, 8);
+    *dst = d.i;
+}
+#else
+void u64get_le(uint64_t *dst, unsigned char *src) {
+    *dst = src[0] | ((uint32_t) src[1] << 8) | ((uint32_t) src[2] << 16) | ((uint32_t) src[3] << 24) |
+           ((uint32_t) src[4] << 32) | ((uint32_t) src[5] << 40) | ((uint32_t) src[6] << 48) | ((uint32_t) src[7] << 56);
+}
+#endif
+
+/* Big-endian? */
+#if 0
+void u64get_be(uint64_t *dst, unsigned char *src) {
+    union {
+        unsigned char buf[8];
+        uint64_t i;
+    } d;
+
+    memcpy(d.buf, src, 8);
+    *dst = d.i;
+}
+#else
+void u64get_be(uint64_t *dst, unsigned char *src) {
+    *dst = ((uint32_t) src[0] << 56) | ((uint32_t) src[1] << 48) | ((uint32_t) src[2] << 40) | ((uint32_t) src[3] << 32) |
+            ((uint32_t) src[4] << 24) | ((uint32_t) src[5] << 16) | ((uint32_t) src[6] << 8) | src[7];
+}
+#endif
+
+#if X86_CPU | AMD64_CPU
+int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t *dst) {
+#if MSVC_COMPILER
+    if (function > 0)
+    {
+        __cpuid(reinterpret_cast<int *>(dst), function & 0x80000000);
+
+        if (dst[0] < function)
+        {
+            memset(dst, 0, 16);
+            return -1;
+        }
+    }
+
+    __cpuidex(reinterpret_cast<int *>(dst), function, subfunction);
+
+    return 0;
+#elif CLANG_COMPILER | GCC_COMPILER
+    unsigned int _eax, _ebx, _ecx, _edx;
+
+    if (function > 0)
+    {
+        __cpuid(function & 0x80000000, _eax, _ebx, _ecx, _edx);
+
+        if (_eax < function)
+        {
+            memset(dst, 0, 16);
+            return -1;
+        }
+    }
+
+    __cpuid_count(function, subfunction, dst[0], dst[1], dst[2], dst[3]);
+
+    return 0;
+#else
+    UNUSED(function)
+    UNUSED(subfunction)
+    UNUSED(dst)
+
+    return -1;
+#endif
+}
+#endif
+
+#ifdef __cplusplus
+}
+#endif
