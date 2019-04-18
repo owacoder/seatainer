@@ -65,7 +65,7 @@ static int cc_ll_has_external_metadata(HLinkedList list)
     return list->size & 1;
 }
 
-static void cc_ll_set_size_of(HLinkedList list, size_t size)
+static void cc_ll_set_size(HLinkedList list, size_t size)
 {
     list->size = (size << 1) | (list->size & 1);
 }
@@ -218,7 +218,7 @@ int cc_ll_insert_after(HLinkedList list, unsigned flags, Iterator after, HConstE
     if (ll_after == list->tail)
         list->tail = ptr;
 
-    cc_ll_set_size_of(list, cc_ll_size_of(list) + 1);
+    cc_ll_set_size(list, cc_ll_size(list) + 1);
 
     return CC_OK;
 
@@ -243,7 +243,7 @@ int cc_ll_erase_after(HLinkedList list, Iterator after, ElementDataCallback dest
         return CC_OK;
 
     *begin = node->next;
-    cc_ll_set_size_of(list, cc_ll_size_of(list) - 1);
+    cc_ll_set_size(list, cc_ll_size(list) - 1);
 
     if (list->tail == node)
         list->tail = (HLinkedListNode) after;
@@ -364,7 +364,7 @@ int cc_ll_iterate(HLinkedList list, ExtendedElementDataCallback callback, void *
     return CC_OK;
 }
 
-size_t cc_ll_size_of(HLinkedList list)
+size_t cc_ll_size(HLinkedList list)
 {
     return list->size >> 1;
 }
@@ -471,7 +471,7 @@ void cc_ll_clear(HLinkedList list, ElementDataCallback destruct)
     }
 
     list->head = NULL;
-    cc_ll_set_size_of(list, 0);
+    cc_ll_set_size(list, 0);
 }
 
 void cc_ll_destroy(HLinkedList list, ElementDataCallback destruct)

@@ -173,7 +173,7 @@ extern "C" {
      * Note that this operation is performed in O(1) time
      *
      */
-    size_t cc_ll_size_of(HLinkedList list);
+    size_t cc_ll_size(HLinkedList list);
 
     /* Returns the metadata (type and callback information) of the linked list
      *

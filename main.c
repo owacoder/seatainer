@@ -256,14 +256,14 @@ void test_ht(size_t cnt)
         cc_ht_insert(table, CC_MULTI_VALUE | CC_MOVE_VALUE, key, value, NULL);
     }
 
-    printf("Hash size: %u\n", cc_ht_size_of(table));
+    printf("Hash size: %u\n", cc_ht_size(table));
     printf("Hash total collisions: %u\n", cc_ht_total_collisions(table));
     printf("Hash most bucket collisions: %u\n", cc_ht_max_bucket_collisions(table));
-    printf("Hash load factor: %f (capacity %u)\n", cc_ht_load_factor(table), cc_ht_capacity_of(table));
+    printf("Hash load factor: %f (capacity %u)\n", cc_ht_load_factor(table), cc_ht_capacity(table));
     /* cc_ht_adjust_load_factor(table, 0.41); */
     printf("Hash total collisions: %u\n", cc_ht_total_collisions(table));
     printf("Hash most bucket collisions: %u\n", cc_ht_max_bucket_collisions(table));
-    printf("Hash load factor: %f (capacity %u)\n", cc_ht_load_factor(table), cc_ht_capacity_of(table));
+    printf("Hash load factor: %f (capacity %u)\n", cc_ht_load_factor(table), cc_ht_capacity(table));
 
     /*cc_ht_iterate(table, printIntKeyStringValue, NULL);
     cc_el_assign_signed_int(key, 0);
@@ -317,12 +317,16 @@ void test_small_dll()
     cc_dll_destroy(list, NULL);
 }
 
+#include "IO/aes.h"
 #include "IO/crypto_rand.h"
 #include "IO/hex.h"
 #include "IO/md5.h"
 #include "IO/sha1.h"
 
 void test_io() {
+    test_aes();
+    return;
+
 #if WINDOWS_OS
     IO io = io_open("F:/Test_Data/test.txt", "w");
 #elif LINUX_OS
@@ -344,7 +348,8 @@ void test_io() {
         return;
     /* assert(io_puts("Some text", io) == 0); */
     printf(".%012d.\n", 545);
-    printf("printed %d\n", io_printf(io, "\n.%%%p.\n", io));
+    double dvalue = 0.2525252525252525;
+    printf("printed %d\n", io_printf(io, "\n.%%%.19f.\n", dvalue));
     assert(io_seek(io, 0, SEEK_END) == 0);
     assert(io_putc(' ', io) == EOF);
     printf("buffer size = %ld\n", io_tell(io));
@@ -369,6 +374,8 @@ void test_io() {
     printf("Read %d\n", (int) read);
     io_rewind(io2);
     assert(io_read(buffer, 1, 32, io2) != 0);
+
+    printf(".%%%.19f.\n", dvalue);
 
     for (size_t i = 0; i < read; ++i)
         printf("%02x", (uint8_t) buffer[i]);

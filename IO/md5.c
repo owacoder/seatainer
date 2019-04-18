@@ -243,7 +243,7 @@ static int md5_seek(void *userdata, long offset, int origin, IO io) {
     }
 }
 
-static struct InputOutputDeviceCallbacks callbacks = {
+static const struct InputOutputDeviceCallbacks md5_callbacks = {
     .read = md5_read,
     .write = md5_write,
     .open = md5_open,
@@ -256,5 +256,5 @@ static struct InputOutputDeviceCallbacks callbacks = {
 };
 
 IO io_open_md5(IO io, const char *mode) {
-    return io_open_custom(&callbacks, io, mode);
+    return io_open_custom(&md5_callbacks, io, mode);
 }

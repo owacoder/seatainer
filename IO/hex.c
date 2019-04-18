@@ -125,7 +125,7 @@ static long long hex_tell64(void *userdata, IO io) {
     return io_tell64(hex->io);
 }
 
-static struct InputOutputDeviceCallbacks callbacks = {
+static const struct InputOutputDeviceCallbacks hex_callbacks = {
     .read = hex_read,
     .write = hex_write,
     .open = hex_open,
@@ -138,5 +138,5 @@ static struct InputOutputDeviceCallbacks callbacks = {
 };
 
 IO io_open_hex_filter(IO io, const char *mode) {
-    return io_open_custom(&callbacks, io, mode);
+    return io_open_custom(&hex_callbacks, io, mode);
 }

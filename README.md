@@ -95,3 +95,4 @@ Seatainer officially supports C89 and newer.
  - `CC_NO_MEM_ABORT` - Define to make out-of-memory conditions spit out an error and abort the program. If a function returns a pointer, it will return NULL instead of aborting.
  - `CC_BAD_PARAM_ABORT` - Define to make procedures with bad parameters spit out an error and abort the program.
  - `CC_NO_SUCH_METHOD_ABORT` - Define to make procedures with no valid method to call spit out an error and abort the program.
+ - `CC_IO_STATIC_INSTANCES` - Define to a non-negative integer to allow fast allocation of a limited number of IO instances. If this limit is reached, the subsequent devices will be dynamically allocated. If this value is not defined, all allocations will be dynamic.

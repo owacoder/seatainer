@@ -32,23 +32,23 @@ extern inline int cc_s_push_back_cstring(HString string, const char *data);
 extern inline int cc_s_push_back_cstring_n(HString string, const char *data, size_t count);
 #else
 int cc_s_push_back(HString string, char data) {
-    return cc_s_insert(string, cc_s_size_of(string), data);
+    return cc_s_insert(string, cc_s_size(string), data);
 }
 int cc_s_push_back_n(HString string, char data, size_t count) {
-    return cc_s_insert_n(string, cc_s_size_of(string), data, count);
+    return cc_s_insert_n(string, cc_s_size(string), data, count);
 }
 int cc_s_push_back_cstring(HString string, const char *data) {
-    return cc_s_insert_cstring(string, cc_s_size_of(string), data);
+    return cc_s_insert_cstring(string, cc_s_size(string), data);
 }
 int cc_s_push_back_cstring_n(HString string, const char *data, size_t count) {
-    return cc_s_insert_cstring_n(string, cc_s_size_of(string), data, count);
+    return cc_s_insert_cstring_n(string, cc_s_size(string), data, count);
 }
 
 int cc_s_pop_back(HString string) {
-    return cc_s_erase(string, cc_s_size_of(string) - 1);
+    return cc_s_erase(string, cc_s_size(string) - 1);
 }
 int cc_s_pop_back_n(HString string, size_t count) {
-    return cc_s_erase_n(string, cc_s_size_of(string) - count, count);
+    return cc_s_erase_n(string, cc_s_size(string) - count, count);
 }
 #endif
 
@@ -98,7 +98,7 @@ static int cc_s_valid_type(HElementData el)
 
 HString cc_s_grow(HString str, size_t size)
 {
-    size_t capacity = cc_s_capacity_of(str);
+    size_t capacity = cc_s_capacity(str);
     /* Do we really need to grow? */
     if (capacity >= size)
         return str;
@@ -113,7 +113,7 @@ HString cc_s_grow(HString str, size_t size)
 
     /* Then copy from small-string-optimization if necessary */
     if (cc_s_is_tight(str))
-        memcpy(new_data, str->d.tight, cc_s_size_of(str));
+        memcpy(new_data, str->d.tight, cc_s_size(str));
 
     str->d.helper.data = new_data;
     str->d.helper.capacity = new_size;
@@ -137,14 +137,14 @@ HString cc_s_copy(HString str)
     if (!new_str)
         return NULL;
 
-    if (cc_s_grow(new_str, cc_s_size_of(str)) == NULL)
+    if (cc_s_grow(new_str, cc_s_size(str)) == NULL)
     {
         cc_s_destroy(new_str); /* Nothing initialized yet, so don't pass `destruct` */
         return NULL;
     }
-    cc_s_set_size(new_str, cc_s_size_of(str)); /* cc_s_grow() doesn't set the size */
+    cc_s_set_size(new_str, cc_s_size(str)); /* cc_s_grow() doesn't set the size */
 
-    memcpy(cc_s_raw(new_str), cc_s_raw(str), cc_s_size_of(str));
+    memcpy(cc_s_raw(new_str), cc_s_raw(str), cc_s_size(str));
 
     return new_str;
 }
@@ -158,23 +158,23 @@ void cc_s_swap(HString lhs, HString rhs)
 
 int cc_s_insert_n(HString str, size_t before, char data, size_t len)
 {
-    if (before > cc_s_size_of(str))
+    if (before > cc_s_size(str))
         CC_BAD_PARAM_HANDLER("element out-of-bounds");
 
-    if (cc_s_grow(str, cc_s_size_of(str) + len) == NULL)
+    if (cc_s_grow(str, cc_s_size(str) + len) == NULL)
         CC_NO_MEM_HANDLER("out of memory");
 
     if (len == 0)
         return CC_OK;
 
     /* Move string so we can insert at `before` */
-    cc_s_move(str, before, before + len, cc_s_size_of(str) - before);
+    cc_s_move(str, before, before + len, cc_s_size(str) - before);
 
     /* Copy */
     memset(cc_s_raw(str) + before, data, len);
 
     /* Update str size */
-    cc_s_set_size(str, cc_s_size_of(str) + len);
+    cc_s_set_size(str, cc_s_size(str) + len);
 
     return CC_OK;
 }
@@ -185,23 +185,23 @@ int cc_s_insert(HString str, size_t before, char data) {
 
 int cc_s_insert_cstring_n(HString str, size_t before, const char *data, size_t len)
 {
-    if (before > cc_s_size_of(str))
+    if (before > cc_s_size(str))
         CC_BAD_PARAM_HANDLER("element out-of-bounds");
 
-    if (cc_s_grow(str, cc_s_size_of(str) + len) == NULL)
+    if (cc_s_grow(str, cc_s_size(str) + len) == NULL)
         CC_NO_MEM_HANDLER("out of memory");
 
     if (len == 0)
         return CC_OK;
 
     /* Move string so we can insert at `before` */
-    cc_s_move(str, before, before + len, cc_s_size_of(str) - before);
+    cc_s_move(str, before, before + len, cc_s_size(str) - before);
 
     /* Copy */
     memcpy(cc_s_raw(str) + before, data, len);
 
     /* Update str size */
-    cc_s_set_size(str, cc_s_size_of(str) + len);
+    cc_s_set_size(str, cc_s_size(str) + len);
 
     return CC_OK;
 }
@@ -216,17 +216,17 @@ int cc_s_erase(HString string, size_t element) {
 
 int cc_s_erase_n(HString str, size_t element, size_t count)
 {
-    if (element >= cc_s_size_of(str))
+    if (element >= cc_s_size(str))
         CC_BAD_PARAM_HANDLER("element out-of-bounds");
 
-    count = MIN(count, cc_s_size_of(str) - element);
+    count = MIN(count, cc_s_size(str) - element);
 
     if (count)
     {
         /* Move string over the top of the element we got rid of */
-        cc_s_move(str, element + count, element, cc_s_size_of(str) - element - count);
+        cc_s_move(str, element + count, element, cc_s_size(str) - element - count);
         /* Decrease str size */
-        cc_s_set_size(str, cc_s_size_of(str) - count);
+        cc_s_set_size(str, cc_s_size(str) - count);
     }
 
     return CC_OK;
@@ -240,10 +240,10 @@ int cc_s_find(HString str, Iterator start, unsigned flags, HConstElementData dat
 
 void cc_s_reverse(HString str)
 {
-    if (cc_s_size_of(str) == 0)
+    if (cc_s_size(str) == 0)
         return;
 
-    size_t min = 0, max = cc_s_size_of(str) - 1;
+    size_t min = 0, max = cc_s_size(str) - 1;
 
     while (min < max)
     {
@@ -254,12 +254,12 @@ void cc_s_reverse(HString str)
     }
 }
 
-size_t cc_s_size_of(HString str)
+size_t cc_s_size(HString str)
 {
     return str->size >> 1;
 }
 
-size_t cc_s_capacity_of(HString str)
+size_t cc_s_capacity(HString str)
 {
     return cc_s_is_tight(str)? sizeof(struct StringHelper): str->d.helper.capacity;
 }
@@ -271,17 +271,17 @@ char *cc_s_raw(HString str)
 
 Iterator cc_s_begin(HString str)
 {
-    return cc_s_size_of(str) == 0? NULL: cc_s_raw(str);
+    return cc_s_size(str) == 0? NULL: cc_s_raw(str);
 }
 
 Iterator cc_s_rbegin(HString str)
 {
-    return cc_s_size_of(str) == 0? NULL: cc_s_raw(str) + (cc_s_size_of(str) - 1);
+    return cc_s_size(str) == 0? NULL: cc_s_raw(str) + (cc_s_size(str) - 1);
 }
 
 Iterator cc_s_next(HString str, Iterator node)
 {
-    if (node == NULL || node == cc_s_raw(str) + (cc_s_size_of(str) - 1))
+    if (node == NULL || node == cc_s_raw(str) + (cc_s_size(str) - 1))
         return NULL;
 
     return (char *) node + 1;
@@ -324,14 +324,14 @@ int cc_s_compare(HString lhs, HString rhs, StringCompareCallback cmp)
     }
     else
     {
-        comparison = memcmp(cc_s_raw(lhs), cc_s_raw(rhs), MIN(cc_s_size_of(lhs), cc_s_size_of(rhs)));
+        comparison = memcmp(cc_s_raw(lhs), cc_s_raw(rhs), MIN(cc_s_size(lhs), cc_s_size(rhs)));
         if (comparison != 0)
             return comparison;
     }
 
-    if (cc_s_size_of(rhs) > cc_s_size_of(lhs))
+    if (cc_s_size(rhs) > cc_s_size(lhs))
         comparison = -1; /* lhs is shorter */
-    else if (cc_s_size_of(lhs) > cc_s_size_of(rhs))
+    else if (cc_s_size(lhs) > cc_s_size(rhs))
         comparison = 1; /* rhs is shorter */
     else
         comparison = 0;
@@ -358,13 +358,13 @@ void cc_s_destroy(HString str)
 
 char *cc_s_to_cstring(HString str)
 {
-    if (cc_s_size_of(str) == 0)
+    if (cc_s_size(str) == 0)
         return "";
 
-    if (!cc_s_grow(str, cc_s_size_of(str) + 1))
+    if (!cc_s_grow(str, cc_s_size(str) + 1))
         return NULL;
 
-    cc_s_raw(str)[cc_s_size_of(str)] = 0; /* Set last character to NUL */
+    cc_s_raw(str)[cc_s_size(str)] = 0; /* Set last character to NUL */
 
     return cc_s_raw(str);
 }

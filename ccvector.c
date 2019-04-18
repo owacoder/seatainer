@@ -300,12 +300,12 @@ void cc_v_reverse(HVector list)
     }
 }
 
-size_t cc_v_size_of(HVector list)
+size_t cc_v_size(HVector list)
 {
     return list->size;
 }
 
-size_t cc_v_capacity_of(HVector list)
+size_t cc_v_capacity(HVector list)
 {
     return list->capacity;
 }
@@ -442,10 +442,10 @@ const char *cc_v_to_cstring(HVector list)
     if (list->size == 0)
         return "";
 
-    if (!cc_v_grow(list, cc_v_size_of(list) + 1))
+    if (!cc_v_grow(list, cc_v_size(list) + 1))
         return NULL;
 
-    *((char *) cc_v_raw(list) + cc_v_size_of(list)) = 0; /* Set last character to NUL */
+    *((char *) cc_v_raw(list) + cc_v_size(list)) = 0; /* Set last character to NUL */
 
     return cc_v_raw(list);
 }

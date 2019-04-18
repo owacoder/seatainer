@@ -364,7 +364,7 @@ size_t cc_ht_total_collisions(HHashTable table)
     for (idx = 0; idx < table->capacity; ++idx)
         if (table->table[idx])
         {
-            size_t size = cc_ll_size_of(table->table[idx]);
+            size_t size = cc_ll_size(table->table[idx]);
             if (size > 1)
                 collisions += size;
         }
@@ -377,18 +377,18 @@ size_t cc_ht_max_bucket_collisions(HHashTable table)
     size_t max = 0, idx;
 
     for (idx = 0; idx < table->capacity; ++idx)
-        if (table->table[idx] && cc_ll_size_of(table->table[idx]) > max)
-            max = cc_ll_size_of(table->table[idx]);
+        if (table->table[idx] && cc_ll_size(table->table[idx]) > max)
+            max = cc_ll_size(table->table[idx]);
 
     return max;
 }
 
-size_t cc_ht_size_of(HHashTable table)
+size_t cc_ht_size(HHashTable table)
 {
     return table->size;
 }
 
-size_t cc_ht_capacity_of(HHashTable table)
+size_t cc_ht_capacity(HHashTable table)
 {
     return table->capacity;
 }
@@ -524,7 +524,7 @@ ExIterator cc_ht_begin(HHashTable table)
     for (idx = 0; idx < table->capacity; ++idx)
     {
         HLinkedList list = table->table[idx];
-        if (list && cc_ll_size_of(list))
+        if (list && cc_ll_size(list))
         {
             ExIterator result = cc_el_null_ex_iterator();
             Iterator list_begin = cc_ll_begin(list);
@@ -564,7 +564,7 @@ ExIterator cc_ht_next(HHashTable table, ExIterator node)
     for (++idx; idx < table->capacity; ++idx)
     {
         list = table->table[idx];
-        if (list && cc_ll_size_of(list))
+        if (list && cc_ll_size(list))
         {
             list_iter = cc_ll_begin(list);
 
@@ -592,7 +592,7 @@ int cc_ht_find(HHashTable table, HConstElementData key, ElementDualDataCallback 
 
     /* Then find location in bucket */
     HLinkedList bucket = table->table[hash];
-    if (!bucket || !cc_ll_size_of(bucket)) /* Bucket doesn't exist or is empty */
+    if (!bucket || !cc_ll_size(bucket)) /* Bucket doesn't exist or is empty */
         goto null;
 
     Iterator prior;

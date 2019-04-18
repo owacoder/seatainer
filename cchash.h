@@ -86,14 +86,14 @@ extern "C" {
      * Note that this operation is performed in O(1) time
      *
      */
-    size_t cc_ht_size_of(HHashTable table);
+    size_t cc_ht_size(HHashTable table);
 
     /* Returns the capacity of the hash table
      *
      * Note that this operation is performed in O(1) time
      *
      */
-    size_t cc_ht_capacity_of(HHashTable table);
+    size_t cc_ht_capacity(HHashTable table);
 
     /* Allocates a new element inserted to the table
      *

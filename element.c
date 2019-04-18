@@ -320,7 +320,7 @@ static int cc_el_string_copy_constructor(HElementData lhs, HElementData rhs)
     HString *r = cc_el_storage_location(rhs);
 
     if (*l)
-        return cc_s_assign_cstring_n(*l, cc_s_raw(*r), cc_s_size_of(*r));
+        return cc_s_assign_cstring_n(*l, cc_s_raw(*r), cc_s_size(*r));
     else
     {
         *l = cc_s_copy(*r);
@@ -856,7 +856,7 @@ int cc_el_move_contents(HElementData dest, HConstElementData src)
     if (dest->meta)
         size_to_copy = cc_el_metadata_type_size(dest->meta);
     else
-        size_to_copy = cc_el_size_of_type(dest->type);
+        size_to_copy = cc_el_size_type(dest->type);
 
     memcpy(cc_el_storage_location(dest), cc_el_storage_location((HElementData) src), size_to_copy);
 
@@ -1182,7 +1182,7 @@ HContainerElementMetaData cc_el_get_metadata(HConstElementData data)
     return data->meta;
 }
 
-size_t cc_el_size_of_type(ContainerElementType type)
+size_t cc_el_size_type(ContainerElementType type)
 {
     switch (type)
     {
@@ -1237,7 +1237,7 @@ int cc_el_make_metadata_at(void *buf, size_t buffer_size, ContainerElementType t
     result->el_copy_constructor = cc_el_copy_constructor(type);
     result->el_compare = cc_el_compare(type);
     result->el_type = type;
-    result->el_size = cc_el_size_of_type(type);
+    result->el_size = cc_el_size_type(type);
     result->el_userdata = NULL;
 
     return CC_OK;
@@ -1375,8 +1375,8 @@ int cc_el_hash_default(HConstElementData element, unsigned *hash)
         {
             HString string = *((HString *) cc_el_storage_location(data));
 
-            if (cc_s_size_of(string))
-                *hash = pearson_hash(cc_s_raw(string), cc_s_size_of(string));
+            if (cc_s_size(string))
+                *hash = pearson_hash(cc_s_raw(string), cc_s_size(string));
             else
                 *hash = 0;
 
@@ -1403,8 +1403,8 @@ int cc_el_hash_default(HConstElementData element, unsigned *hash)
                 case El_Float:
                 case El_Double:
                 case El_VoidPtr:
-                    if (cc_v_size_of(vector))
-                        *hash = pearson_hash(cc_v_raw(vector), cc_v_size_of(vector) * cc_el_metadata_type_size(cc_v_metadata(vector)));
+                    if (cc_v_size(vector))
+                        *hash = pearson_hash(cc_v_raw(vector), cc_v_size(vector) * cc_el_metadata_type_size(cc_v_metadata(vector)));
                     else
                         *hash = 0;
                     break;

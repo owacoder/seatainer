@@ -177,7 +177,7 @@ extern "C" {
      * Note that this operation is performed in O(1) time
      *
      */
-    size_t cc_dll_size_of(HDoublyLinkedList list);
+    size_t cc_dll_size(HDoublyLinkedList list);
 
     /* Returns the metadata (type and callback information) of the linked list
      *

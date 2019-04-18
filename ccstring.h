@@ -46,14 +46,14 @@ extern "C" {
      * Note that this operation is performed in O(1) time
      *
      */
-    size_t cc_s_size_of(HString string);
+    size_t cc_s_size(HString string);
 
     /* Returns the capacity of the string
      *
      * Note that this operation is performed in O(1) time
      *
      */
-    size_t cc_s_capacity_of(HString string);
+    size_t cc_s_capacity(HString string);
 
     /* Allocates a new element inserted before the specified string index
      *
@@ -101,23 +101,23 @@ extern "C" {
      *
      */
     INLINE int cc_s_push_back(HString string, char data) INLINE_DEFINITION({
-        return cc_s_insert(string, cc_s_size_of(string), data);
+        return cc_s_insert(string, cc_s_size(string), data);
     })
     INLINE int cc_s_push_back_n(HString string, char data, size_t count) INLINE_DEFINITION({
-        return cc_s_insert_n(string, cc_s_size_of(string), data, count);
+        return cc_s_insert_n(string, cc_s_size(string), data, count);
     })
     INLINE int cc_s_push_back_cstring(HString string, const char *data) INLINE_DEFINITION({
-        return cc_s_insert_cstring(string, cc_s_size_of(string), data);
+        return cc_s_insert_cstring(string, cc_s_size(string), data);
     })
     INLINE int cc_s_push_back_cstring_n(HString string, const char *data, size_t count) INLINE_DEFINITION({
-        return cc_s_insert_cstring_n(string, cc_s_size_of(string), data, count);
+        return cc_s_insert_cstring_n(string, cc_s_size(string), data, count);
     })
 
     INLINE int cc_s_pop_back(HString string) INLINE_DEFINITION({
-        return cc_s_erase(string, cc_s_size_of(string) - 1);
+        return cc_s_erase(string, cc_s_size(string) - 1);
     })
     INLINE int cc_s_pop_back_n(HString string, size_t count) INLINE_DEFINITION({
-        return cc_s_erase_n(string, cc_s_size_of(string) - count, count);
+        return cc_s_erase_n(string, cc_s_size(string) - count, count);
     })
 
     /* Returns the raw contiguous data pointer

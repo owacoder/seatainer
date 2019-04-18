@@ -226,8 +226,7 @@ AtomicPointer atomicp_cmpxchg(volatile AtomicPointer *location, AtomicPointer va
 }
 #endif
 
-int memswap(void *p, void *q, size_t size)
-{
+int memswap(void *p, void *q, size_t size) {
     char *pchar = p, *qchar = q;
 
     while (size--)
@@ -240,9 +239,17 @@ int memswap(void *p, void *q, size_t size)
     return 0;
 }
 
+int memxor(void *dst, void *src, size_t size) {
+    char *pdst = dst, *psrc = src;
+
+    while (size--)
+        *pdst++ ^= *psrc++;
+
+    return 0;
+}
+
 /* Adapted from https://en.wikipedia.org/wiki/Modular_exponentiation#Right-to-left_binary_method */
-static uint64_t exp_mod(uint64_t base, uint64_t exp, uint64_t mod)
-{
+static uint64_t exp_mod(uint64_t base, uint64_t exp, uint64_t mod) {
     uint64_t result = 1;
 
     for (base %= mod; exp; exp >>= 1)
@@ -256,8 +263,7 @@ static uint64_t exp_mod(uint64_t base, uint64_t exp, uint64_t mod)
 }
 
 /* Adapted from https://en.wikipedia.org/wiki/Miller%E2%80%93Rabin_primality_test#Deterministic_variants */
-int is_prime(size_t number)
-{
+int is_prime(size_t number) {
     size_t i, j;
     static int divisors[] = {3, 5, 7, 11, 13};
 
@@ -296,8 +302,7 @@ next:;
     return 1;
 }
 
-size_t next_prime(size_t number)
-{
+size_t next_prime(size_t number) {
     number |= 1;
     while (!is_prime(number) && number < 0xffffffffu)
         number += 2;
@@ -305,8 +310,7 @@ size_t next_prime(size_t number)
     return number < 0xffffffffu? number: 0;
 }
 
-static unsigned char *pearson_lookup_table()
-{
+static unsigned char *pearson_lookup_table() {
     /* A table of randomly shuffled values between 0-255 */
     /* Each value appears only once, but in a random position */
     static unsigned char lookup[256] = {
@@ -396,13 +400,7 @@ uint64_t rotate_right64(uint64_t v, unsigned amount) {
 /* Little-endian? */
 #if (X86_CPU | AMD64_CPU) && CHAR_BIT == 8
 void u32cpy_le(unsigned char *dst, uint32_t v) {
-    union {
-        unsigned char buf[4];
-        uint32_t i;
-    } d;
-
-    d.i = v;
-    memcpy(dst, d.buf, 4);
+    memcpy(dst, &v, 4);
 }
 #else
 void u32cpy_le(unsigned char *dst, uint32_t v) {
@@ -416,13 +414,7 @@ void u32cpy_le(unsigned char *dst, uint32_t v) {
 /* Big-endian? */
 #if 0
 void u32cpy_be(unsigned char *dst, uint32_t v) {
-    union {
-        unsigned char buf[4];
-        uint32_t i;
-    } d;
-
-    d.i = v;
-    memcpy(dst, d.buf, 4);
+    memcpy(dst, &v, 4);
 }
 #else
 void u32cpy_be(unsigned char *dst, uint32_t v) {
@@ -436,13 +428,7 @@ void u32cpy_be(unsigned char *dst, uint32_t v) {
 /* Little-endian? */
 #if (X86_CPU | AMD64_CPU) && CHAR_BIT == 8
 void u64cpy_le(unsigned char *dst, uint64_t v) {
-    union {
-        unsigned char buf[8];
-        uint64_t i;
-    } d;
-
-    d.i = v;
-    memcpy(dst, d.buf, 8);
+    memcpy(dst, &v, 8);
 }
 #else
 void u64cpy_le(unsigned char *dst, uint64_t v) {
@@ -460,13 +446,7 @@ void u64cpy_le(unsigned char *dst, uint64_t v) {
 /* Big-endian? */
 #if 0
 void u64cpy_be(unsigned char *dst, uint64_t v) {
-    union {
-        unsigned char buf[8];
-        uint64_t i;
-    } d;
-
-    d.i = v;
-    memcpy(dst, d.buf, 8);
+    memcpy(dst, &v, 8);
 }
 #else
 void u64cpy_be(unsigned char *dst, uint64_t v) {
@@ -485,80 +465,60 @@ void u64cpy_be(unsigned char *dst, uint64_t v) {
 
 /* Little-endian? */
 #if (X86_CPU | AMD64_CPU) && CHAR_BIT == 8
-void u32get_le(uint32_t *dst, unsigned char *src) {
-    union {
-        unsigned char buf[4];
-        uint32_t i;
-    } d;
-
-    memcpy(d.buf, src, 4);
-    *dst = d.i;
+uint32_t u32get_le(uint32_t *dst, unsigned char *src) {
+    memcpy(dst, src, 4);
+    return *dst;
 }
 #else
-void u32get_le(uint32_t *dst, unsigned char *src) {
-    *dst = src[0] | ((uint32_t) src[1] << 8) | ((uint32_t) src[2] << 16) | ((uint32_t) src[3] << 24);
+uint32_t u32get_le(uint32_t *dst, unsigned char *src) {
+    return *dst = src[0] | ((uint32_t) src[1] << 8) | ((uint32_t) src[2] << 16) | ((uint32_t) src[3] << 24);
 }
 #endif
 
 /* Big-endian? */
 #if 0
-void u32get_be(uint32_t *dst, unsigned char *src) {
-    union {
-        unsigned char buf[4];
-        uint32_t i;
-    } d;
-
-    memcpy(d.buf, src, 4);
-    *dst = d.i;
+uint32_t u32get_be(uint32_t *dst, unsigned char *src) {
+    memcpy(dst, src, 4);
+    return *dst;
 }
 #else
-void u32get_be(uint32_t *dst, unsigned char *src) {
-    *dst = ((uint32_t) src[0] << 24) | ((uint32_t) src[1] << 16) | ((uint32_t) src[2] << 8) | src[3];
+uint32_t u32get_be(uint32_t *dst, unsigned char *src) {
+    return *dst = ((uint32_t) src[0] << 24) | ((uint32_t) src[1] << 16) | ((uint32_t) src[2] << 8) | src[3];
 }
 #endif
 
 /* Little-endian? */
 #if (X86_CPU | AMD64_CPU) && CHAR_BIT == 8
-void u64get_le(uint64_t *dst, unsigned char *src) {
-    union {
-        unsigned char buf[8];
-        uint64_t i;
-    } d;
-
-    memcpy(d.buf, src, 8);
-    *dst = d.i;
+uint64_t u64get_le(uint64_t *dst, unsigned char *src) {
+    memcpy(dst, src, 8);
+    return *dst;
 }
 #else
-void u64get_le(uint64_t *dst, unsigned char *src) {
-    *dst = src[0] | ((uint32_t) src[1] << 8) | ((uint32_t) src[2] << 16) | ((uint32_t) src[3] << 24) |
-           ((uint32_t) src[4] << 32) | ((uint32_t) src[5] << 40) | ((uint32_t) src[6] << 48) | ((uint32_t) src[7] << 56);
+uint64_t u64get_le(uint64_t *dst, unsigned char *src) {
+    return *dst = src[0] | ((uint64_t) src[1] << 8) | ((uint64_t) src[2] << 16) | ((uint64_t) src[3] << 24) |
+           ((uint64_t) src[4] << 32) | ((uint64_t) src[5] << 40) | ((uint64_t) src[6] << 48) | ((uint64_t) src[7] << 56);
 }
 #endif
 
 /* Big-endian? */
 #if 0
-void u64get_be(uint64_t *dst, unsigned char *src) {
-    union {
-        unsigned char buf[8];
-        uint64_t i;
-    } d;
-
-    memcpy(d.buf, src, 8);
-    *dst = d.i;
+uint64_t u64get_be(uint64_t *dst, unsigned char *src) {
+    memcpy(dst, src, 8);
+    return *dst;
 }
 #else
-void u64get_be(uint64_t *dst, unsigned char *src) {
-    *dst = ((uint32_t) src[0] << 56) | ((uint32_t) src[1] << 48) | ((uint32_t) src[2] << 40) | ((uint32_t) src[3] << 32) |
-            ((uint32_t) src[4] << 24) | ((uint32_t) src[5] << 16) | ((uint32_t) src[6] << 8) | src[7];
+uint64_t u64get_be(uint64_t *dst, unsigned char *src) {
+    return *dst = ((uint64_t) src[0] << 56) | ((uint64_t) src[1] << 48) | ((uint64_t) src[2] << 40) | ((uint64_t) src[3] << 32) |
+            ((uint64_t) src[4] << 24) | ((uint64_t) src[5] << 16) | ((uint64_t) src[6] << 8) | src[7];
 }
 #endif
 
 #if X86_CPU | AMD64_CPU
-int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t *dst) {
+int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t dst[4]) {
 #if MSVC_COMPILER
     if (function > 0)
     {
-        __cpuid(reinterpret_cast<int *>(dst), function & 0x80000000);
+        __cpuid((int *) (dst), function & 0x80000000);
 
         if (dst[0] < function)
         {
@@ -567,7 +527,7 @@ int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t *dst) {
         }
     }
 
-    __cpuidex(reinterpret_cast<int *>(dst), function, subfunction);
+    __cpuidex((int *) (dst), function, subfunction);
 
     return 0;
 #elif CLANG_COMPILER | GCC_COMPILER

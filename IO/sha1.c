@@ -430,7 +430,7 @@ static int sha1_seek(void *userdata, long offset, int origin, IO io) {
     }
 }
 
-static struct InputOutputDeviceCallbacks callbacks = {
+static const struct InputOutputDeviceCallbacks sha1_callbacks = {
     .read = sha1_read,
     .write = sha1_write,
     .open = sha1_open,
@@ -443,5 +443,5 @@ static struct InputOutputDeviceCallbacks callbacks = {
 };
 
 IO io_open_sha1(IO io, const char *mode) {
-    return io_open_custom(&callbacks, io, mode);
+    return io_open_custom(&sha1_callbacks, io, mode);
 }

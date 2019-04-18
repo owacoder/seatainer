@@ -63,7 +63,7 @@ IO io_open_file(FILE *file);
 IO io_open_empty(void);
 IO io_open_cstring(const char *str);
 IO io_open_buffer(char *buf, size_t size, const char *mode);
-IO io_open_custom(struct InputOutputDeviceCallbacks *custom, void *userdata, const char *mode);
+IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdata, const char *mode);
 int io_vprintf(IO io, const char *fmt, va_list args);
 int io_printf(IO io, const char *fmt, ...);
 int io_putc(int ch, IO io);

@@ -10,6 +10,8 @@
 #include <stdint.h>
 #include <limits.h>
 #include <ctype.h>
+#include <math.h> /* For printf and scanf */
+#include <float.h>
 
 struct InputOutputDevice {
     /*
@@ -39,7 +41,7 @@ struct InputOutputDevice {
      *
      */
     void *ptr;
-    struct InputOutputDeviceCallbacks *callbacks;
+    const struct InputOutputDeviceCallbacks *callbacks;
     size_t size, pos;
     IOType type;
     unsigned flags;
@@ -48,20 +50,62 @@ struct InputOutputDevice {
     unsigned char ungetBuf[4];
 };
 
+#ifdef CC_IO_STATIC_INSTANCES
+#if CC_IO_STATIC_INSTANCES > 0
+#define CC_IO_HAS_STATIC_INSTANCES
+#endif
+#endif
+
 #define IO_FLAG_READABLE ((unsigned) 0x01)
 #define IO_FLAG_WRITABLE ((unsigned) 0x02)
 #define IO_FLAG_UPDATE ((unsigned) 0x04)
 #define IO_FLAG_APPEND ((unsigned) 0x08)
 #define IO_FLAG_ERROR ((unsigned) 0x10)
 #define IO_FLAG_EOF ((unsigned) 0x20)
+#define IO_FLAG_IN_USE ((unsigned) 0x40)
+#define IO_FLAG_DYNAMIC ((unsigned) 0x80)
+#define IO_FLAG_RESET (IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_UPDATE | IO_FLAG_APPEND | IO_FLAG_ERROR | IO_FLAG_EOF)
 
-static IO io_alloc(IOType type) {
-    IO io = malloc(sizeof(struct InputOutputDevice));
+#ifdef CC_IO_HAS_STATIC_INSTANCES
+static struct InputOutputDevice io_devices[CC_IO_STATIC_INSTANCES];
+
+static IO io_static_alloc(IOType type) {
+    IO io = NULL;
+
+    for (int i = 0; i < CC_IO_STATIC_INSTANCES; ++i) {
+        if ((io_devices[i].flags & IO_FLAG_IN_USE) == 0) {
+            io = &io_devices[i];
+            break;
+        }
+    }
+
     if (io == NULL)
         return NULL;
 
     io->type = type;
-    io->flags = 0;
+    io->flags = IO_FLAG_IN_USE;
+    io->callbacks = NULL;
+    io->ungetAvail = 0;
+
+    return io;
+}
+#endif
+
+static IO io_alloc(IOType type) {
+    IO io;
+
+#ifdef CC_IO_HAS_STATIC_INSTANCES
+    io = io_static_alloc(type);
+    if (io != NULL)
+        return io;
+#endif
+
+    io = malloc(sizeof(struct InputOutputDevice));
+    if (io == NULL)
+        return NULL;
+
+    io->type = type;
+    io->flags = IO_FLAG_IN_USE | IO_FLAG_DYNAMIC;
     io->callbacks = NULL;
     io->ungetAvail = 0;
 
@@ -93,7 +137,7 @@ static int io_close_without_destroying(IO io) {
         case IO_OwnFile: result = fclose(io->ptr); break;
         case IO_Custom:
             if (io->callbacks->close == NULL)
-                return EOF;
+                return 0;
             return io->callbacks->close(io->ptr, io);
         default: break;
     }
@@ -112,7 +156,10 @@ void io_clearerr(IO io) {
 int io_close(IO io) {
     int result = io_close_without_destroying(io);
 
-    free(io);
+    if (io->flags & IO_FLAG_DYNAMIC)
+        free(io);
+    else
+        io->flags = 0;
 
     return result;
 }
@@ -160,7 +207,6 @@ int io_flush(IO io) {
     }
 }
 
-/* TODO: Custom callbacks for everything below this point */
 int io_getc(IO io) {
     if (!(io->flags & IO_FLAG_READABLE))
     {
@@ -291,7 +337,7 @@ IO io_open(const char *filename, const char *mode) {
         return NULL;
     }
 
-    io->flags = io_flags_for_mode(mode);
+    io->flags |= io_flags_for_mode(mode);
 
     return io;
 }
@@ -307,7 +353,7 @@ IO io_open_file(FILE *file) {
     io->ptr = file;
 
     /* We really can't determine what mode the file was opened with, so assume read/write */
-    io->flags = IO_FLAG_READABLE | IO_FLAG_WRITABLE;
+    io->flags |= IO_FLAG_READABLE | IO_FLAG_WRITABLE;
 
     return io;
 }
@@ -340,7 +386,7 @@ IO io_open_buffer(char *buf, size_t size, const char *mode) {
     io->size = size;
     io->pos = 0;
 
-    io->flags = io_flags_for_mode(mode);
+    io->flags |= io_flags_for_mode(mode);
 
     if (0 == (io->flags & (IO_FLAG_READABLE | IO_FLAG_WRITABLE))) {
         free(io);
@@ -353,7 +399,7 @@ IO io_open_buffer(char *buf, size_t size, const char *mode) {
     return io;
 }
 
-IO io_open_custom(struct InputOutputDeviceCallbacks *custom, void *userdata, const char *mode) {
+IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdata, const char *mode) {
     if (custom == NULL)
         return NULL;
 
@@ -364,7 +410,7 @@ IO io_open_custom(struct InputOutputDeviceCallbacks *custom, void *userdata, con
     io->ptr = userdata;
     io->callbacks = custom;
 
-    io->flags = io_flags_for_mode(mode);
+    io->flags |= io_flags_for_mode(mode);
 
     if (0 == (io->flags & (IO_FLAG_READABLE | IO_FLAG_WRITABLE)) ||
             (custom->open != NULL && (io->ptr = custom->open(userdata, io)) == NULL)) {
@@ -410,6 +456,9 @@ static unsigned io_stou(const char *str, const char **update) {
 #define PRINTF_STATE_NEGATIVE 8
 #define PRINTF_STATE_FLOATING_POINT 0x10
 #define PRINTF_STATE_NUMERIC (PRINTF_STATE_INTEGRAL | PRINTF_STATE_FLOATING_POINT)
+#define PRINTF_STATE_FREE_BUFFER 0x20
+
+#define PRINTF_STATE_ERROR 0x80
 
 struct io_printf_state {
     unsigned char *buffer;
@@ -465,6 +514,130 @@ struct io_printf_state {
         (state)->buffer = ptr;                                      \
         (state)->bufferLength = eptr-ptr;                           \
     } while (0)
+
+#define LOG10(len) (((len) == PRINTF_LEN_BIG_L)? log10l: log10)
+#define CEIL(len) (((len) == PRINTF_LEN_BIG_L)? ceill: ceil)
+#define FLOOR(len) (((len) == PRINTF_LEN_BIG_L)? floorl: floor)
+#define PRINTF_ABS(len, value) (((len) == PRINTF_LEN_BIG_L)? fabsl(value): fabs(value))
+
+#define PRINTF_F(type, fmt, value, fmt_flags, prec, len, state)     \
+    do {                                                            \
+        type mval = (value);                                        \
+                                                                    \
+        if (signbit(mval)) {                                        \
+            (state)->flags |= PRINTF_STATE_NEGATIVE;                \
+            mval = PRINTF_ABS(len, mval);                           \
+        }                                                           \
+                                                                    \
+        if (isinf(mval)) {                                          \
+            (state)->buffer = (unsigned char *) (((fmt) == 'F')? "INFINITY": "infinity"); \
+            (state)->bufferLength = 8;                              \
+        } else if (isnan(mval)) {                                   \
+            (state)->buffer = (unsigned char *) (((fmt) == 'F')? "NAN": "nan"); \
+            (state)->bufferLength = 3;                              \
+        } else {                                                    \
+            if ((len) == PRINTF_LEN_BIG_L)                          \
+                io_printf_f_long(mval, fmt_flags, prec, len, state); \
+            else                                                    \
+                io_printf_f(mval, fmt_flags, prec, len, state);     \
+        }                                                           \
+    } while (0)
+
+static void io_printf_f_long(long double value, unsigned flags, unsigned prec, unsigned len, struct io_printf_state *state) {
+    size_t mantissa_digits = (value <= 1.0)? 1: floorl(log10l(value)) + 1;
+    size_t precision = (flags) & PRINTF_FLAG_HAS_PRECISION? prec: 6;
+    size_t decimal_point_len = (precision || (flags & PRINTF_FLAG_HASH))? 1: 0;
+    size_t complete_len = mantissa_digits + decimal_point_len + precision;
+    size_t allowed = LDBL_DIG + 2;
+    char *mbuf, *mptr;
+    double oldval = value;
+
+    if (complete_len > sizeof(state->internalBuffer)) {
+        mbuf = state->buffer = malloc(complete_len);
+        if (mbuf == NULL) {
+            state->flags |= PRINTF_STATE_ERROR;
+            return;
+        }
+        state->flags |= PRINTF_STATE_FREE_BUFFER;
+    } else
+        mbuf = state->buffer;
+
+    mptr = mbuf + mantissa_digits;
+    do {
+        *--mptr = '0' + (int) floorl(fmodl(value, 10.0));
+        value /= 10.0;
+    } while (value >= 1.0);
+
+    if (mantissa_digits > allowed) {
+        memset(mbuf + allowed, '0', mantissa_digits - allowed);
+        allowed = 0;
+    }
+
+    mptr = mbuf + mantissa_digits;
+    if (decimal_point_len)
+        *mptr++ = '.';
+
+    value = (oldval - floorl(oldval)) + 0.5 / powl(10.0, precision);
+
+    while (precision--) {
+        value *= 10.0;
+        if (allowed) {
+            *mptr++ = '0' + (int) floorl(fmodl(value, 10.0));
+            --allowed;
+        } else
+            *mptr++ = '0';
+    }
+
+    state->bufferLength = complete_len;
+}
+
+static void io_printf_f(double value, unsigned flags, unsigned prec, unsigned len, struct io_printf_state *state) {
+    size_t mantissa_digits = (value <= 1.0)? 1: floor(log10(value)) + 1;
+    size_t precision = (flags) & PRINTF_FLAG_HAS_PRECISION? prec: 6;
+    size_t decimal_point_len = (precision || (flags & PRINTF_FLAG_HASH))? 1: 0;
+    size_t complete_len = mantissa_digits + decimal_point_len + precision;
+    size_t allowed = DBL_DIG + 2;
+    char *mbuf, *mptr;
+    double oldval = value;
+
+    if (complete_len > sizeof(state->internalBuffer)) {
+        mbuf = state->buffer = malloc(complete_len);
+        if (mbuf == NULL) {
+            state->flags |= PRINTF_STATE_ERROR;
+            return;
+        }
+        state->flags |= PRINTF_STATE_FREE_BUFFER;
+    } else
+        mbuf = state->buffer;
+
+    mptr = mbuf + mantissa_digits;
+    do {
+        *--mptr = '0' + (int) floor(fmod(value, 10.0));
+        value /= 10.0;
+    } while (value >= 1.0);
+
+    if (mantissa_digits > allowed) {
+        memset(mbuf + allowed, '0', mantissa_digits - allowed);
+        allowed = 0;
+    }
+
+    mptr = mbuf + mantissa_digits;
+    if (decimal_point_len)
+        *mptr++ = '.';
+
+    value = (oldval - floor(oldval)) + 0.5 / pow(10.0, precision);
+
+    while (precision--) {
+        value *= 10.0;
+        if (allowed) {
+            *mptr++ = '0' + (int) floor(fmod(value, 10.0));
+            --allowed;
+        } else
+            *mptr++ = '0';
+    }
+
+    state->bufferLength = complete_len;
+}
 
 static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, unsigned prec, unsigned len, va_list args) {
     switch (len) {
@@ -560,8 +733,11 @@ static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsig
     return state->bufferLength;
 }
 
+#define CLEANUP(x) do {result = (x); goto cleanup;} while (0)
+
 /* TODO: handle floating point args for C-style strings and sized buffers */
 int io_vprintf(IO io, const char *fmt, va_list args) {
+    int result = 0;
     int written = 0;
     unsigned fmt_flags = 0, fmt_width = 0, fmt_prec = 0, fmt_len = 0;
 
@@ -748,6 +924,22 @@ done_with_flags:
                                 state.flags |= PRINTF_STATE_ADD_0X;
 
                             break;
+                        case 'f':
+                        case 'F':
+                            state.flags |= PRINTF_STATE_FLOATING_POINT;
+
+                            if (fmt_len == PRINTF_LEN_BIG_L) {
+                                long double value = va_arg(args, long double);
+                                PRINTF_F(long double, *fmt, value, fmt_flags, fmt_prec, fmt_len, &state);
+                            } else {
+                                double value = va_arg(args, double);
+                                PRINTF_F(double, *fmt, value, fmt_flags, fmt_prec, fmt_len, &state);
+                            }
+
+                            if (state.flags & PRINTF_STATE_ERROR)
+                                CLEANUP(-1);
+
+                            break;
                         case 'p':
                             state.flags |= PRINTF_STATE_INTEGRAL | PRINTF_STATE_ADD_0X;
 
@@ -808,31 +1000,34 @@ done_with_flags:
                     if (!(fmt_flags & PRINTF_FLAG_MINUS)) /* right-align field */ {
                         for (; fillCount; --fillCount)
                             if (io_putc(' ', io) == EOF)
-                                return -1;
+                                CLEANUP(-1);
                     }
 
                     /* add addon characters */
                     if (state.flags & PRINTF_STATE_ADD_0X) {
                         if (io_putc('0', io) == EOF || io_putc(*fmt == 'X'? 'X': 'x', io) == EOF)
-                            return -1;
+                            CLEANUP(-1);
                     } else if (addonChar) {
                         if (io_putc(addonChar, io) == EOF)
-                            return -1;
+                            CLEANUP(-1);
                     }
 
                     /* output precision fill */
                     for (; precCount; --precCount)
                         if (io_putc('0', io) == EOF)
-                            return -1;
+                            CLEANUP(-1);
 
                     /* output field itself */
                     if (io_write(state.buffer, 1, state.bufferLength, io) != state.bufferLength)
-                        return -1;
+                        CLEANUP(-1);
 
                     /* if left aligned, output field fill (this is a NOP if field was right aligned, since fillCount is now 0) */
                     for (; fillCount; --fillCount)
                         if (io_putc(' ', io) == EOF)
-                            return -1;
+                            CLEANUP(-1);
+
+                    if (state.flags & PRINTF_STATE_FREE_BUFFER)
+                        free(state.buffer);
                 } else if (io_putc(*fmt, io) == EOF)
                     return -1;
                 else
@@ -843,6 +1038,12 @@ done_with_flags:
     }
 
     return written;
+
+cleanup:
+    if (state.flags & PRINTF_STATE_FREE_BUFFER)
+        free(state.buffer);
+
+    return result;
 }
 
 int io_printf(IO io, const char *fmt, ...) {
@@ -1044,7 +1245,7 @@ IO io_reopen(const char *filename, const char *mode, IO io) {
 
             io->ptr = f;
             io->type = IO_OwnFile;
-            io->flags = 0;
+            io->flags &= IO_FLAG_RESET;
 
             return io;
         }

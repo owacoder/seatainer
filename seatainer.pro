@@ -9,6 +9,7 @@ DEFINES += CC_TYPE_MISMATCH_ABORT \
            CC_NO_MEM_ABORT \
            CC_BAD_PARAM_ABORT \
            CC_NO_SUCH_METHOD_ABORT \
+           CC_IO_STATIC_INSTANCES=20
 
 SOURCES += main.c \
     ccdbllst.c \
@@ -22,7 +23,8 @@ SOURCES += main.c \
     IO/crypto_rand.c \
     IO/hex.c \
     IO/md5.c \
-    IO/sha1.c
+    IO/sha1.c \
+    IO/aes.c
 
 HEADERS += \
     ccdbllst.h \
@@ -37,7 +39,8 @@ HEADERS += \
     IO/crypto_rand.h \
     IO/hex.h \
     IO/md5.h \
-    IO/sha1.h
+    IO/sha1.h \
+    IO/aes.h
 
 DISTFILES += \
     README.md

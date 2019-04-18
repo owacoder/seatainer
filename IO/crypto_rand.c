@@ -57,7 +57,7 @@ static size_t crypto_rand_read(void *ptr, size_t size, size_t count, void *userd
     return cryptoRand->RtlGenRandom(ptr, size*count)? size*count: SIZE_MAX;
 }
 
-static struct InputOutputDeviceCallbacks callbacks = {
+static const struct InputOutputDeviceCallbacks crypto_rand_callbacks = {
     .read = crypto_rand_read,
     .write = NULL,
     .open = crypto_rand_open,
@@ -70,7 +70,7 @@ static struct InputOutputDeviceCallbacks callbacks = {
 };
 
 IO io_open_crypto_rand() {
-    return io_open_custom(&callbacks, NULL, "r");
+    return io_open_custom(&crypto_rand_callbacks, NULL, "r");
 }
 #elif LINUX_OS
 IO io_open_crypto_rand() {

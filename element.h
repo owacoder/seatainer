@@ -463,7 +463,7 @@ extern "C" {
 
     /* Returns the size of the data type specified
      */
-    size_t cc_el_size_of_type(ContainerElementType type);
+    size_t cc_el_size_type(ContainerElementType type);
 
     /* Returns the size of a metadata block */
     size_t cc_el_metadata_sizeof();

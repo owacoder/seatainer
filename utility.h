@@ -46,6 +46,12 @@ AtomicPointer atomicp_cmpxchg(volatile AtomicPointer *location, AtomicPointer va
  */
 int memswap(void *p, void *q, size_t size);
 
+/* XORs memory block in dst with src
+ *
+ * p and q must not overlap
+ */
+int memxor(void *dst, void *src, size_t size);
+
 /* Performs a Pearson hash on the specified data, with a pseudo-random shuffle of hash bytes */
 unsigned pearson_hash(const char *data, size_t size);
 
@@ -65,15 +71,15 @@ void u32cpy_be(unsigned char *dst, uint32_t v);
 void u64cpy_le(unsigned char *dst, uint64_t v);
 void u64cpy_be(unsigned char *dst, uint64_t v);
 
-void u32get_le(uint32_t *dst, unsigned char *src);
-void u32get_be(uint32_t *dst, unsigned char *src);
-void u64get_le(uint64_t *dst, unsigned char *src);
-void u64get_be(uint64_t *dst, unsigned char *src);
+uint32_t u32get_le(uint32_t *dst, unsigned char *src);
+uint32_t u32get_be(uint32_t *dst, unsigned char *src);
+uint64_t u64get_le(uint64_t *dst, unsigned char *src);
+uint64_t u64get_be(uint64_t *dst, unsigned char *src);
 
 #if X86_CPU | AMD64_CPU
 /* Requires that `dst` be able to store at least 4 32-bit integers */
 /* Returns 0 on success, non-zero on failure */
-int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t *dst);
+int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t dst[4]);
 #endif
 
 #define TESTBIT(x, bit) ((x) & (1ull << bit))

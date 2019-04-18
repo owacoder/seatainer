@@ -49,14 +49,14 @@ extern "C" {
      * Note that this operation is performed in O(1) time
      *
      */
-    size_t cc_v_size_of(HVector list);
+    size_t cc_v_size(HVector list);
 
     /* Returns the capacity of the vector
      *
      * Note that this operation is performed in O(1) time
      *
      */
-    size_t cc_v_capacity_of(HVector list);
+    size_t cc_v_capacity(HVector list);
 
     /* Allocates a new element inserted before the specified vector index
      *
@@ -108,11 +108,11 @@ extern "C" {
      *
      */
     INLINE int cc_v_push_back(HVector list, unsigned flags, HConstElementData data, ElementDataCallback construct) INLINE_DEFINITION({
-        return cc_v_insert(list, flags, cc_v_size_of(list), data, construct);
+        return cc_v_insert(list, flags, cc_v_size(list), data, construct);
     })
 
     INLINE int cc_v_pop_back(HVector list, ElementDataCallback destruct) INLINE_DEFINITION({
-        return cc_v_erase(list, cc_v_size_of(list) - 1, destruct);
+        return cc_v_erase(list, cc_v_size(list) - 1, destruct);
     })
 
     /* Returns the raw contiguous data pointer

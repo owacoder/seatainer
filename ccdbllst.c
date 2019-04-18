@@ -423,7 +423,7 @@ void cc_dll_reverse(HDoublyLinkedList list)
     list->tail = prev;
 }
 
-size_t cc_dll_size_of(HDoublyLinkedList list)
+size_t cc_dll_size(HDoublyLinkedList list)
 {
     return list->size;
 }
