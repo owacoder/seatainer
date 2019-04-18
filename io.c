@@ -544,12 +544,14 @@ struct io_printf_state {
     } while (0)
 
 static void io_printf_f_long(long double value, unsigned flags, unsigned prec, unsigned len, struct io_printf_state *state) {
+    UNUSED(len)
+
     size_t mantissa_digits = (value <= 1.0)? 1: floorl(log10l(value)) + 1;
     size_t precision = (flags) & PRINTF_FLAG_HAS_PRECISION? prec: 6;
     size_t decimal_point_len = (precision || (flags & PRINTF_FLAG_HASH))? 1: 0;
     size_t complete_len = mantissa_digits + decimal_point_len + precision;
     size_t allowed = LDBL_DIG + 2;
-    char *mbuf, *mptr;
+    unsigned char *mbuf, *mptr;
     double oldval = value;
 
     if (complete_len > sizeof(state->internalBuffer)) {
@@ -592,12 +594,14 @@ static void io_printf_f_long(long double value, unsigned flags, unsigned prec, u
 }
 
 static void io_printf_f(double value, unsigned flags, unsigned prec, unsigned len, struct io_printf_state *state) {
+    UNUSED(len)
+
     size_t mantissa_digits = (value <= 1.0)? 1: floor(log10(value)) + 1;
     size_t precision = (flags) & PRINTF_FLAG_HAS_PRECISION? prec: 6;
     size_t decimal_point_len = (precision || (flags & PRINTF_FLAG_HASH))? 1: 0;
     size_t complete_len = mantissa_digits + decimal_point_len + precision;
     size_t allowed = DBL_DIG + 2;
-    char *mbuf, *mptr;
+    unsigned char *mbuf, *mptr;
     double oldval = value;
 
     if (complete_len > sizeof(state->internalBuffer)) {
@@ -640,6 +644,9 @@ static void io_printf_f(double value, unsigned flags, unsigned prec, unsigned le
 }
 
 static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, unsigned prec, unsigned len, va_list args) {
+    UNUSED(flags)
+    UNUSED(prec)
+
     switch (len) {
         default: return -1;
         case PRINTF_LEN_NONE:
@@ -687,6 +694,9 @@ static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, u
 }
 
 static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsigned flags, unsigned prec, unsigned len, va_list args) {
+    UNUSED(flags)
+    UNUSED(prec)
+
     switch (len) {
         default: return -1;
         case PRINTF_LEN_NONE:
