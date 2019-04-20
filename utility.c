@@ -242,7 +242,7 @@ int memswap(void *p, void *q, size_t size) {
 int memxor(void *dst, void *src, size_t size) {
     char *pdst = dst, *psrc = src;
 
-    while (size--)
+    for (; size; --size)
         *pdst++ ^= *psrc++;
 
     return 0;

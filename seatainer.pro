@@ -3,7 +3,7 @@ CONFIG += console
 CONFIG -= app_bundle
 CONFIG -= qt
 
-QMAKE_CFLAGS += -mssse3 -msha
+QMAKE_CFLAGS += -msse4.1 -msha -maes
 
 DEFINES += CC_TYPE_MISMATCH_ABORT \
            CC_NO_MEM_ABORT \

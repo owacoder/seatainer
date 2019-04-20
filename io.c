@@ -43,18 +43,12 @@ struct InputOutputDevice {
     void *ptr;
     const struct InputOutputDeviceCallbacks *callbacks;
     size_t size, pos;
-    IOType type;
+    enum IO_Type type;
     unsigned flags;
 
     unsigned ungetAvail;
     unsigned char ungetBuf[4];
 };
-
-#ifdef CC_IO_STATIC_INSTANCES
-#if CC_IO_STATIC_INSTANCES > 0
-#define CC_IO_HAS_STATIC_INSTANCES
-#endif
-#endif
 
 #define IO_FLAG_READABLE ((unsigned) 0x01)
 #define IO_FLAG_WRITABLE ((unsigned) 0x02)
@@ -66,10 +60,20 @@ struct InputOutputDevice {
 #define IO_FLAG_DYNAMIC ((unsigned) 0x80)
 #define IO_FLAG_RESET (IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_UPDATE | IO_FLAG_APPEND | IO_FLAG_ERROR | IO_FLAG_EOF)
 
+/* **WARNING** - Only define CC_IO_STATIC_INSTANCES if you don't need thread safety */
+#ifdef CC_IO_STATIC_INSTANCES
+#if CC_IO_STATIC_INSTANCES > 0
+#define CC_IO_HAS_STATIC_INSTANCES
+#endif
+#endif
+
 #ifdef CC_IO_HAS_STATIC_INSTANCES
 static struct InputOutputDevice io_devices[CC_IO_STATIC_INSTANCES];
 
-static IO io_static_alloc(IOType type) {
+static enum IO_OpenHint io_device_open_hint;
+static enum IO_OpenHint io_device_open_permanent_hint;
+
+static IO io_static_alloc(enum IO_Type type) {
     IO io = NULL;
 
     for (int i = 0; i < CC_IO_STATIC_INSTANCES; ++i) {
@@ -87,17 +91,48 @@ static IO io_static_alloc(IOType type) {
     io->callbacks = NULL;
     io->ungetAvail = 0;
 
+    io_hint_next_open(io_device_open_permanent_hint, 0);
+
     return io;
+}
+
+void io_hint_next_open(enum IO_OpenHint hint, int permanentHint) {
+    io_device_open_hint = hint;
+    if (permanentHint)
+        io_device_open_permanent_hint = hint;
+}
+
+static enum IO_OpenHint io_permanent_open_hint() {
+    return io_device_open_permanent_hint;
+}
+
+static enum IO_OpenHint io_open_hint_for_next_open() {
+    return io_device_open_hint;
+}
+#else
+void io_hint_next_open(enum IO_OpenHint hint, int permanentHint) {
+    UNUSED(hint)
+    UNUSED(permanentHint)
+}
+
+static enum IO_OpenHint io_permanent_open_hint() {
+    return IO_HintDynamic;
+}
+
+static enum IO_OpenHint io_open_hint_for_next_open() {
+    return IO_HintDynamic;
 }
 #endif
 
-static IO io_alloc(IOType type) {
+static IO io_alloc(enum IO_Type type) {
     IO io;
 
 #ifdef CC_IO_HAS_STATIC_INSTANCES
-    io = io_static_alloc(type);
-    if (io != NULL)
-        return io;
+    if (io_open_hint_for_next_open() == IO_HintStatic) {
+        io = io_static_alloc(type);
+        if (io != NULL)
+            return io;
+    }
 #endif
 
     io = malloc(sizeof(struct InputOutputDevice));
@@ -108,6 +143,8 @@ static IO io_alloc(IOType type) {
     io->flags = IO_FLAG_IN_USE | IO_FLAG_DYNAMIC;
     io->callbacks = NULL;
     io->ungetAvail = 0;
+
+    io_hint_next_open(io_permanent_open_hint(), 0);
 
     return io;
 }
@@ -259,7 +296,7 @@ int io_getc(IO io) {
     }
 }
 
-int io_getpos(IO io, IO_pos *pos) {
+int io_getpos(IO io, IO_Pos *pos) {
     switch (io->type) {
         default: pos->_pos = 0; return 0;
         case IO_File:
@@ -1455,7 +1492,7 @@ int io_seek64(IO io, long long offset, int origin) {
 }
 #endif
 
-int io_setpos(IO io, const IO_pos *pos) {
+int io_setpos(IO io, const IO_Pos *pos) {
     switch (io->type) {
         default: return -1;
         case IO_File:

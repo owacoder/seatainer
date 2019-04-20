@@ -14,7 +14,7 @@ static unsigned char test_aes_plaintext[] = {
     0xad, 0x2b, 0x41, 0x7b, 0xe6, 0x6c, 0x37, 0x10
 };
 
-static unsigned char test_aes_ciphertext[] = {
+static unsigned char test_aes_ciphertext128[] = {
     0x3a, 0xd7, 0x7b, 0xb4, 0x0d, 0x7a, 0x36, 0x60,
     0xa8, 0x9e, 0xca, 0xf3, 0x24, 0x66, 0xef, 0x97,
     0xf5, 0xd3, 0xd5, 0x85, 0x03, 0xb9, 0x69, 0x9d,
@@ -25,21 +25,52 @@ static unsigned char test_aes_ciphertext[] = {
     0x82, 0x23, 0x20, 0x71, 0x04, 0x72, 0x5d, 0xd4
 };
 
-static unsigned char test_aes_ecb_key[] = {
+static unsigned char test_aes_ciphertext192[] = {
+    0xbd, 0x33, 0x4f, 0x1d, 0x6e, 0x45, 0xf2, 0x5f,
+    0xf7, 0x12, 0xa2, 0x14, 0x57, 0x1f, 0xa5, 0xcc,
+    0x97, 0x41, 0x04, 0x84, 0x6d, 0x0a, 0xd3, 0xad,
+    0x77, 0x34, 0xec, 0xb3, 0xec, 0xee, 0x4e, 0xef,
+    0xef, 0x7a, 0xfd, 0x22, 0x70, 0xe2, 0xe6, 0x0a,
+    0xdc, 0xe0, 0xba, 0x2f, 0xac, 0xe6, 0x44, 0x4e,
+    0x9a, 0x4b, 0x41, 0xba, 0x73, 0x8d, 0x6c, 0x72,
+    0xfb, 0x16, 0x69, 0x16, 0x03, 0xc1, 0x8e, 0x0e
+};
+
+static unsigned char test_aes_ecb_key128[] = {
     0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
     0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
 };
 
+static unsigned char test_aes_ecb_key192[] = {
+    0x8e, 0x73, 0xb0, 0xf7, 0xda, 0x0e, 0x64, 0x52,
+    0xc8, 0x10, 0xf3, 0x2b, 0x80, 0x90, 0x79, 0xe5,
+    0x62, 0xf8, 0xea, 0xd2, 0x52, 0x2c, 0x6b, 0x7b
+};
+
+#if defined(__SSE2__)
+#define AES_COMPILE_SUPPORTS_X86_INTRINSICS
+#endif
+
 #include "hex.h"
+#include "crypto_rand.h"
 
 void test_aes() {
-    unsigned char cipher[16];
+    unsigned char iv[16];
 
-    IO ciphertext = io_open_buffer((char *) test_aes_ciphertext, sizeof(test_aes_ciphertext), "r");
-    IO aes = io_open_aes(ciphertext, AES_128, test_aes_ecb_key, "r");
+    IO rand = io_open_crypto_rand();
+    io_read(iv, 1, 16, rand);
+    io_close(rand);
+
+    enum AES_Mode mode = AES_OFB;
+    IO input = io_open_cstring("Hello World!    This is a text!!SomeMoreTextForU");
+    IO ciphertext = io_open_aes_encrypt(input, AES_192, mode, test_aes_ecb_key192, iv, "r");
+    IO pciphertext = io_open_aes_encrypt(input, AES_192, mode, test_aes_ecb_key192, iv, "r<");
+    IO aes = io_open_aes_decrypt(ciphertext, AES_192, mode, test_aes_ecb_key192, iv, "r");
+    IO paes = io_open_aes_decrypt(pciphertext, AES_192, mode, test_aes_ecb_key192, iv, "r<");
 
     while (1) {
-        if (io_read(cipher, 16, 1, aes) != 1) {
+        int ch;
+        if ((ch = io_getc(aes)) == EOF) {
             if (io_error(aes))
                 puts("Error encountered while reading AES");
             else
@@ -47,21 +78,38 @@ void test_aes() {
             break;
         }
 
-        printf("Plain: ");
-        for (size_t i = 0; i < sizeof(cipher); ++i)
-            printf("%02x", cipher[i]);
-        puts("");
+        putc(ch, stdout);
+    }
+
+    puts("");
+    io_rewind(input);
+
+    while (1) {
+        int ch;
+        if ((ch = io_getc(paes)) == EOF) {
+            if (io_error(paes))
+                puts("Error encountered while reading AES");
+            else
+                puts("End of stream reached");
+            break;
+        }
+
+        putc(ch, stdout);
     }
 
     io_close(aes);
+    io_close(pciphertext);
     io_close(ciphertext);
+    io_close(input);
 
     IO plaintext = io_open_file(stdout);
     IO hex = io_open_hex_filter(plaintext, "w");
-    aes = io_open_aes(hex, AES_128, test_aes_ecb_key, "w");
+    aes = io_open_aes_encrypt(hex, AES_192, AES_ECB, test_aes_ecb_key192, NULL, "w");
 
     printf("Encrypted: ");
-    io_write(test_aes_plaintext, 16, 1, aes);
+    io_putc(test_aes_plaintext[0], aes);
+    io_write(test_aes_plaintext + 1, 3, 1, aes);
+    io_write(test_aes_plaintext + 4, 12, 1, aes);
     printf("\nEncrypted: ");
     io_write(test_aes_plaintext + 16, 16, 1, aes);
     printf("\nEncrypted: ");
@@ -76,10 +124,18 @@ void test_aes() {
 }
 
 struct AES_ctx {
-    IO io;
-    unsigned char *state;
-    unsigned char expandedKey[16 * 15]; /* First 16 bytes are original key */
-    unsigned char rounds;
+    unsigned char iv[16]; /* Initialization vector */
+    unsigned char previous[16]; /* Stores previous-block/IV/data-needed-for-next-iteration */
+    unsigned char state[16]; /* Data payload should be put in this buffer before encryption/decryption */
+    unsigned char expandedKey[16 * 15]; /* Key schedule; first bytes are original key */
+    unsigned char *buffer; /* Data payload should be read out from here after encryption/decryption */
+    IO io; /* Underlying IO device */
+    void (*cb)(struct AES_ctx *ctx); /* Callback for encryption/decryption; pass pointer to this struct as argument */
+    enum AES_Mode mode; /* Encryption mode, handled by AESEncode/AESDecode */
+    unsigned char rounds; /* Number of iterations required for current key size (the number of rounds is stored instead of key size) */
+    unsigned char pos;
+    /* pos contains the number of bytes written from the state when writing (0-15), 16 means flush the state */
+    /* pos contains the number of bytes available to read from the state when reading (1-16), 0 means fill the state */
 };
 
 static const unsigned char sbox[] = {
@@ -138,6 +194,15 @@ static const unsigned char Rcon[] = {
     0xc6, 0x97, 0x35, 0x6a, 0xd4, 0xb3, 0x7d, 0xfa, 0xef, 0xc5, 0x91, 0x39, 0x72, 0xe4, 0xd3, 0xbd,
     0x61, 0xc2, 0x9f, 0x25, 0x4a, 0x94, 0x33, 0x66, 0xcc, 0x83, 0x1d, 0x3a, 0x74, 0xe8, 0xcb, 0x8d
 };
+
+static void AddOne(unsigned char *ctr) {
+    uint8_t carry = 1;
+    for (int i = 15; i >= 0; --i) {
+        int temp = ctr[i] + carry;
+        ctr[i] = temp;
+        carry = temp >> 8;
+    }
+}
 
 static void SubBytes(unsigned char *state) {
     for (int i = 0; i < 16; ++i)
@@ -200,7 +265,7 @@ static void InvShiftRows(unsigned char *state) {
 }
 
 static void AddRoundKey(struct AES_ctx *ctx, int round) {
-    memxor(ctx->state, ctx->expandedKey + round * 16, 16);
+    memxor(ctx->buffer, ctx->expandedKey + round * 16, 16);
 }
 
 static uint8_t xtime(uint8_t v) {
@@ -231,13 +296,13 @@ static void MixColumns(struct AES_ctx *ctx) {
     uint8_t i;
     unsigned char state[4][4];
 
-    memcpy(state, ctx->state, 16);
+    memcpy(state, ctx->buffer, 16);
 
     for (i = 0; i < 4; ++i) {
-        ctx->state[AT(i, 0)] = GF(2, state[i][0]) ^ GF(3, state[i][1]) ^ state[i][2] ^ state[i][3];
-        ctx->state[AT(i, 1)] = GF(2, state[i][1]) ^ GF(3, state[i][2]) ^ state[i][3] ^ state[i][0];
-        ctx->state[AT(i, 2)] = GF(2, state[i][2]) ^ GF(3, state[i][3]) ^ state[i][0] ^ state[i][1];
-        ctx->state[AT(i, 3)] = GF(2, state[i][3]) ^ GF(3, state[i][0]) ^ state[i][1] ^ state[i][2];
+        ctx->buffer[AT(i, 0)] = GF(2, state[i][0]) ^ GF(3, state[i][1]) ^ state[i][2] ^ state[i][3];
+        ctx->buffer[AT(i, 1)] = GF(2, state[i][1]) ^ GF(3, state[i][2]) ^ state[i][3] ^ state[i][0];
+        ctx->buffer[AT(i, 2)] = GF(2, state[i][2]) ^ GF(3, state[i][3]) ^ state[i][0] ^ state[i][1];
+        ctx->buffer[AT(i, 3)] = GF(2, state[i][3]) ^ GF(3, state[i][0]) ^ state[i][1] ^ state[i][2];
     }
 }
 
@@ -245,13 +310,13 @@ static void InvMixColumns(struct AES_ctx *ctx) {
     uint8_t i;
     unsigned char state[4][4];
 
-    memcpy(state, ctx->state, 16);
+    memcpy(state, ctx->buffer, 16);
 
     for (i = 0; i < 4; ++i) {
-        ctx->state[AT(i, 0)] = GF(0xe, state[i][0]) ^ GF(0xb, state[i][1]) ^ GF(0xd, state[i][2]) ^ GF(0x9, state[i][3]);
-        ctx->state[AT(i, 1)] = GF(0xe, state[i][1]) ^ GF(0xb, state[i][2]) ^ GF(0xd, state[i][3]) ^ GF(0x9, state[i][0]);
-        ctx->state[AT(i, 2)] = GF(0xe, state[i][2]) ^ GF(0xb, state[i][3]) ^ GF(0xd, state[i][0]) ^ GF(0x9, state[i][1]);
-        ctx->state[AT(i, 3)] = GF(0xe, state[i][3]) ^ GF(0xb, state[i][0]) ^ GF(0xd, state[i][1]) ^ GF(0x9, state[i][2]);
+        ctx->buffer[AT(i, 0)] = GF(0xe, state[i][0]) ^ GF(0xb, state[i][1]) ^ GF(0xd, state[i][2]) ^ GF(0x9, state[i][3]);
+        ctx->buffer[AT(i, 1)] = GF(0xe, state[i][1]) ^ GF(0xb, state[i][2]) ^ GF(0xd, state[i][3]) ^ GF(0x9, state[i][0]);
+        ctx->buffer[AT(i, 2)] = GF(0xe, state[i][2]) ^ GF(0xb, state[i][3]) ^ GF(0xd, state[i][0]) ^ GF(0x9, state[i][1]);
+        ctx->buffer[AT(i, 3)] = GF(0xe, state[i][3]) ^ GF(0xb, state[i][0]) ^ GF(0xd, state[i][1]) ^ GF(0x9, state[i][2]);
     }
 }
 
@@ -284,38 +349,276 @@ static void ExpandKey(struct AES_ctx *ctx) {
     }
 }
 
-static void AESEncode(struct AES_ctx *ctx) {
+static void AESEncodeInternal(struct AES_ctx *ctx) {
     uint8_t round = 0;
 
     AddRoundKey(ctx, 0);
 
     for (round = 1; round < ctx->rounds; ++round) {
-        SubBytes(ctx->state);
-        ShiftRows(ctx->state);
+        SubBytes(ctx->buffer);
+        ShiftRows(ctx->buffer);
         MixColumns(ctx);
         AddRoundKey(ctx, round);
     }
 
-    SubBytes(ctx->state);
-    ShiftRows(ctx->state);
+    SubBytes(ctx->buffer);
+    ShiftRows(ctx->buffer);
     AddRoundKey(ctx, round);
 }
 
-static void AESDecode(struct AES_ctx *ctx) {
+/* See https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation */
+static void AESEncode(struct AES_ctx *ctx) {
+    switch (ctx->mode) {
+        case AES_ECB:
+        default: {
+            ctx->buffer = ctx->state;
+            AESEncodeInternal(ctx);
+            break;
+        }
+        case AES_CBC: {
+            memxor(ctx->previous, ctx->state, 16);
+            ctx->buffer = ctx->previous;
+            AESEncodeInternal(ctx);
+            break;
+        }
+        case AES_PCBC: {
+            memswap(ctx->previous, ctx->state, 16);
+            memxor(ctx->state, ctx->previous, 16);
+            ctx->buffer = ctx->state;
+            AESEncodeInternal(ctx);
+            memxor(ctx->previous, ctx->state, 16);
+            break;
+        }
+        case AES_CFB: {
+            ctx->buffer = ctx->previous;
+            AESEncodeInternal(ctx);
+            memxor(ctx->previous, ctx->state, 16);
+            break;
+        }
+        case AES_OFB: {
+            ctx->buffer = ctx->previous;
+            AESEncodeInternal(ctx);
+            memxor(ctx->state, ctx->previous, 16);
+            ctx->buffer = ctx->state;
+            break;
+        }
+    }
+}
+
+static void AESDecodeInternal(struct AES_ctx *ctx) {
     uint8_t round = 0;
 
     AddRoundKey(ctx, ctx->rounds);
 
     for (round = ctx->rounds-1; round > 0; --round) {
-        InvShiftRows(ctx->state);
-        InvSubBytes(ctx->state);
+        InvShiftRows(ctx->buffer);
+        InvSubBytes(ctx->buffer);
         AddRoundKey(ctx, round);
         InvMixColumns(ctx);
     }
 
-    InvShiftRows(ctx->state);
-    InvSubBytes(ctx->state);
+    InvShiftRows(ctx->buffer);
+    InvSubBytes(ctx->buffer);
     AddRoundKey(ctx, 0);
+}
+
+static void AESDecode(struct AES_ctx *ctx) {
+    switch (ctx->mode) {
+        case AES_ECB:
+        default: {
+            ctx->buffer = ctx->state;
+            AESDecodeInternal(ctx);
+            break;
+        }
+        case AES_CBC: {
+            unsigned char ciphertext[16];
+            memcpy(ciphertext, ctx->state, 16);
+            ctx->buffer = ctx->state;
+            AESDecodeInternal(ctx);
+            memxor(ctx->state, ctx->previous, 16);
+            memcpy(ctx->previous, ciphertext, 16);
+            break;
+        }
+        case AES_PCBC: {
+            unsigned char ciphertext[16];
+            memcpy(ciphertext, ctx->state, 16);
+            ctx->buffer = ctx->state;
+            AESDecodeInternal(ctx);
+            memxor(ctx->state, ctx->previous, 16);
+            memcpy(ctx->previous, ctx->state, 16);
+            memxor(ctx->previous, ciphertext, 16);
+            break;
+        }
+        case AES_CFB: {
+            memswap(ctx->state, ctx->previous, 16);
+            ctx->buffer = ctx->state;
+            AESEncodeInternal(ctx); /* sic, not decoding */
+            memxor(ctx->state, ctx->previous, 16);
+            ctx->buffer = ctx->state;
+            break;
+        }
+        case AES_OFB: {
+            ctx->buffer = ctx->previous;
+            AESEncodeInternal(ctx); /* sic, not decoding */
+            memxor(ctx->state, ctx->previous, 16);
+            ctx->buffer = ctx->state;
+            break;
+        }
+    }
+}
+
+#ifdef AES_COMPILE_SUPPORTS_X86_INTRINSICS
+static __m128i AESEncodeInternal_x86(struct AES_ctx *ctx, __m128i state) {
+    state = _mm_xor_si128(state, _mm_loadu_si128(((__m128i *) ctx->expandedKey) + 0));
+
+    for (int i = 1; i < ctx->rounds; ++i)
+        state = _mm_aesenc_si128(state, _mm_loadu_si128(((__m128i *) ctx->expandedKey) + i));
+
+    return _mm_aesenclast_si128(state, _mm_loadu_si128(((__m128i *) ctx->expandedKey) + ctx->rounds));
+}
+
+static __m128i AESDecodeInternal_x86(struct AES_ctx *ctx, __m128i state) {
+    state = _mm_xor_si128(state, _mm_loadu_si128(((__m128i *) ctx->expandedKey) + ctx->rounds));
+
+    for (int i = ctx->rounds-1; i > 0; --i)
+        state = _mm_aesdec_si128(state, _mm_loadu_si128(((__m128i *) ctx->expandedKey) + i));
+
+    return _mm_aesdeclast_si128(state, _mm_loadu_si128(((__m128i *) ctx->expandedKey) + 0));
+}
+
+static void AESEncode_x86(struct AES_ctx *ctx) {
+    __m128i state = _mm_loadu_si128((__m128i *) ctx->state);
+
+    switch (ctx->mode) {
+        case AES_ECB:
+        default: {
+            state = AESEncodeInternal_x86(ctx, state);
+            _mm_storeu_si128((__m128i *) ctx->state, state);
+            ctx->buffer = ctx->state;
+            break;
+        }
+        case AES_CBC: {
+            __m128i previous = _mm_loadu_si128((__m128i *) ctx->previous);
+            previous = _mm_xor_si128(previous, state);
+            previous = AESEncodeInternal_x86(ctx, previous);
+            _mm_storeu_si128((__m128i *) ctx->previous, previous);
+            ctx->buffer = ctx->previous;
+            break;
+        }
+        case AES_PCBC: {
+            __m128i plaintext = state;
+            __m128i previous = _mm_loadu_si128((__m128i *) ctx->previous);
+            state = _mm_xor_si128(state, previous);
+            state = AESEncodeInternal_x86(ctx, state);
+            _mm_storeu_si128((__m128i *) ctx->state, state);
+            previous = _mm_xor_si128(plaintext, state);
+            _mm_storeu_si128((__m128i *) ctx->previous, previous);
+            ctx->buffer = ctx->state;
+            break;
+        }
+        case AES_CFB: {
+            __m128i previous = _mm_loadu_si128((__m128i *) ctx->previous);
+            previous = AESEncodeInternal_x86(ctx, previous);
+            previous = _mm_xor_si128(previous, state);
+            _mm_storeu_si128((__m128i *) ctx->previous, previous);
+            ctx->buffer = ctx->previous;
+            break;
+        }
+        case AES_OFB: {
+            __m128i previous = _mm_loadu_si128((__m128i *) ctx->previous);
+            previous = AESEncodeInternal_x86(ctx, previous);
+            state = _mm_xor_si128(previous, state);
+            _mm_storeu_si128((__m128i *) ctx->previous, previous);
+            _mm_storeu_si128((__m128i *) ctx->state, state);
+            ctx->buffer = ctx->state;
+            break;
+        }
+    }
+}
+
+static void AESDecode_x86(struct AES_ctx *ctx) {
+    __m128i state = _mm_loadu_si128((__m128i *) ctx->state);
+
+    switch (ctx->mode) {
+        case AES_ECB:
+        default: {
+            state = AESDecodeInternal_x86(ctx, state);
+            _mm_storeu_si128((__m128i *) ctx->state, state);
+            ctx->buffer = ctx->state;
+            break;
+        }
+        case AES_CBC: {
+            __m128i ciphertext = state;
+            __m128i previous = _mm_loadu_si128((__m128i *) ctx->previous);
+            state = AESDecodeInternal_x86(ctx, state);
+            state = _mm_xor_si128(state, previous);
+            _mm_storeu_si128((__m128i *) ctx->state, state);
+            _mm_storeu_si128((__m128i *) ctx->previous, ciphertext);
+            ctx->buffer = ctx->state;
+            break;
+        }
+        case AES_PCBC: {
+            __m128i ciphertext = state;
+            __m128i previous = _mm_loadu_si128((__m128i *) ctx->previous);
+            state = AESDecodeInternal_x86(ctx, state);
+            state = _mm_xor_si128(state, previous);
+            _mm_storeu_si128((__m128i *) ctx->state, state);
+            ciphertext = _mm_xor_si128(ciphertext, state);
+            _mm_storeu_si128((__m128i *) ctx->previous, ciphertext);
+            ctx->buffer = ctx->state;
+            break;
+        }
+        case AES_CFB: {
+            __m128i previous = _mm_loadu_si128((__m128i *) ctx->previous);
+            previous = AESEncodeInternal_x86(ctx, previous); /* sic, not decoding */
+            previous = _mm_xor_si128(previous, state);
+            _mm_storeu_si128((__m128i *) ctx->state, previous);
+            _mm_storeu_si128((__m128i *) ctx->previous, state);
+            ctx->buffer = ctx->state;
+            break;
+        }
+        case AES_OFB: {
+            __m128i previous = _mm_loadu_si128((__m128i *) ctx->previous);
+            previous = AESEncodeInternal_x86(ctx, previous); /* sic, not decoding */
+            state = _mm_xor_si128(previous, state);
+            _mm_storeu_si128((__m128i *) ctx->previous, previous);
+            _mm_storeu_si128((__m128i *) ctx->state, state);
+            ctx->buffer = ctx->state;
+            break;
+        }
+    }
+}
+#endif
+
+static size_t aes_write(const void *ptr, size_t size, size_t count, void *userdata, IO io) {
+    UNUSED(io)
+
+    const unsigned char *cptr = ptr;
+    struct AES_ctx *aes = userdata;
+    size_t max = size*count, blocks = 0;
+
+    while (max) {
+        size_t add = max;
+        if (add > 16 - (size_t) aes->pos)
+            add = 16 - aes->pos;
+
+        memcpy(aes->state + aes->pos, cptr, add);
+        aes->pos += add;
+        cptr += add;
+        max -= add;
+
+        if (aes->pos == 16) {
+            aes->cb(aes);
+
+            aes->pos = 0;
+
+            if (io_write(aes->buffer, 16, 1, aes->io) != 1)
+                return (size * count - max) / size;
+            ++blocks;
+        }
+    }
+
+    return count;
 }
 
 static size_t aes_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {
@@ -323,53 +626,43 @@ static size_t aes_read(void *ptr, size_t size, size_t count, void *userdata, IO 
 
     unsigned char *cptr = ptr;
     struct AES_ctx *aes = userdata;
-    size_t max = size*count, read, bytes = 0;
-    if (max % 16 != 0)
-        return SIZE_MAX;
+    size_t max = size*count;
 
-    if ((read = io_read(ptr, size, count, aes->io)) != count) {
-        if (io_error(aes->io))
-            return SIZE_MAX;
+    while (max) {
+        if (aes->pos == 0) {
+            if (io_read(aes->state, 1, 16, aes->io) != 16)
+                return io_error(aes->io)? SIZE_MAX: (size * count - max) / size;
+
+            aes->cb(aes);
+
+            aes->pos = 16;
+        }
+
+        size_t use = max;
+        if (use > aes->pos)
+            use = aes->pos;
+
+        memcpy(cptr, aes->buffer + 16 - aes->pos, use);
+        aes->pos -= use;
+        cptr += use;
+        max -= use;
     }
 
-    for (; bytes + 16 <= read*size; bytes += 16, cptr += 16) {
-        aes->state = cptr;
-
-        AESDecode(aes);
-        //AES_ECB_decrypt(aes->state, aes->expandedKey, aes->state, 16);
-    }
-
-    return bytes / size;
-}
-
-static size_t aes_write(const void *ptr, size_t size, size_t count, void *userdata, IO io) {
-    UNUSED(io)
-
-    const unsigned char *cptr = ptr;
-    struct AES_ctx *aes = userdata;
-    size_t max = size*count, bytes = 0;
-    unsigned char buffer[16];
-
-    if (max % 16 != 0)
-        return 0;
-
-    aes->state = buffer;
-    for (; bytes + 16 <= max; bytes += 16, cptr += 16) {
-        memcpy(buffer, cptr, 16);
-
-        AESEncode(aes);
-
-        if (io_write(buffer, 16, 1, aes->io) != 1)
-            return bytes / size;
-    }
-
-    return bytes / size;
+    return count;
 }
 
 int aes_close(void *userdata, IO io) {
     UNUSED(io)
 
     free(userdata);
+    return 0;
+}
+
+int aes_seek64(void *userdata, long long int offset, int origin, IO io) {
+    UNUSED(io)
+
+    struct AES_ctx *aes = userdata;
+
     return 0;
 }
 
@@ -385,8 +678,8 @@ static const struct InputOutputDeviceCallbacks aes_callbacks = {
     .seek64 = NULL
 };
 
-IO io_open_aes(IO io, enum AES_Type type, const unsigned char *key, const char *mode) {
-    struct AES_ctx *ctx = malloc(sizeof(struct AES_ctx));
+IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode) {
+    struct AES_ctx *ctx = calloc(1, sizeof(struct AES_ctx));
     if (ctx == NULL)
         return NULL;
 
@@ -396,7 +689,15 @@ IO io_open_aes(IO io, enum AES_Type type, const unsigned char *key, const char *
         return NULL;
     }
 
+    if (iv != NULL) {
+        memcpy(ctx->iv, iv, 16);
+        memcpy(ctx->previous, iv, 16);
+    }
+
     ctx->io = io;
+    ctx->cb = AESEncode;
+    ctx->mode = cipherMode;
+
     switch (type) {
         case AES_128: ctx->rounds = 10; memcpy(ctx->expandedKey, key, 16); break;
         case AES_192: ctx->rounds = 12; memcpy(ctx->expandedKey, key, 24); break;
@@ -404,6 +705,63 @@ IO io_open_aes(IO io, enum AES_Type type, const unsigned char *key, const char *
     }
 
     ExpandKey(ctx);
+
+#ifdef AES_COMPILE_SUPPORTS_X86_INTRINSICS
+#if X86_CPU | AMD64_CPU
+    /* Detect AES extensions support */
+    uint32_t cpuid[4];
+    /* TODO: hardware acceleration can be prevented by adding '<' in the open mode; this should be taken out later */
+    if (strchr(mode, '<') == NULL && 0 == x86_cpuid(1, 0, cpuid) && TESTBIT(cpuid[2], 25))
+        ctx->cb = AESEncode_x86;
+#endif
+#endif
+
+    return result;
+}
+
+IO io_open_aes_decrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode) {
+    struct AES_ctx *ctx = calloc(1, sizeof(struct AES_ctx));
+    if (ctx == NULL)
+        return NULL;
+
+    IO result = io_open_custom(&aes_callbacks, ctx, mode);
+    if (result == NULL) {
+        free(ctx);
+        return NULL;
+    }
+
+    if (iv != NULL) {
+        memcpy(ctx->iv, iv, 16);
+        memcpy(ctx->previous, iv, 16);
+    }
+
+    ctx->io = io;
+    ctx->cb = AESDecode;
+    ctx->mode = cipherMode;
+
+    switch (type) {
+        case AES_128: ctx->rounds = 10; memcpy(ctx->expandedKey, key, 16); break;
+        case AES_192: ctx->rounds = 12; memcpy(ctx->expandedKey, key, 24); break;
+        case AES_256: ctx->rounds = 14; memcpy(ctx->expandedKey, key, 32); break;
+    }
+
+    ExpandKey(ctx);
+
+#ifdef AES_COMPILE_SUPPORTS_X86_INTRINSICS
+#if X86_CPU | AMD64_CPU
+    /* Detect AES extensions support */
+    uint32_t cpuid[4];
+    if (strchr(mode, '<') == NULL && 0 == x86_cpuid(1, 0, cpuid) && TESTBIT(cpuid[2], 25)) {
+        ctx->cb = AESDecode_x86;
+
+        if (cipherMode < AES_CFB) {
+            /* AESIMC instruction needed for implementation reasons for the central keys in the schedule */
+            for (int i = 1; i < ctx->rounds; ++i)
+                _mm_storeu_si128((((__m128i *) ctx->expandedKey) + i), _mm_aesimc_si128(_mm_loadu_si128(((__m128i *) ctx->expandedKey) + i)));
+        }
+    }
+#endif
+#endif
 
     return result;
 }
