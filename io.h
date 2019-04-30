@@ -32,6 +32,10 @@ struct InputOutputDeviceCallbacks {
     IO_ReadCallback read;
     IO_WriteCallback write;
 
+    /* Userdata given to io_open_custom is passed as an argument to `open`, then the userdata in the IO object is set to the return value of this function.
+     * If this function returns NULL, the call to open will fail and no IO device will be opened
+     * If `open` itself is NULL, the userdata in the IO object is set to the userdata parameter of io_open_custom, and there is no way to prevent opening the IO device here
+     */
     void *(*open)(void *userdata, IO io);
     IO_SimpleCallback close, flush;
 
@@ -52,6 +56,12 @@ int io_writable(IO io);
  * This pointer should *never* be freed
  */
 void *io_userdata(IO io);
+/* Returns pointer to object-specific raw buffer (the size is given by io_tempdata_size(), but is guaranteed to be >= 4 for Custom-type objects)
+ * This buffer can be used for anything
+ * If this function returns NULL, no buffer is available
+ */
+unsigned char *io_tempdata(IO io);
+size_t io_tempdata_size(IO io);
 int io_error(IO io);
 int io_eof(IO io);
 int io_flush(IO io);
@@ -64,6 +74,10 @@ IO io_open_empty(void);
 IO io_open_cstring(const char *str);
 IO io_open_buffer(char *buf, size_t size, const char *mode);
 IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdata, const char *mode);
+/* Reads all data from `in` and pushes it to `out`
+ * Returns -1 on input error, 0 on success, and 1 on output error
+ */
+int io_copy(IO in, IO out);
 int io_vprintf(IO io, const char *fmt, va_list args);
 int io_printf(IO io, const char *fmt, ...);
 int io_putc(int ch, IO io);

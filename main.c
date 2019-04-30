@@ -325,6 +325,7 @@ void test_small_dll()
 
 void test_io() {
     test_aes();
+    test_hex();
     return;
 
 #if WINDOWS_OS

@@ -57,7 +57,7 @@ void test_aes() {
     io_close(ciphertext);
 
     IO plaintext = io_open_file(stdout);
-    IO hex = io_open_hex_filter(plaintext, "w");
+    IO hex = io_open_hex_encode(plaintext, "w");
     aes = io_open_aes(hex, AES_128, test_aes_ecb_key, "w");
 
     printf("Encrypted: ");

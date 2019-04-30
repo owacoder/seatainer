@@ -13,6 +13,10 @@
 #include <math.h> /* For printf and scanf */
 #include <float.h>
 
+struct IO_sizes {
+    size_t size, pos;
+};
+
 struct InputOutputDevice {
     /*
      * `ptr` stores the following:
@@ -42,7 +46,10 @@ struct InputOutputDevice {
      */
     void *ptr;
     const struct InputOutputDeviceCallbacks *callbacks;
-    size_t size, pos;
+    union {
+        struct IO_sizes sizes;
+        char raw[sizeof(struct IO_sizes)];
+    } data;
     IOType type;
     unsigned flags;
 
@@ -117,7 +124,7 @@ static int io_current_char(IO io) {
     switch (io->type) {
         default: return EOF;
         case IO_CString:
-        case IO_SizedBuffer: return ((const unsigned char *) io->ptr)[io->pos];
+        case IO_SizedBuffer: return ((const unsigned char *) io->ptr)[io->data.sizes.pos];
     }
 }
 
@@ -126,7 +133,7 @@ static int io_from_unget_buffer(IO io) {
     if (io->ungetAvail == 0)
         return EOF;
 
-    ++io->pos;
+    ++io->data.sizes.pos;
     return io->ungetBuf[--io->ungetAvail];
 }
 
@@ -176,6 +183,14 @@ void *io_userdata(IO io) {
     return io->ptr;
 }
 
+unsigned char *io_tempdata(IO io) {
+    return io->type != IO_Custom? NULL: io->data.raw;
+}
+
+size_t io_tempdata_size(IO io) {
+    return io->type != IO_Custom? 0: sizeof(struct IO_sizes);
+}
+
 int io_error(IO io) {
     switch (io->type) {
         default: return io->flags & IO_FLAG_ERROR;
@@ -207,6 +222,24 @@ int io_flush(IO io) {
     }
 }
 
+int io_copy(IO in, IO out) {
+    const size_t size = 256;
+    char data[size];
+    size_t read = size;
+
+    while (read == size) {
+        if ((read = io_read(data, 1, size, in)) != size) {
+            if (io_error(in))
+                return -1;
+        }
+
+        if (io_write(data, 1, read, out) != read)
+            return 1;
+    }
+
+    return 0;
+}
+
 int io_getc(IO io) {
     if (!(io->flags & IO_FLAG_READABLE))
     {
@@ -224,25 +257,25 @@ int io_getc(IO io) {
         case IO_OwnFile: return fgetc(io->ptr);
         case IO_CString:
         {
-            char ch = ((const char *) io->ptr)[io->pos];
+            char ch = ((const char *) io->ptr)[io->data.sizes.pos];
 
             if (ch == 0) {
                 io->flags |= IO_FLAG_EOF;
                 return EOF;
             }
 
-            io->pos++;
+            io->data.sizes.pos++;
 
             return (unsigned char) ch;
         }
         case IO_SizedBuffer:
         {
-            if (io->pos == io->size) {
+            if (io->data.sizes.pos == io->data.sizes.size) {
                 io->flags |= IO_FLAG_EOF;
                 return EOF;
             }
 
-            return ((const char *) io->ptr)[io->pos++];
+            return ((const char *) io->ptr)[io->data.sizes.pos++];
         }
         case IO_Custom:
         {
@@ -265,7 +298,7 @@ int io_getpos(IO io, IO_pos *pos) {
         case IO_File:
         case IO_OwnFile: return fgetpos(io->ptr, &pos->_fpos);
         case IO_CString:
-        case IO_SizedBuffer: pos->_pos = io->pos; return 0;
+        case IO_SizedBuffer: pos->_pos = io->data.sizes.pos; return 0;
         case IO_Custom:
         {
             long long tell = io_tell64(io);
@@ -372,7 +405,7 @@ IO io_open_cstring(const char *str) {
 
     io->flags |= IO_FLAG_READABLE;
     io->ptr = (char *) str;
-    io->pos = 0;
+    io->data.sizes.pos = 0;
 
     return io;
 }
@@ -383,8 +416,8 @@ IO io_open_buffer(char *buf, size_t size, const char *mode) {
         return NULL;
 
     io->ptr = buf;
-    io->size = size;
-    io->pos = 0;
+    io->data.sizes.size = size;
+    io->data.sizes.pos = 0;
 
     io->flags |= io_flags_for_mode(mode);
 
@@ -549,7 +582,7 @@ static void io_printf_f_long(long double value, unsigned flags, unsigned prec, u
     size_t decimal_point_len = (precision || (flags & PRINTF_FLAG_HASH))? 1: 0;
     size_t complete_len = mantissa_digits + decimal_point_len + precision;
     size_t allowed = LDBL_DIG + 2;
-    char *mbuf, *mptr;
+    unsigned char *mbuf, *mptr;
     double oldval = value;
 
     if (complete_len > sizeof(state->internalBuffer)) {
@@ -597,7 +630,7 @@ static void io_printf_f(double value, unsigned flags, unsigned prec, unsigned le
     size_t decimal_point_len = (precision || (flags & PRINTF_FLAG_HASH))? 1: 0;
     size_t complete_len = mantissa_digits + decimal_point_len + precision;
     size_t allowed = DBL_DIG + 2;
-    char *mbuf, *mptr;
+    unsigned char *mbuf, *mptr;
     double oldval = value;
 
     if (complete_len > sizeof(state->internalBuffer)) {
@@ -1069,11 +1102,11 @@ int io_putc(int ch, IO io) {
         case IO_File:
         case IO_OwnFile: return fputc(ch, io->ptr);
         case IO_SizedBuffer:
-            if (io->pos == io->size) {
+            if (io->data.sizes.pos == io->data.sizes.size) {
                 io->flags |= IO_FLAG_ERROR;
                 return EOF;
             }
-            ((char *) io->ptr)[io->pos++] = (char) ch;
+            ((char *) io->ptr)[io->data.sizes.pos++] = (char) ch;
             return (unsigned char) ch;
         case IO_Custom:
         {
@@ -1115,7 +1148,7 @@ int io_puts(const char *str, IO io) {
         {
             int result = 0;
             size_t len = strlen(str);
-            size_t avail = io->size - io->pos;
+            size_t avail = io->data.sizes.size - io->data.sizes.pos;
 
             if (avail < len) {
                 len = avail;
@@ -1123,9 +1156,9 @@ int io_puts(const char *str, IO io) {
                 result = EOF;
             }
 
-            memcpy((char *) io->ptr + io->pos, str, len);
+            memcpy((char *) io->ptr + io->data.sizes.pos, str, len);
 
-            io->pos += len;
+            io->data.sizes.pos += len;
             return result;
         }
     }
@@ -1149,11 +1182,11 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
             unsigned char *cptr = ptr;
             size_t blocks = 0;
             size_t i = io->ungetAvail, max = size*count;
-            size_t start_pos = io->pos;
+            size_t start_pos = io->data.sizes.pos;
 
             /* search for 0 character in C-string */
-            for (io->pos += io->ungetAvail; i < max && io_current_char(io) > 0; ++i)
-                io->pos++;
+            for (io->data.sizes.pos += io->ungetAvail; i < max && io_current_char(io) > 0; ++i)
+                io->data.sizes.pos++;
 
             /* if i < max, the NUL is in the desired block,
              * so truncate to reading the most complete blocks we can */
@@ -1163,14 +1196,14 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
                 i = max;
 
             i -= i % size;
-            io->pos = start_pos;
+            io->data.sizes.pos = start_pos;
             blocks = i;
 
             /* then copy the blocks */
             for (; i && io->ungetAvail; --i)
                 *cptr++ = io_from_unget_buffer(io);
-            memcpy(cptr, (char *) io->ptr + io->pos, i);
-            io->pos += i;
+            memcpy(cptr, (char *) io->ptr + io->data.sizes.pos, i);
+            io->data.sizes.pos += i;
 
             /* return number of blocks read */
             return blocks / size;
@@ -1179,7 +1212,7 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
         {
             unsigned char *cptr = ptr;
             size_t max = size*count, blocks = 0;
-            size_t avail = io->size - io->pos;
+            size_t avail = io->data.sizes.size - io->data.sizes.pos;
 
             /* not enough to cover reading the requested blocks */
             if (avail < max)
@@ -1194,8 +1227,8 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
             /* then copy the blocks */
             for (; max && io->ungetAvail; --max)
                 *cptr++ = io_from_unget_buffer(io);
-            memcpy(cptr, (char *) io->ptr + io->pos, max);
-            io->pos += max;
+            memcpy(cptr, (char *) io->ptr + io->data.sizes.pos, max);
+            io->data.sizes.pos += max;
 
             /* return number of blocks read */
             return blocks / size;
@@ -1281,21 +1314,21 @@ int io_seek(IO io, long int offset, int origin) {
         {
             switch (origin) {
                 case SEEK_SET:
-                    if (offset < 0 || (io->pos < (unsigned long) offset && io->pos + strlen(io->ptr) < (unsigned long) offset))
+                    if (offset < 0 || (io->data.sizes.pos < (unsigned long) offset && io->data.sizes.pos + strlen(io->ptr) < (unsigned long) offset))
                         return -1;
-                    io->pos = offset;
+                    io->data.sizes.pos = offset;
                     break;
                 case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long) -offset > io->pos) || (offset > 0 && strlen(io->ptr) < (unsigned long) offset))
+                    if ((offset < 0 && (unsigned long) -offset > io->data.sizes.pos) || (offset > 0 && strlen(io->ptr) < (unsigned long) offset))
                         return -1;
-                    io->pos += offset;
+                    io->data.sizes.pos += offset;
                     break;
                 case SEEK_END:
                 {
-                    size_t len = io->pos + strlen(io->ptr);
+                    size_t len = io->data.sizes.pos + strlen(io->ptr);
                     if (offset > 0 || (unsigned long) -offset > len)
                         return -1;
-                    io->pos = len + offset;
+                    io->data.sizes.pos = len + offset;
                     break;
                 }
             }
@@ -1309,19 +1342,19 @@ int io_seek(IO io, long int offset, int origin) {
         {
             switch (origin) {
                 case SEEK_SET:
-                    if (offset < 0 || io->size < (unsigned long) offset)
+                    if (offset < 0 || io->data.sizes.size < (unsigned long) offset)
                         return -1;
-                    io->pos = offset;
+                    io->data.sizes.pos = offset;
                     break;
                 case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long) -offset > io->pos) || (offset > 0 && io->size < (unsigned long) offset))
+                    if ((offset < 0 && (unsigned long) -offset > io->data.sizes.pos) || (offset > 0 && io->data.sizes.size < (unsigned long) offset))
                         return -1;
-                    io->pos += offset;
+                    io->data.sizes.pos += offset;
                     break;
                 case SEEK_END:
-                    if (offset > 0 || (unsigned long) -offset > io->size)
+                    if (offset > 0 || (unsigned long) -offset > io->data.sizes.size)
                         return -1;
-                    io->pos = io->size + offset;
+                    io->data.sizes.pos = io->data.sizes.size + offset;
                     break;
             }
 
@@ -1364,21 +1397,21 @@ static int io_seek64_internal(IO io, long long int offset, int origin)
         {
             switch (origin) {
                 case SEEK_SET:
-                    if (offset < 0 || (io->pos < (unsigned long long) offset && io->pos + strlen(io->ptr) < (unsigned long long) offset))
+                    if (offset < 0 || (io->data.sizes.pos < (unsigned long long) offset && io->data.sizes.pos + strlen(io->ptr) < (unsigned long long) offset))
                         return -1;
-                    io->pos = offset;
+                    io->data.sizes.pos = offset;
                     break;
                 case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long long) -offset > io->pos) || (offset > 0 && strlen(io->ptr) < (unsigned long long) offset))
+                    if ((offset < 0 && (unsigned long long) -offset > io->data.sizes.pos) || (offset > 0 && strlen(io->ptr) < (unsigned long long) offset))
                         return -1;
-                    io->pos += offset;
+                    io->data.sizes.pos += offset;
                     break;
                 case SEEK_END:
                 {
-                    size_t len = io->pos + strlen(io->ptr);
+                    size_t len = io->data.sizes.pos + strlen(io->ptr);
                     if (offset > 0 || (unsigned long long) -offset > len)
                         return -1;
-                    io->pos = len + offset;
+                    io->data.sizes.pos = len + offset;
                     break;
                 }
             }
@@ -1392,19 +1425,19 @@ static int io_seek64_internal(IO io, long long int offset, int origin)
         {
             switch (origin) {
                 case SEEK_SET:
-                    if (offset < 0 || io->size < (unsigned long long) offset)
+                    if (offset < 0 || io->data.sizes.size < (unsigned long long) offset)
                         return -1;
-                    io->pos = offset;
+                    io->data.sizes.pos = offset;
                     break;
                 case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long long) -offset > io->pos) || (offset > 0 && io->size < (unsigned long long) offset))
+                    if ((offset < 0 && (unsigned long long) -offset > io->data.sizes.pos) || (offset > 0 && io->data.sizes.size < (unsigned long long) offset))
                         return -1;
-                    io->pos += offset;
+                    io->data.sizes.pos += offset;
                     break;
                 case SEEK_END:
-                    if (offset > 0 || (unsigned long long) -offset > io->size)
+                    if (offset > 0 || (unsigned long long) -offset > io->data.sizes.size)
                         return -1;
-                    io->pos = io->size + offset;
+                    io->data.sizes.pos = io->data.sizes.size + offset;
                     break;
             }
 
@@ -1455,7 +1488,7 @@ int io_setpos(IO io, const IO_pos *pos) {
             return io_seek64(io, pos->_pos, SEEK_SET);
         case IO_CString:
         case IO_SizedBuffer:
-            io->pos = pos->_pos;
+            io->data.sizes.pos = pos->_pos;
             io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR);
             io->ungetAvail = 0;
             return 0;
@@ -1473,7 +1506,7 @@ long int io_tell(IO io) {
             else
                 return -1L;
         case IO_CString:
-        case IO_SizedBuffer: return io->pos;
+        case IO_SizedBuffer: return io->data.sizes.pos;
     }
 }
 
@@ -1491,7 +1524,7 @@ long long int io_tell64(IO io) {
             else
                 return -1LL;
         case IO_CString:
-        case IO_SizedBuffer: return io->pos;
+        case IO_SizedBuffer: return io->data.sizes.pos;
     }
 }
 #elif LINUX_OS
@@ -1508,7 +1541,7 @@ long long int io_tell64(IO io) {
             else
                 return -1LL;
         case IO_CString:
-        case IO_SizedBuffer: return io->pos;
+        case IO_SizedBuffer: return io->data.sizes.pos;
     }
 }
 #else
@@ -1555,7 +1588,7 @@ size_t io_write(const void *ptr, size_t size, size_t count, IO io) {
         case IO_SizedBuffer:
         {
             size_t max = size*count;
-            size_t avail = io->size - io->pos;
+            size_t avail = io->data.sizes.size - io->data.sizes.pos;
 
             /* not enough to cover writing the requested blocks */
             if (avail < max)
@@ -1566,8 +1599,8 @@ size_t io_write(const void *ptr, size_t size, size_t count, IO io) {
             }
 
             /* then copy the blocks */
-            memcpy((char *) io->ptr + io->pos, ptr, max);
-            io->pos += max;
+            memcpy((char *) io->ptr + io->data.sizes.pos, ptr, max);
+            io->data.sizes.pos += max;
 
             /* return number of blocks written */
             return max / size;
@@ -1585,7 +1618,7 @@ void io_rewind(IO io) {
         case IO_Custom: io_seek(io, 0, SEEK_SET); break;
         case IO_CString:
         case IO_SizedBuffer:
-            io->pos = 0;
+            io->data.sizes.pos = 0;
             io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR);
             break;
     }
@@ -1642,7 +1675,7 @@ int io_ungetc(int chr, IO io) {
             {
                 io->flags &= ~IO_FLAG_EOF;
 
-                --io->pos;
+                --io->data.sizes.pos;
                 return io->ungetBuf[io->ungetAvail++] = chr;
             }
 
