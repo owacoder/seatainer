@@ -43,6 +43,11 @@ size_t cc_v_sizeof()
     return sizeof(struct Vector);
 }
 
+size_t cc_v_max_capacity()
+{
+    return SIZE_MAX;
+}
+
 HVector cc_v_init(ContainerElementType type)
 {
     HVector result = MALLOC(cc_v_sizeof(), 1);

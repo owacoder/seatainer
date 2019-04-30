@@ -326,20 +326,19 @@ void test_small_dll()
 void test_io() {
     test_aes();
     test_hex();
-    return;
 
 #if WINDOWS_OS
     IO io = io_open("F:/Test_Data/test.txt", "w");
 #elif LINUX_OS
-    IO io = io_open("/shared/Test_Data/test.txt", "w");
+    IO io = io_open_native("/shared/Test_Data/test.txt", "wx");
 #endif
     if (!io)
         return;
 
-    io_seek64(io, 1LL << 16, SEEK_SET);
+    // io_seek64(io, 1LL << 16, SEEK_SET);
     io_puts("This is some text", io);
     io_seek(io, 1, SEEK_SET);
-    io_puts("That", io);
+    io_puts("That my", io);
 
     io_close(io);
 

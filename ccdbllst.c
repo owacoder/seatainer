@@ -96,6 +96,11 @@ size_t cc_dll_sizeof()
     return sizeof(struct DoublyLinkedList);
 }
 
+size_t cc_dll_max_capacity()
+{
+    return SIZE_MAX;
+}
+
 HDoublyLinkedList cc_dll_init(ContainerElementType type)
 {
     HDoublyLinkedList result = MALLOC(cc_dll_sizeof(), 1);

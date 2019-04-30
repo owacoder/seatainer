@@ -6,8 +6,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-    /* Returns the size of one linked list */
+    /* Returns the size of one hash table */
     size_t cc_ht_sizeof();
+
+    /* Returns maximum capacity of one hash table */
+    size_t cc_ht_max_capacity();
 
     /* Initializes a new hash table with specified key and value types, and specified capacity
      *

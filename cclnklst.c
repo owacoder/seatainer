@@ -60,6 +60,11 @@ size_t cc_ll_sizeof()
     return sizeof(struct LinkedList);
 }
 
+size_t cc_ll_max_capacity()
+{
+    return SIZE_MAX / 2;
+}
+
 static int cc_ll_has_external_metadata(HLinkedList list)
 {
     return list->size & 1;

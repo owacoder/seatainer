@@ -57,6 +57,11 @@ size_t cc_s_sizeof()
     return sizeof(struct String);
 }
 
+size_t cc_s_max_capacity()
+{
+    return SIZE_MAX / 2;
+}
+
 HString cc_s_init()
 {
     return CALLOC(cc_s_sizeof(), 1);

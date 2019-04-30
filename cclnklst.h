@@ -16,6 +16,9 @@ extern "C" {
     /* Returns the size of one linked list */
     size_t cc_ll_sizeof();
 
+    /* Returns max capacity of one linked list */
+    size_t cc_ll_max_capacity();
+
     /* Initializes a new linked list with specified type
      *
      * Returns NULL if allocation failed

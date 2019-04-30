@@ -219,6 +219,11 @@ size_t cc_ht_sizeof()
     return sizeof(struct HashTable);
 }
 
+size_t cc_ht_max_capacity()
+{
+    return SIZE_MAX;
+}
+
 HHashTable cc_ht_init_with_capacity(ContainerElementType keyType, ContainerElementType valueType, size_t capacity)
 {
     HHashTable table = CALLOC(cc_ht_sizeof(), 1);
@@ -456,7 +461,7 @@ int cc_ht_insert(HHashTable table, unsigned flags, HConstElementData key, HConst
 
     if (CC_ORGANIZATION(flags) == CC_ORGANIZE_AUTO)
     {
-        if (cc_ht_load_factor(table) > 0.7) /* Greater than 70%, reduce to 60% */
+        if (cc_ht_load_factor(table) > 0.7) /* Greater than 70%, reduce to 50% */
             return cc_ht_adjust_load_factor(table, 0.5);
     }
 

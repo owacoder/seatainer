@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdint.h>
 
 /* The first character of io_tempdata() stores the previous nibble when decoding, and the next nibble when encoding
  * If this value is 16, then no value is present

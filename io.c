@@ -1,4 +1,5 @@
 #define _FILE_OFFSET_BITS 64
+#define _LARGEFILE64_SOURCE
 
 #include "io.h"
 #include "utility.h"
@@ -13,6 +14,14 @@
 #include <math.h> /* For printf and scanf */
 #include <float.h>
 
+#if LINUX_OS
+#include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
+#elif WINDOWS_OS
+#include <windows.h>
+#endif
+
 struct IO_sizes {
     size_t size, pos;
 };
@@ -22,6 +31,7 @@ struct InputOutputDevice {
      * `ptr` stores the following:
      *
      *      type == IO_File: FILE *
+     *      type == IO_NativeFile: Linux - undefined, Windows - File handle
      *      type == IO_CString: const char *
      *      type == IO_SizedBuffer: const char *
      *      type == IO_Custom: void * (pointing to userdata)
@@ -29,6 +39,7 @@ struct InputOutputDevice {
      * `size` stores the following:
      *
      *      type == IO_File: undefined
+     *      type == IO_NativeFile: Linux - undefined, Windows - undefined
      *      type == IO_CString: size of C-style string, not including terminating NUL
      *      type == IO_SizedBuffer: size of buffer
      *      type == IO_Custom: undefined
@@ -36,6 +47,7 @@ struct InputOutputDevice {
      * `pos` stores the following:
      *
      *      type == IO_File: undefined
+     *      type == IO_NativeFile: Linux - file descriptor, Windows - undefined
      *      type == IO_CString: current read position in string
      *      type == IO_SizedBuffer: current read/write position in string
      *      type == IO_Custom: undefined
@@ -65,8 +77,9 @@ struct InputOutputDevice {
 #define IO_FLAG_APPEND ((unsigned) 0x08)
 #define IO_FLAG_ERROR ((unsigned) 0x10)
 #define IO_FLAG_EOF ((unsigned) 0x20)
-#define IO_FLAG_IN_USE ((unsigned) 0x40)
-#define IO_FLAG_DYNAMIC ((unsigned) 0x80)
+#define IO_FLAG_FAIL_IF_EXISTS ((unsigned) 0x40)
+#define IO_FLAG_IN_USE ((unsigned) 0x100)
+#define IO_FLAG_DYNAMIC ((unsigned) 0x200)
 #define IO_FLAG_RESET (IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_UPDATE | IO_FLAG_APPEND | IO_FLAG_ERROR | IO_FLAG_EOF)
 
 /* **WARNING** - Only define CC_IO_STATIC_INSTANCES if you don't need thread safety */
@@ -158,6 +171,13 @@ static IO io_alloc(enum IO_Type type) {
     return io;
 }
 
+static void io_destroy(IO io) {
+    if (io->flags & IO_FLAG_DYNAMIC)
+        free(io);
+    else
+        io->flags = 0;
+}
+
 /* TODO: slate for removal? */
 static int io_current_char(IO io) {
     switch (io->type) {
@@ -181,6 +201,11 @@ static int io_close_without_destroying(IO io) {
 
     switch (io->type) {
         case IO_OwnFile: result = fclose(io->ptr); break;
+#if LINUX_OS
+        case IO_OwnNativeFile: result = close(io->data.sizes.pos)? EOF: 0; break;
+#elif WINDOWS_OS
+        case IO_OwnNativeFile: result = CloseHandle(io->ptr)? EOF: 0; break;
+#endif
         case IO_Custom:
             if (io->callbacks->close == NULL)
                 return 0;
@@ -202,10 +227,7 @@ void io_clearerr(IO io) {
 int io_close(IO io) {
     int result = io_close_without_destroying(io);
 
-    if (io->flags & IO_FLAG_DYNAMIC)
-        free(io);
-    else
-        io->flags = 0;
+    io_destroy(io);
 
     return result;
 }
@@ -251,6 +273,10 @@ int io_flush(IO io) {
         default: return 0;
         case IO_File:
         case IO_OwnFile: return fflush(io->ptr);
+#if WINDOWS_OS
+        case IO_NativeFile:
+        case IO_OwnNativeFile: return FlushFileBuffers(io->ptr)? EOF: 0;
+#endif
         case IO_Custom:
             if (io->callbacks->flush == NULL)
             {
@@ -294,6 +320,31 @@ int io_getc(IO io) {
         default: io->flags |= IO_FLAG_EOF; return EOF;
         case IO_File:
         case IO_OwnFile: return fgetc(io->ptr);
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
+        {
+            char buf;
+#if LINUX_OS
+            ssize_t count = read(io->data.sizes.pos, &buf, 1);
+
+            if (count <= 0) {
+                io->flags |= count == 0? IO_FLAG_EOF: IO_FLAG_ERROR;
+                return EOF;
+            }
+#elif WINDOWS_OS
+            DWORD count;
+
+            if (!ReadFile(io->ptr, &buf, 1, &count, NULL)) {
+                io->flags |= IO_FLAG_ERROR;
+                return EOF;
+            } else if (count == 0) {
+                io->flags |= IO_FLAG_EOF;
+                return EOF;
+            }
+#endif
+
+            return buf;
+        }
         case IO_CString:
         {
             char ch = ((const char *) io->ptr)[io->data.sizes.pos];
@@ -338,6 +389,8 @@ int io_getpos(IO io, IO_Pos *pos) {
         case IO_OwnFile: return fgetpos(io->ptr, &pos->_fpos);
         case IO_CString:
         case IO_SizedBuffer: pos->_pos = io->data.sizes.pos; return 0;
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
         case IO_Custom:
         {
             long long tell = io_tell64(io);
@@ -365,6 +418,8 @@ char *io_gets(char *str, int num, IO io) {
         case IO_OwnFile: return fgets(str, num, io->ptr);
         case IO_CString:
         case IO_SizedBuffer:
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
         case IO_Custom:
         {
             int ch = 0;
@@ -392,6 +447,7 @@ static unsigned io_flags_for_mode(const char *mode) {
             case 'w': flags |= IO_FLAG_WRITABLE; break;
             case '+': flags |= IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_UPDATE; break;
             case 'a': flags |= IO_FLAG_APPEND; break;
+            case 'x': flags |= IO_FLAG_FAIL_IF_EXISTS; break;
         }
     }
 
@@ -405,7 +461,7 @@ IO io_open(const char *filename, const char *mode) {
 
     io->ptr = fopen(filename, mode);
     if (io->ptr == NULL) {
-        free(io);
+        io_close(io);
         return NULL;
     }
 
@@ -413,6 +469,48 @@ IO io_open(const char *filename, const char *mode) {
 
     return io;
 }
+
+#if LINUX_OS
+IO io_open_native(const char *filename, const char *mode) {
+    unsigned flags = io_flags_for_mode(mode);
+    unsigned openFlags = 0;
+
+    IO io = io_alloc(IO_OwnNativeFile);
+    if (io == NULL)
+        return NULL;
+
+    io->flags |= flags;
+
+    if ((flags & (IO_FLAG_READABLE | IO_FLAG_WRITABLE)) == (IO_FLAG_READABLE | IO_FLAG_WRITABLE))
+        openFlags = O_RDWR | O_CREAT;
+    else if (flags & IO_FLAG_READABLE)
+        openFlags = O_RDONLY;
+    else if (flags & IO_FLAG_WRITABLE)
+        openFlags = O_WRONLY | O_CREAT;
+
+    if (flags & IO_FLAG_APPEND)
+        openFlags |= O_APPEND;
+    else if (!(flags & IO_FLAG_UPDATE))
+        openFlags |= O_TRUNC;
+
+    if (flags & IO_FLAG_FAIL_IF_EXISTS)
+        openFlags |= O_EXCL;
+
+    int descriptor = open(filename, openFlags);
+    if (descriptor < 0) {
+        io_destroy(io);
+        return NULL;
+    }
+
+    io->data.sizes.pos = descriptor;
+
+    return io;
+}
+#elif WINDOWS_OS
+IO io_open_native(const char *filename, const char *mode) {
+
+}
+#endif
 
 IO io_open_file(FILE *file) {
     if (file == NULL)
@@ -461,7 +559,7 @@ IO io_open_buffer(char *buf, size_t size, const char *mode) {
     io->flags |= io_flags_for_mode(mode);
 
     if (0 == (io->flags & (IO_FLAG_READABLE | IO_FLAG_WRITABLE))) {
-        free(io);
+        io_destroy(io);
         return NULL;
     }
 
@@ -486,7 +584,7 @@ IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdat
 
     if (0 == (io->flags & (IO_FLAG_READABLE | IO_FLAG_WRITABLE)) ||
             (custom->open != NULL && (io->ptr = custom->open(userdata, io)) == NULL)) {
-        free(io);
+        io_destroy(io);
         return NULL;
     }
 
@@ -1150,6 +1248,27 @@ int io_putc(int ch, IO io) {
         default: io->flags |= IO_FLAG_ERROR; return EOF;
         case IO_File:
         case IO_OwnFile: return fputc(ch, io->ptr);
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
+        {
+            unsigned char chr = ch;
+
+#if LINUX_OS
+            if (write(io->data.sizes.pos, &chr, 1) != 1) {
+                io->flags |= IO_FLAG_ERROR;
+                return EOF;
+            }
+#elif WINDOWS_OS
+            DWORD count;
+
+            if (!WriteFile(io->ptr, &chr, 1, &count, NULL) || count != 1) {
+                io->flags |= IO_FLAG_ERROR;
+                return EOF;
+            }
+#endif
+
+            return chr;
+        }
         case IO_SizedBuffer:
             if (io->data.sizes.pos == io->data.sizes.size) {
                 io->flags |= IO_FLAG_ERROR;
@@ -1183,13 +1302,13 @@ int io_puts(const char *str, IO io) {
         default: io->flags |= IO_FLAG_ERROR; return EOF;
         case IO_File:
         case IO_OwnFile: return fputs(str, io->ptr);
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
         case IO_Custom:
         {
             size_t len = strlen(str);
-            if (io_write(str, 1, len, io) != len) {
-                io->flags |= IO_FLAG_ERROR;
+            if (io_write(str, 1, len, io) != len)
                 return EOF;
-            }
 
             return 0;
         }
@@ -1226,6 +1345,46 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
         default: io->flags |= IO_FLAG_EOF; return 0;
         case IO_File:
         case IO_OwnFile: return fread(ptr, size, count, io->ptr);
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
+        {
+            size_t max = size*count, totalRead = 0;
+
+#if LINUX_OS
+            do {
+                size_t amount = max > SSIZE_MAX? SSIZE_MAX: max;
+                ssize_t amountRead = 0;
+
+                if ((amountRead = read(io->data.sizes.pos, ptr, amount)) < (ssize_t) amount) {
+                    io->flags |= amountRead < 0? IO_FLAG_ERROR: IO_FLAG_EOF;
+                    return totalRead + (amountRead < 0? 0: amountRead);
+                }
+
+                ptr = (unsigned char *) ptr + amount;
+                totalRead += amount;
+                max -= amount;
+            } while (max);
+#elif WINDOWS_OS
+            do {
+                DWORD amount = max > 0xffffffffu? 0xffffffffu: max;
+                DWORD amountRead = 0;
+
+                if (!ReadFile(io->ptr, ptr, amount, &amountRead, NULL)) {
+                    io->flags |= IO_FLAG_ERROR;
+                    return totalRead;
+                } else if (amountRead < amount) {
+                    io->flags |= IO_FLAG_EOF;
+                    return totalRead + amountRead;
+                }
+
+                ptr = (unsigned char *) ptr + amount;
+                totalRead += amount;
+                max -= amount;
+            } while (max);
+#endif
+
+            return totalRead;
+        }
         case IO_CString:
         {
             unsigned char *cptr = ptr;
@@ -1321,7 +1480,7 @@ IO io_reopen(const char *filename, const char *mode, IO io) {
 
             if (f == NULL)
             {
-                free(io);
+                io_destroy(io);
                 return NULL;
             }
 
@@ -1337,7 +1496,7 @@ IO io_reopen(const char *filename, const char *mode, IO io) {
 
             if (io->ptr == NULL)
             {
-                free(io);
+                io_destroy(io);
                 return NULL;
             }
 
@@ -1352,13 +1511,54 @@ int io_seek(IO io, long int offset, int origin) {
         default: return -1;
         case IO_File:
         case IO_OwnFile: return fseek(io->ptr, offset, origin);
-        case IO_Custom:
-            if (io->callbacks->seek != NULL)
-                return io->callbacks->seek(io->ptr, offset, origin, io);
-            else if (io->callbacks->seek64 != NULL)
-                return io->callbacks->seek64(io->ptr, offset, origin, io);
-            else
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
+#if LINUX_OS
+            if (lseek(io->data.sizes.pos, offset, origin) < 0)
                 return -1;
+#elif WINDOWS_OS
+            if (sizeof(long) == sizeof(LONG)) {
+                if ((offset = SetFilePointer(io->ptr, offset, NULL,
+                                             origin == SEEK_SET? FILE_BEGIN:
+                                             origin == SEEK_CUR? FILE_CURRENT:
+                                             origin == SEEK_END? FILE_END: FILE_BEGIN)) == INVALID_SET_FILE_POINTER)
+                    return -1;
+            } else {
+                LARGE_INTEGER li;
+
+                li.QuadPart = offset;
+
+                if ((li.LowPart = SetFilePointer(io->ptr, li.LowPart, &li.HighPart,
+                                                 origin == SEEK_SET? FILE_BEGIN:
+                                                 origin == SEEK_CUR? FILE_CURRENT:
+                                                 origin == SEEK_END? FILE_END: FILE_BEGIN)) == INVALID_SET_FILE_POINTER &&
+                        GetLastError() != NO_ERROR)
+                    return -1;
+            }
+#endif
+
+            io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR);
+            io->ungetAvail = 0;
+
+            return 0;
+        case IO_Custom: {
+            long seek;
+
+            if (io->callbacks->seek != NULL)
+                seek = io->callbacks->seek(io->ptr, offset, origin, io);
+            else if (io->callbacks->seek64 != NULL)
+                seek = io->callbacks->seek64(io->ptr, offset, origin, io);
+            else
+                seek = -1;
+
+            if (seek < 0)
+                return seek;
+
+            io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR);
+            io->ungetAvail = 0;
+
+            return seek;
+        }
         case IO_CString:
         {
             switch (origin) {
@@ -1504,6 +1704,24 @@ int io_seek64(IO io, long long int offset, int origin) {
         default: return io_seek64_internal(io, offset, origin);
         case IO_File:
         case IO_OwnFile: return _fseeki64(io->ptr, offset, origin);
+        case IO_NativeFile:
+        case IO_OwnNativeFile: {
+            LARGE_INTEGER li;
+
+            li.QuadPart = offset;
+
+            if ((li.LowPart = SetFilePointer(io->ptr, li.LowPart, &li.HighPart,
+                                             origin == SEEK_SET? FILE_BEGIN:
+                                             origin == SEEK_CUR? FILE_CURRENT:
+                                             origin == SEEK_END? FILE_END: FILE_BEGIN)) == INVALID_SET_FILE_POINTER &&
+                    GetLastError() != NO_ERROR)
+                return -1;
+
+            io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR);
+            io->ungetAvail = 0;
+
+            return 0;
+        }
     }
 }
 #elif LINUX_OS
@@ -1512,6 +1730,15 @@ int io_seek64(IO io, long long int offset, int origin) {
         default: return io_seek64_internal(io, offset, origin);
         case IO_File:
         case IO_OwnFile: return fseeko(io->ptr, offset, origin);
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
+            if (lseek64(io->data.sizes.pos, offset, origin) < 0)
+                return -1;
+
+            io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR);
+            io->ungetAvail = 0;
+
+            return 0;
     }
 }
 #else
@@ -1533,6 +1760,8 @@ int io_setpos(IO io, const IO_Pos *pos) {
         case IO_File:
         case IO_OwnFile:
             return fsetpos(io->ptr, &pos->_fpos);
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
         case IO_Custom:
             return io_seek64(io, pos->_pos, SEEK_SET);
         case IO_CString:
@@ -1549,6 +1778,30 @@ long int io_tell(IO io) {
         default: return -1L;
         case IO_File:
         case IO_OwnFile: return ftell(io->ptr);
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
+#if LINUX_OS
+            return lseek(io->data.sizes.pos, 0, SEEK_CUR);
+#elif WINDOWS_OS
+            if (sizeof(long) == sizeof(LONG)) {
+                long offset;
+
+                if ((offset = SetFilePointer(io->ptr, 0, NULL, FILE_CURRENT)) == INVALID_SET_FILE_POINTER)
+                    offset = -1;
+
+                return offset;
+            } else {
+                LARGE_INTEGER li;
+
+                li.QuadPart = 0;
+
+                if ((li.LowPart = SetFilePointer(io->ptr, li.LowPart, &li.HighPart, FILE_CURRENT)) == INVALID_SET_FILE_POINTER &&
+                        GetLastError() != NO_ERROR)
+                    li.QuadPart = -1;
+
+                return li.QuadPart;
+            }
+#endif
         case IO_Custom:
             if (io->callbacks->tell != NULL)
                 return io->callbacks->tell(io->ptr, io);
@@ -1565,6 +1818,18 @@ long long int io_tell64(IO io) {
         default: return -1LL;
         case IO_File:
         case IO_OwnFile: return _ftelli64(io->ptr);
+        case IO_NativeFile:
+        case IO_OwnNativeFile: {
+            LARGE_INTEGER li;
+
+            li.QuadPart = 0;
+
+            if ((li.LowPart = SetFilePointer(io->ptr, li.LowPart, &li.HighPart, FILE_CURRENT)) == INVALID_SET_FILE_POINTER &&
+                    GetLastError() != NO_ERROR)
+                li.QuadPart = -1;
+
+            return li.QuadPart;
+        }
         case IO_Custom:
             if (io->callbacks->tell64 != NULL)
                 return io->callbacks->tell64(io->ptr, io);
@@ -1582,6 +1847,8 @@ long long int io_tell64(IO io) {
         default: return -1LL;
         case IO_File:
         case IO_OwnFile: return ftello(io->ptr);
+        case IO_NativeFile:
+        case IO_OwnNativeFile: return lseek64(io->data.sizes.pos, 0, SEEK_CUR);
         case IO_Custom:
             if (io->callbacks->tell64 != NULL)
                 return io->callbacks->tell64(io->ptr, io);
@@ -1622,6 +1889,43 @@ size_t io_write(const void *ptr, size_t size, size_t count, IO io) {
         default: io->flags |= IO_FLAG_ERROR; return 0;
         case IO_File:
         case IO_OwnFile: return fwrite(ptr, size, count, io->ptr);
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
+        {
+            size_t max = size*count, totalWritten = 0;
+
+#if LINUX_OS
+            do {
+                size_t amount = max > SSIZE_MAX? SSIZE_MAX: max;
+                ssize_t amountWritten = 0;
+
+                if ((amountWritten = write(io->data.sizes.pos, ptr, amount)) < (ssize_t) amount) {
+                    io->flags |= IO_FLAG_ERROR;
+                    return totalWritten + (amountWritten < 0? 0: amountWritten);
+                }
+
+                ptr = (unsigned char *) ptr + amount;
+                totalWritten += amount;
+                max -= amount;
+            } while (max);
+#elif WINDOWS_OS
+            do {
+                DWORD amount = max > 0xffffffffu? 0xffffffffu: max;
+                DWORD amountWritten = 0;
+
+                if (!WriteFile(io->ptr, ptr, amount, &amountWritten, NULL) || amountWritten != amount) {
+                    io->flags |= IO_FLAG_ERROR;
+                    return totalRead + amountWritten;
+                }
+
+                ptr = (unsigned char *) ptr + amount;
+                totalWritten += amount;
+                max -= amount;
+            } while (max);
+#endif
+
+            return totalWritten;
+        }
         case IO_Custom:
         {
             if (io->callbacks->write == NULL) {
@@ -1664,6 +1968,8 @@ void io_rewind(IO io) {
         default: break;
         case IO_File:
         case IO_OwnFile: rewind(io->ptr); break;
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
         case IO_Custom: io_seek(io, 0, SEEK_SET); break;
         case IO_CString:
         case IO_SizedBuffer:
@@ -1696,7 +2002,7 @@ IO io_tmpfile(void) {
 
     io->ptr = tmpfile();
     if (io->ptr == NULL) {
-        free(io);
+        io_destroy(io);
         return NULL;
     }
 
@@ -1714,6 +2020,16 @@ int io_ungetc(int chr, IO io) {
         default: return EOF;
         case IO_File:
         case IO_OwnFile: return ungetc(chr, io->ptr);
+        case IO_NativeFile:
+        case IO_OwnNativeFile:
+            if (io->ungetAvail != sizeof(io->ungetBuf))
+            {
+                io->flags &= ~IO_FLAG_EOF;
+
+                return io->ungetBuf[io->ungetAvail++] = chr;
+            }
+
+            return EOF;
         case IO_CString:
             if (chr == 0)
                 return EOF;

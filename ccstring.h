@@ -6,8 +6,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-    /* Returns the size of one linked list */
+    /* Returns the size of one string */
     size_t cc_s_sizeof();
+
+    /* Returns max capacity of one string */
+    size_t cc_s_max_capacity();
 
     /* Initializes a new string
      *

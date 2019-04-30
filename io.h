@@ -2,6 +2,7 @@
 #define IO_H
 
 #include <stdio.h>
+#include <platforms.h>
 
 /* **WARNING** - Only define CC_IO_STATIC_INSTANCES if you don't need thread safety */
 
@@ -14,6 +15,8 @@ enum IO_Type
     IO_Empty,
     IO_File, /* External FILE * object */
     IO_OwnFile, /* Internally-created FILE * object */
+    IO_NativeFile, /* External native file descriptor */
+    IO_OwnNativeFile, /* Internally-created native file descriptor */
     IO_CString, /* NUL-terminated C-style string */
     IO_SizedBuffer, /* Size-limited buffer for reading and/or writing */
     IO_Custom /* Custom callback for reading and/or writing */
@@ -85,6 +88,12 @@ int io_getc(IO io);
 int io_getpos(IO io, IO_Pos *pos);
 char *io_gets(char *str, int num, IO io);
 IO io_open(const char *filename, const char *mode);
+IO io_open_native(const char *filename, const char *mode);
+#if LINUX_OS
+IO io_open_native_file(int descriptor);
+#elif WINDOWS_OS
+IO io_open_native_file(HANDLE descriptor);
+#endif
 IO io_open_file(FILE *file);
 IO io_open_empty(void); /* No input is read (i.e. the first read returns EOF) and all writes fail to this device */
 IO io_open_cstring(const char *str);
@@ -100,6 +109,7 @@ int io_putc(int ch, IO io);
 int io_puts(const char *str, IO io);
 size_t io_read(void *ptr, size_t size, size_t count, IO io);
 IO io_reopen(const char *filename, const char *mode, IO io);
+int io_vscanf(IO io, const char *fmt, va_list args);
 int io_scanf(IO io, const char *fmt, ...);
 int io_seek(IO io, long int offset, int origin);
 int io_seek64(IO io, long long int offset, int origin);
