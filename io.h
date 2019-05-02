@@ -75,7 +75,7 @@ int io_writable(IO io);
  * This pointer should *never* be freed
  */
 void *io_userdata(IO io);
-/* Returns pointer to object-specific raw buffer (the size is given by io_tempdata_size(), but is guaranteed to be >= 4 for Custom-type objects)
+/* Returns pointer to object-specific raw buffer (the size is given by io_tempdata_size(), but is guaranteed to be >= 6 for Custom-type objects)
  * This buffer can be used for anything
  * If this function returns NULL, no buffer is available
  */
