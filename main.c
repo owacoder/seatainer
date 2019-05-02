@@ -328,17 +328,29 @@ void test_io() {
     test_hex();
 
 #if WINDOWS_OS
-    IO io = io_open("F:/Test_Data/test.txt", "w");
+    IO io = io_open_native("F:/Test_Data/test.txt", "r");
 #elif LINUX_OS
     IO io = io_open_native("/shared/Test_Data/test.txt", "wx");
 #endif
     if (!io)
         return;
 
+    IO out = io_open_file(stdout);
+    io_setvbuf(io, NULL, _IOFBF, 4);
+    while (1) {
+        int ch = io_getc(io);
+        if (ch == EOF) break;
+
+        io_putc(ch, out);
+    }
+    puts("");
+
     // io_seek64(io, 1LL << 16, SEEK_SET);
-    io_puts("This is some text", io);
+    io_setvbuf(io, NULL, _IOFBF, 4);
+    //io_puts("This is some text", io);
     io_seek(io, 1, SEEK_SET);
-    io_puts("That my", io);
+    io_putc('?', io);
+    io_puts("That is your name", io);
 
     io_close(io);
 

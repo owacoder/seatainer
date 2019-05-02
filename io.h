@@ -89,6 +89,7 @@ int io_getpos(IO io, IO_Pos *pos);
 char *io_gets(char *str, int num, IO io);
 IO io_open(const char *filename, const char *mode);
 IO io_open_native(const char *filename, const char *mode);
+/* TODO: io_open_native_file() not yet implemented */
 #if LINUX_OS
 IO io_open_native_file(int descriptor);
 #elif WINDOWS_OS

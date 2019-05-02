@@ -1474,10 +1474,10 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
                 return count;
             } else { /* Buffered and requested more than buffer holds */
                 size_t read = io->data.sizes.pos;
-                memcpy(cptr, io->data.sizes.ptr2 + io->data.sizes.size - io->data.sizes.pos, io->data.sizes.pos);
+                memcpy(cptr, io->data.sizes.ptr2 + io->data.sizes.size - io->data.sizes.pos, read);
 
-                max -= io->data.sizes.pos;
-                cptr += io->data.sizes.pos;
+                max -= read;
+                cptr += read;
                 io->data.sizes.pos = 0;
 
                 /* Pull greater-than-buffer-size chunk directly into output, skipping the buffer entirely */
@@ -1499,7 +1499,7 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
                     memcpy(cptr, io->data.sizes.ptr2 + io->data.sizes.size - io->data.sizes.pos, max);
                     io->data.sizes.pos -= max;
 
-                    return count;
+                    return (read + max) / size;
                 }
             }
         }
@@ -1641,11 +1641,14 @@ int io_seek(IO io, long int offset, int origin) {
                 return -1;
 #elif WINDOWS_OS
             if (sizeof(long) == sizeof(LONG)) {
-                if ((offset = SetFilePointer(io->ptr, offset, NULL,
+                DWORD val;
+                if ((val = SetFilePointer(io->ptr, offset, NULL,
                                              origin == SEEK_SET? FILE_BEGIN:
                                              origin == SEEK_CUR? FILE_CURRENT:
                                              origin == SEEK_END? FILE_END: FILE_BEGIN)) == INVALID_SET_FILE_POINTER)
                     return -1;
+
+                return offset = (long) val;
             } else {
                 LARGE_INTEGER li;
 
@@ -1908,9 +1911,12 @@ long int io_tell(IO io) {
 #elif WINDOWS_OS
             if (sizeof(long) == sizeof(LONG)) {
                 long offset;
+                DWORD val;
 
-                if ((offset = SetFilePointer(io->ptr, 0, NULL, FILE_CURRENT)) == INVALID_SET_FILE_POINTER)
+                if ((val = SetFilePointer(io->ptr, 0, NULL, FILE_CURRENT)) == INVALID_SET_FILE_POINTER)
                     offset = -1;
+                else
+                    offset = (long) val;
 
                 if (io->flags & IO_FLAG_HAS_JUST_READ)
                     return offset - io->data.sizes.pos;
