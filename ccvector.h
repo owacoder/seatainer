@@ -6,6 +6,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
     /* Returns the size of one linked list */
     size_t cc_v_sizeof();
 
@@ -249,6 +250,7 @@ extern "C" {
      * Note that this operation is performed in O(n) time
      */
     void cc_v_destroy(HVector list, ElementDataCallback destruct);
+
 #ifdef __cplusplus
 }
 #endif

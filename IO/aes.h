@@ -3,6 +3,10 @@
 
 #include "../io.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 enum AES_Type {
     AES_128,
     AES_192,
@@ -39,5 +43,9 @@ IO io_open_aes_decrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, cons
 IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode);
 
 void test_aes();
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // AES_H

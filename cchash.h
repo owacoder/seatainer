@@ -6,6 +6,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
     /* Returns the size of one hash table */
     size_t cc_ht_sizeof();
 
@@ -225,6 +226,7 @@ extern "C" {
      * Note that this operation is performed in O(n) time
      */
     void cc_ht_destroy(HHashTable table);
+
 #ifdef __cplusplus
 }
 #endif

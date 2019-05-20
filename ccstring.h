@@ -6,6 +6,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
     /* Returns the size of one string */
     size_t cc_s_sizeof();
 
@@ -240,6 +241,7 @@ extern "C" {
      * Note that this operation is performed in O(n) time
      */
     void cc_s_destroy(HString string);
+
 #ifdef __cplusplus
 }
 #endif

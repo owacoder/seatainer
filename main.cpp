@@ -327,6 +327,17 @@ void test_io() {
     test_aes();
     test_hex();
 
+    IO tmp = io_open_minimal_buffer("wt");
+    IO hex = io_open_hex_encode(tmp, "w");
+    io_puts("Some data", tmp);
+    io_puts(" and some more data", tmp);
+    printf("Written: %d\n", io_printf(tmp, " and something more, with a number (%d) and a string (%10s)\n", 1443, "str"));
+    io_putc(0, tmp);
+    puts(io_underlying_buffer(tmp));
+    printf("Size: %lu\n", (unsigned long) io_underlying_buffer_size(tmp));
+    printf("Capacity: %lu\n", (unsigned long) io_underlying_buffer_capacity(tmp));
+    return;
+
 #if WINDOWS_OS
     IO io = io_open_native("F:/Test_Data/test.txt", "r");
 #elif LINUX_OS
@@ -397,9 +408,48 @@ void test_io() {
     io_close(io);
 }
 
+#include "dir.h"
+
 int main()
 {
+    const char *strs[][2] = {
+        {"input", "*"},
+        {"pattern", "pa*"},
+        {"pattern", "*ttern?*"},
+        {"pattern#", "pattern[0-9#a-z]"},
+        {"Some really long string - with some special ranges like [ and ]", "*[^ ] really*]*"}
+    };
+
+    IO in = io_open_file(stdin);
+    IO out = io_open_file(stdout);
+    if (1) {
+        char buf[20];
+        int value = 0, res;
+        res = io_scanf(io_open_cstring("+123 Oliver-Ward-Adams"), "%d %8[A-Za-z]", &value, buf);
+        printf("Matched = %d (%d, %s)\n", res, value, buf);
+        io_rewind(in);
+    }
+
+    char path[256] = "smb://server/path";
+
+    printf("Normalized = %s\n", path_norm(path));
+    printf("Parent Dir = %s\n", path_up(path));
+    printf("Parent Dir = %s\n", path_up(path));
+
+    Directory dir = dir_open("/shared");
+    DirectoryEntry entry;
+    printf("Error: %d\n", dir_error(dir));
+    perror("");
+    while ((entry = dir_next(dir)) != NULL)
+        printf("/shared/%s %s\n", dirent_name(entry), dirent_is_directory(entry)? "(dir)": "");
+    dir_close(dir);
+
+    for (size_t i = 0; i < sizeof(strs)/sizeof(*strs); ++i)
+        printf("glob(\"%s\", \"%s\") = %d\n", strs[i][0], strs[i][1], glob(strs[i][0], strs[i][1]));
+
     test_io();
+
+    return 0;
 
     const size_t cnt = 800000;
 

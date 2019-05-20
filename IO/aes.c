@@ -63,10 +63,10 @@ void test_aes() {
 
     enum AES_Mode mode = AES_OFB;
     IO input = io_open_cstring("Hello World!    This is a text!!SomeMoreTextForU");
-    IO ciphertext = io_open_aes_encrypt(input, AES_192, mode, test_aes_ecb_key192, iv, "r");
-    IO pciphertext = io_open_aes_encrypt(input, AES_192, mode, test_aes_ecb_key192, iv, "r<");
-    IO aes = io_open_aes_decrypt(ciphertext, AES_192, mode, test_aes_ecb_key192, iv, "r");
-    IO paes = io_open_aes_decrypt(pciphertext, AES_192, mode, test_aes_ecb_key192, iv, "r<");
+    IO ciphertext = io_open_aes_encrypt(input, AES_192, mode, test_aes_ecb_key192, iv, "rb");
+    IO pciphertext = io_open_aes_encrypt(input, AES_192, mode, test_aes_ecb_key192, iv, "rb<");
+    IO aes = io_open_aes_decrypt(ciphertext, AES_192, mode, test_aes_ecb_key192, iv, "rb");
+    IO paes = io_open_aes_decrypt(pciphertext, AES_192, mode, test_aes_ecb_key192, iv, "rb<");
 
     while (1) {
         int ch;
@@ -103,8 +103,8 @@ void test_aes() {
     io_close(input);
 
     IO plaintext = io_open_file(stdout);
-    IO hex = io_open_hex_encode(plaintext, "w");
-    aes = io_open_aes_encrypt(hex, AES_192, AES_ECB, test_aes_ecb_key192, NULL, "w");
+    IO hex = io_open_hex_encode(plaintext, "wb");
+    aes = io_open_aes_encrypt(hex, AES_192, AES_ECB, test_aes_ecb_key192, NULL, "wb");
 
     printf("Encrypted: ");
     io_putc(test_aes_plaintext[0], aes);

@@ -3,6 +3,10 @@
 
 #include "../io.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Open as "r" only: to pull all data from IO and obtain the hash
  *
  * Open as "w" only: push data to the hash function and push the hash to the underlying IO device.
@@ -14,5 +18,9 @@
  *
  */
 IO io_open_md5(IO io, const char *mode);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // MD5_H
