@@ -664,6 +664,7 @@ HContainerElementMetaData cc_ht_value_metadata(HHashTable table)
     return table->value_meta;
 }
 
+/* TODO: hash comparison */
 int cc_ht_compare(HHashTable lhs, HHashTable rhs, ElementDualDataCallback cmp)
 {
 

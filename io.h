@@ -231,6 +231,90 @@ public:
         return io_getc(m_io);
     }
 
+    /* Attempts to read `max` characters into `buffer`, without NUL-terminating. Returns the number of characters read.
+     * Check eof() or error() to determine cause of failure
+     */
+    size_t read(char *buffer, size_t max) {
+        return io_read(buffer, 1, max, m_io);
+    }
+    /* Reads until EOF or newline, whichever comes first */
+    /* NUL-terminates the buffer, so max must be greater than 0. Returns the number of characters read, including the newline
+     * The newline character is included in the output
+     * Check eof() or error() to determine cause of failure
+     */
+    size_t readLine(char *buffer, size_t max) {
+        char *newBuffer = buffer, ch;
+
+        for (--max; max && getChar(ch); --max) {
+            *newBuffer++ = ch;
+            if (ch == '\n')
+                break;
+        }
+
+        *newBuffer = 0;
+
+        return newBuffer - buffer;
+    }
+    /* Reads until EOF or newline, whichever comes first
+     * The newline character is included in the output
+     * Returns true on success, false on failure
+     */
+    bool readLine(std::string &result) {
+        char ch;
+        result.clear();
+        while (getChar(ch)) {
+            result.push_back(ch);
+            if (ch == '\n')
+                break;
+        }
+        return !error();
+    }
+    /* Reads until EOF or newline, whichever comes first
+     * The newline character is included in the output
+     * There is no way to report errors, so an empty output either means no input was available or an error occured
+     */
+    std::string readLine() {
+        std::string result;
+        if (!readLine(result))
+            return std::string();
+        return result;
+    }
+
+    /* Reads up to `max` characters from input and returns them in a std::string
+     * Check eof() or error() to determine cause of failure
+     */
+    bool read(std::string &result, size_t max) {
+        char ch;
+        result.clear();
+        while (max-- && getChar(ch))
+            result.push_back(ch);
+        return !error();
+    }
+    std::string read(size_t max) {
+        std::string result;
+        if (!read(result, max))
+            return std::string();
+
+        return result;
+    }
+    /* Reads all the input and returns it in a std::string
+     * Check eof() or error() to determine cause of failure
+     */
+    bool readAll(std::string &result) {
+        char ch;
+        result.clear();
+        while (getChar(ch))
+            result.push_back(ch);
+        return !error();
+    }
+    std::string readAll() {
+        std::string result;
+        if (!readAll(result))
+            return std::string();
+
+        return result;
+    }
+
     /* Writes a character and returns true on success, false on failure */
     bool putChar(char chr) {
         return io_putc((unsigned char) chr, m_io) != EOF;
