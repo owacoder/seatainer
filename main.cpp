@@ -410,6 +410,29 @@ void test_io() {
 
 #include "dir.h"
 
+void walk(Directory directory, unsigned long long *items, unsigned long long *size) {
+    if (dir_error(directory)) {
+        printf("Error while scanning %s\n", dir_path(directory));
+        return;
+    }
+
+    DirectoryEntry entry;
+    while ((entry = dir_next(directory)) != NULL) {
+        if (dirent_is_subdirectory(entry)) {
+            Directory nextDirectory = dir_open(dirent_fullname(entry));
+            if (nextDirectory) {
+                walk(nextDirectory, items, size);
+                dir_close(nextDirectory);
+            }
+        } else if (!dirent_is_directory(entry)) {
+            ++*items;
+            long long dsize = dirent_size(entry);
+            if (dsize >= 0)
+                *size += dsize;
+        }
+    }
+}
+
 int main()
 {
     const char *strs[][2] = {
@@ -421,27 +444,38 @@ int main()
     };
 
     IO in = io_open_file(stdin);
-    IO out = io_open_file(stdout);
     if (1) {
         char buf[20];
         int value = 0, res;
-        res = io_scanf(io_open_cstring("+123 Oliver-Ward-Adams"), "%d %8[A-Za-z]", &value, buf);
+        res = io_scanf(io_open_cstring("+123 Some-long-string"), "%d %8[A-Za-z]", &value, buf);
         printf("Matched = %d (%d, %s)\n", res, value, buf);
         io_rewind(in);
     }
 
-    char path[256] = "smb://server/path";
+    const char *data[] = {"C:", "Program Files", "..", "/somewhere"};
+    Path path = path_construct_gather(data, sizeof(data)/sizeof(*data));
 
-    printf("Normalized = %s\n", path_norm(path));
-    printf("Parent Dir = %s\n", path_up(path));
-    printf("Parent Dir = %s\n", path_up(path));
+    printf("Original = %s\n", path_str(path));
+    printf("Normalized = %s\n", path_str(path_normalize(path)));
+    printf("Parent Dir = %s\n", path_str(path_up(path)));
+    printf("Parent Dir = %s\n", path_str(path_up(path)));
 
-    Directory dir = dir_open("/shared");
+    path_destroy(path);
+
+    unsigned long long items = 0, size = 0;
+    Directory dir = dir_open("C:\\");
+    walk(dir, &items, &size);
+
+    printf("Walk of %s completed: %llu files found with a total size of %llu bytes\n", dir_path(dir), items, size);
+
+#if 0
     DirectoryEntry entry;
     printf("Error: %d\n", dir_error(dir));
     perror("");
+    printf("Printing directory \"%s\"\n", dir_path(dir));
     while ((entry = dir_next(dir)) != NULL)
-        printf("/shared/%s %s\n", dirent_name(entry), dirent_is_directory(entry)? "(dir)": "");
+        printf("%s %s %lld\n", dirent_fullname(entry), dirent_is_directory(entry)? "(dir)": "", dirent_size(entry));
+#endif
     dir_close(dir);
 
     for (size_t i = 0; i < sizeof(strs)/sizeof(*strs); ++i)

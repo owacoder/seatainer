@@ -135,8 +135,13 @@ static struct InputOutputDevice io_devices[CC_IO_STATIC_INSTANCES];
 static enum IO_OpenHint io_device_open_hint;
 static enum IO_OpenHint io_device_open_permanent_hint;
 
+static Atomic io_static_alloc_lock; /* 1 if lock is held, 0 otherwise */
+
 static IO io_static_alloc(enum IO_Type type) {
     IO io = NULL;
+
+    /* Spinlock until lock is 0 */
+    while (atomic_cmpxchg(&io_static_alloc_lock, 1, 0) != 0);
 
     for (int i = 0; i < CC_IO_STATIC_INSTANCES; ++i) {
         if ((io_devices[i].flags & IO_FLAG_IN_USE) == 0) {
@@ -154,6 +159,8 @@ static IO io_static_alloc(enum IO_Type type) {
     io->ungetAvail = 0;
 
     io_hint_next_open(io_device_open_permanent_hint, 0);
+
+    atomic_set(&io_static_alloc_lock, 0);
 
     return io;
 }

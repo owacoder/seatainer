@@ -117,66 +117,167 @@ int glob(const char *str, const char *pattern) {
     return *str == 0? 0: -1;
 }
 
+struct PathStruct {
+    char *external;
+    char path[];
+};
+
+int path_check_separator(char c) {
+    return c == '\\' || c == '/';
+}
+
+char path_separator() {
+#if WINDOWS_OS
+    return '\\';
+#else
+    return '/';
+#endif
+}
+
+static char *path_data(Path path) {
+    return path->external? path->external: path->path;
+}
+
+const char *path_str(Path path) {
+    return path_data(path);
+}
+
+Path path_construct_ref(char *pathBuffer) {
+    Path result = malloc(sizeof(*result));
+    if (!result)
+        return NULL;
+
+    result->external = pathBuffer;
+
+    return result;
+}
+
+Path path_construct_gather(const char *args[], size_t segments) {
+    size_t totalLen = segments? segments - 1: 0;
+
+    for (size_t i = 0; i < segments; ++i)
+        totalLen += strlen(args[i]);
+
+    Path result = malloc(sizeof(*result) + totalLen + 1);
+    if (!result)
+        return NULL;
+    result->external = NULL;
+
+    char *ptr = result->path;
+    size_t lastLength = 0;
+
+    for (size_t i = 0; i < segments; ++i) {
+        size_t len = strlen(args[i]);
+        if (i && len &&
+                !path_check_separator(args[i-1][lastLength-1]) &&
+                !path_check_separator(*args[i]))
+            *ptr++ = path_separator();
+        memcpy(ptr, args[i], len);
+        ptr += len;
+        lastLength = len;
+    }
+
+    *ptr = 0;
+
+    return result;
+}
+
+Path path_construct(const char *path, const char *name) {
+    size_t pathLen = strlen(path);
+    size_t nameLen = name? strlen(name): 0;
+    int add_separator = pathLen && !path_check_separator(path[pathLen-1]);
+
+    Path result = malloc(sizeof(*result) + pathLen + add_separator + nameLen + 1);
+    if (!result)
+        return NULL;
+
+    memcpy(result->path, path, pathLen);
+
+    if (add_separator)
+        result->path[pathLen++] = path_separator();
+
+    if (name)
+        memcpy(result->path + pathLen, name, nameLen);
+
+    result->path[pathLen + nameLen] = 0;
+    result->external = NULL;
+
+    return result;
+}
+
+Path path_append(Path path, const char *name) {
+    Path result = path_copy(path, name);
+    path_destroy(path);
+    return result;
+}
+
+Path path_copy(Path path, const char *name) {
+    return path_construct(path_str(path), name);
+}
+
+void path_destroy(Path path) {
+    free(path);
+}
+
 /* Removes the last directory from the (either relative or absolute) path and returns `path` */
-char *path_up(char *path) {
-    char *npath = path;
-    char *minAddr = path;
+Path path_up(Path path) {
+    char *pathStr = path_data(path);
+    char *npath = pathStr;
+    char *minAddr = pathStr;
 
 #if LINUX_OS
-    if (*path != '/') /* Either a relative path, or a resource locator */ {
-        minAddr = strchr(path, '/');
+    if (*pathStr != '/') /* Either a relative path, or a resource locator */ {
+        minAddr = strchr(pathStr, '/');
         if (minAddr == NULL || minAddr[-1] != ':')
-            minAddr = path; /* Not a resource locator */
+            minAddr = pathStr; /* Not a resource locator */
         else if (minAddr[1] == '/') /* Resource locator has two slashes (i.e. "smb://"), so look for the next slash */ {
             minAddr = strchr(minAddr + 2, '/');
             if (minAddr == NULL)
-                return path;
+                return pathStr;
         }
     }
 
-    npath = path + strlen(path) - 1;
-    while (npath != path && *npath == '/') /* Trailing '/' character(s), ignore as if not there */
+    npath = pathStr + strlen(pathStr) - 1;
+    while (npath != pathStr && *npath == '/') /* Trailing '/' character(s), ignore as if not there */
         --npath;
 
     while (*npath && *npath != '/')
         --npath;
 
     /* Allow for proper resource locators (don't take the trailing '\' after "\\resource\") */
-    if (npath <= minAddr && minAddr != path) {
+    if (npath <= minAddr && minAddr != pathStr) {
         minAddr[1] = 0;
-        return path;
+        return pathStr;
     }
 
-    if (npath == path && *path == '/') /* Traversed up to root, do not remove slash */
+    if (npath == pathStr && *pathStr == '/') /* Traversed up to root, do not remove slash */
         npath[1] = 0;
     else /* Not root, so remove slash */
         npath[0] = 0;
-
-    return path;
 #elif WINDOWS_OS
-    if (path[0] == '\\' && path[1] == '\\') {
-        minAddr = strchr(path + 2, '\\');
+    if (pathStr[0] == '\\' && pathStr[1] == '\\') {
+        minAddr = strchr(pathStr + 2, '\\');
         if (minAddr == NULL)
             return path;
     }
 
-    npath = path + strlen(path) - 1;
-    while (npath != path && *npath == '\\') /* Trailing '\' character(s), ignore as if not there */
+    npath = pathStr + strlen(pathStr) - 1;
+    while (npath != pathStr && *npath == '\\') /* Trailing '\' character(s), ignore as if not there */
         --npath;
 
     while (*npath && *npath != '\\')
         --npath;
 
     /* Allow for proper resource locators (don't take the trailing '\' after "\\resource\") */
-    if (npath <= minAddr && minAddr != path) {
+    if (npath <= minAddr && minAddr != pathStr) {
         /* Don't strip the name of resources of the form "\\.\name" (resources of this type won't have a trailing slash either) */
-        if (path[2] != '.' || path[3] != '\\')
+        if (pathStr[2] != '.' || pathStr[3] != '\\')
             minAddr[1] = 0;
         return path;
     }
 
-    if (npath <= path + 2 && path[0] && path[1] == ':') /* Absolute drive path, cannot go up */
-        path[2 + (path[2] == '\\')] = 0;
+    if (npath <= pathStr + 2 && pathStr[0] && pathStr[1] == ':') /* Absolute drive path, cannot go up */
+        pathStr[2 + (pathStr[2] == '\\')] = 0;
     else
         npath[0] = 0;
 #endif
@@ -185,8 +286,9 @@ char *path_up(char *path) {
 }
 
 /* Normalizes `path` to remove consecutive '/' or '\' characters, remove './' references, and remove '../' references */
-char *path_norm(char *path) {
-    char *save = path;
+Path path_normalize(Path path) {
+    char *pathStr = path_data(path);
+    char *save = pathStr;
 
 #if WINDOWS_OS
     const int pathSep = '\\';
@@ -196,7 +298,7 @@ char *path_norm(char *path) {
     const int altPathSep = '\\';
 #endif
 
-    char *npath = path;
+    char *npath = pathStr;
 
     /* Convert all path separators to proper form */
     for (; *npath; ++npath)
@@ -206,107 +308,122 @@ char *path_norm(char *path) {
     int unknownParent = 1;
 
     /* Remove consecutive separators */
-    for (npath = path; *path; ) {
-        if (path[0] == pathSep && path[1] == pathSep) { /* Consecutive separators */
+    for (npath = pathStr; *pathStr; ) {
+        if (pathStr[0] == pathSep && pathStr[1] == pathSep) { /* Consecutive separators */
 #if LINUX_OS
             /* Allow two after a scheme for Linux resources */
-            if (path != save && path[-1] == ':') {
-                *npath++ = *path++;
-                *npath++ = *path++;
+            if (pathStr != save && pathStr[-1] == ':') {
+                *npath++ = *pathStr++;
+                *npath++ = *pathStr++;
                 continue;
             }
 #elif WINDOWS_OS
             /* Allow two to start with for Windows resources */
-            if (path == save) {
-                npath = path += 2;
+            if (pathStr == save) {
+                npath = pathStr += 2;
 
                 /* Allow for resources of the form "\\.\" */
-                if (path[0] == '.' && path[1] == pathSep)
-                    npath = path += 2;
+                if (pathStr[0] == '.' && pathStr[1] == pathSep)
+                    npath = pathStr += 2;
 
                 continue;
             }
 #endif
 
-            while (path[0] == pathSep && path[1] == pathSep)
-                ++path;
-        } else if ((path[0] == pathSep && path[1] == '.' && path[2] == '.' && (path[3] == 0 || path[3] == pathSep)) ||
-                   ((path == save || path[-1] == pathSep) && path[0] == '.' && path[1] == '.' && path[2] == pathSep)) { /* Parent directory specifier */
-            path += path[0] == pathSep;
+            while (pathStr[0] == pathSep && pathStr[1] == pathSep)
+                ++pathStr;
+        } else if ((pathStr[0] == pathSep && pathStr[1] == '.' && pathStr[2] == '.' && (pathStr[3] == 0 || pathStr[3] == pathSep)) ||
+                   ((pathStr == save || pathStr[-1] == pathSep) && pathStr[0] == '.' && pathStr[1] == '.' && pathStr[2] == pathSep)) { /* Parent directory specifier */
+            pathStr += pathStr[0] == pathSep;
 
             if (unknownParent) {
-                memmove(npath, path, 3);
+                memmove(npath, pathStr, 3);
                 npath += 3;
-                path += 3;
+                pathStr += 3;
                 continue;
             }
 
-            char *next = path + 3;
+            char *next = pathStr + 3;
             npath[0] = 0;
-            npath = path_up(save);
+            npath = path_data(path_up(path));
 
             npath += strlen(npath);
             if (npath != save && npath[-1] != pathSep && *next)
                 *npath++ = pathSep;
 
-            path = next;
-        } else if ((path == save || path[-1] == pathSep) && path[0] == '.' && path[1] == pathSep) { /* Current directory specifier */
-            while (path[0] == '.' && path[1] == pathSep)
-                path += 2;
-            while (*path == pathSep) /* Remove consecutive separators after directory specifier, if any */
-                ++path;
-        } else if (path[0] == pathSep && path[1] == '.' && (path[2] == 0 || path[2] == pathSep)) { /* Remove trailing current directory specifiers */
-            while (path[0] == pathSep && path[1] == '.' && (path[2] == 0 || path[2] == pathSep))
-                path += 2;
+            pathStr = next;
+        } else if ((pathStr == save || pathStr[-1] == pathSep) && pathStr[0] == '.' && pathStr[1] == pathSep) { /* Current directory specifier */
+            while (pathStr[0] == '.' && pathStr[1] == pathSep)
+                pathStr += 2;
+            while (*pathStr == pathSep) /* Remove consecutive separators after directory specifier, if any */
+                ++pathStr;
+        } else if (pathStr[0] == pathSep && pathStr[1] == '.' && (pathStr[2] == 0 || pathStr[2] == pathSep)) { /* Remove trailing current directory specifiers */
+            while (pathStr[0] == pathSep && pathStr[1] == '.' && (pathStr[2] == 0 || pathStr[2] == pathSep))
+                pathStr += 2;
         } else {
-            *npath++ = *path++;
+            *npath++ = *pathStr++;
             unknownParent = 0; /* We must have part of a valid name here, so parent references after this should be able to be dereferenced */
         }
     }
 
-    if (npath != save && npath[-1] == pathSep)
-        --npath;
+    if (npath != save && npath[-1] == pathSep) {
+#if WINDOWS_OS
+        if (npath - save != 3 || npath[-2] != ':')
+#endif
+            --npath;
+    }
     *npath = 0;
 
-    return save;
+    return path;
 }
 
 #if LINUX_OS
 struct DirEntryStruct {
     char *path; /* Points to path in DirStruct, doesn't have ownership */
+    size_t path_len; /* Length of directory path in DirStruct */
     struct dirent data;
     struct stat extData;
-    unsigned hasExtData; /* non-zero if extData is valid, zero if extData is not valid */
+    char hasExtData; /* non-zero if extData is valid, zero if extData is not valid */
+    char shouldBeFreed; /* non-zero if this structure should be free()d */
 };
 
 struct DirStruct {
     DIR *handle;
-    char *path; /* Owned copy of path, plus capacity for directory separator, 256-byte name, and NUL-terminator */
     struct DirEntryStruct findData, lastFoundData;
     int error; /* Zero if no error occured while opening the directory, platform specific otherwise */
+    size_t pathLen;
+    char path[]; /* Owned copy of path, plus capacity for directory separator, 256-byte name, and NUL-terminator */
 };
 
 int dirFillExtData(DirectoryEntry entry) {
     if (entry->hasExtData)
         return 0;
 
-    size_t pathLen = strlen(entry->path);
-    strcpy(entry->path + pathLen, dirent_name(entry));
+    strcpy(entry->path + entry->path_len, dirent_name(entry));
 
     if (lstat(entry->path, &entry->extData)) {
-        entry->path[pathLen] = 0;
+        entry->path[entry->path_len] = 0;
         return -1;
     }
 
     entry->hasExtData = 1;
-    entry->path[pathLen] = 0;
+    entry->path[entry->path_len] = 0;
     return 0;
 }
 #elif WINDOWS_OS
+struct DirEntryStruct {
+    char *path; /* Points to path in DirStruct, doesn't have ownership */
+    size_t path_len; /* Length of directory path in DirStruct */
+    WIN32_FIND_DATAA data;
+    char shouldBeFreed; /* non-zero if this structure should be free()d */
+};
+
 struct DirStruct {
     HANDLE findFirstHandle;
-    WIN32_FIND_DATAA findData, lastFoundData;
+    struct DirEntryStruct findData, lastFoundData;
     int error; /* Zero if no error occured while opening the directory, platform specific otherwise */
+    size_t path_len;
+    char path[MAX_PATH + 1]; /* Owned copy of path */
 };
 
 void systemTimeToTm(LPSYSTEMTIME time, struct tm *t) {
@@ -324,23 +441,20 @@ void systemTimeToTm(LPSYSTEMTIME time, struct tm *t) {
 
 Directory dir_open(const char *dir) {
 #if LINUX_OS
-    Directory result = calloc(1, sizeof(*result));
+    size_t len = strlen(dir);
+    Directory result = calloc(1, sizeof(*result) + len + 258);
     if (result == NULL)
         return NULL;
 
-    size_t len = strlen(dir);
-    char *path = malloc(len + 258);
-    if (path == NULL) {
-        free(result);
-        return NULL;
-    }
+    /* Copy to new Directory object and ensure path ends with directory separator */
+    memcpy(result->path, dir, len);
+    if (len && result->path[len-1] != '/')
+        result->path[len++] = '/';
+    result->path[len] = 0;
+    result->path_len = len;
 
-    memcpy(path, dir, len);
-    if (len && path[len-1] != '/')
-        path[len++] = '/';
-    path[len] = 0;
-
-    result->path = result->findData.path = result->lastFoundData.path = path;
+    result->findData.path = result->lastFoundData.path = result->path;
+    result->findData.path_len = result->lastFoundData.path_len = result->path_len;
     result->handle = opendir(dir);
 
     struct dirent *dEntry;
@@ -363,25 +477,31 @@ Directory dir_open(const char *dir) {
     char name[MAX_PATH + 3];
     size_t len = strlen(dir);
 
-    if (len > MAX_PATH)
+    if (len > MAX_PATH - 2)
         return NULL;
 
     memcpy(name, dir, len);
 
+    /* Ensure path ends with directory separator */
     if (len && name[len-1] != '\\' && name[len-1] != '/')
         name[len++] = '\\';
-
-    name[len++] = '*';
     name[len] = 0;
-
-    if (len > MAX_PATH)
-        return NULL;
 
     Directory result = calloc(1, sizeof(*result));
     if (result == NULL)
         return NULL;
 
-    result->findFirstHandle = FindFirstFileA(name, &result->findData);
+    /* Copy to new Directory object */
+    strcpy(result->path, name);
+    result->path_len = len;
+    result->findData.path = result->lastFoundData.path = result->path;
+    result->findData.path_len = result->lastFoundData.path_len = result->path_len;
+
+    /* Finish adding glob to end of path */
+    name[len++] = '*';
+    name[len] = 0;
+
+    result->findFirstHandle = FindFirstFileA(name, &result->findData.data);
     if (result->findFirstHandle == INVALID_HANDLE_VALUE)
         result->error = GetLastError();
 
@@ -420,7 +540,7 @@ DirectoryEntry dir_next(Directory dir) {
     dir->lastFoundData = dir->findData;
     DirectoryEntry entry = &dir->lastFoundData;
 
-    if (!FindNextFileA(dir->findFirstHandle, &dir->findData)) {
+    if (!FindNextFileA(dir->findFirstHandle, &dir->findData.data)) {
         FindClose(dir->findFirstHandle);
         dir->findFirstHandle = INVALID_HANDLE_VALUE;
     }
@@ -431,12 +551,15 @@ DirectoryEntry dir_next(Directory dir) {
 #endif
 }
 
+const char *dir_path(Directory dir) {
+    dir->path[dir->path_len] = 0;
+    return dir->path;
+}
+
 void dir_close(Directory dir) {
 #if LINUX_OS
     if (dir->handle != NULL)
         closedir(dir->handle);
-
-    free(dir->path);
 #elif WINDOWS_OS
     if (dir->findFirstHandle != INVALID_HANDLE_VALUE)
         FindClose(dir->findFirstHandle);
@@ -445,12 +568,24 @@ void dir_close(Directory dir) {
     free(dir);
 }
 
+const char *dirent_path(DirectoryEntry entry) {
+    entry->path[entry->path_len] = 0;
+    return entry->path;
+}
+
+const char *dirent_fullname(DirectoryEntry entry) {
+    strcpy(entry->path + entry->path_len, dirent_name(entry));
+    return entry->path;
+}
+
 const char *dirent_name(DirectoryEntry entry) {
 #if LINUX_OS
     return entry->data.d_name;
 #elif WINDOWS_OS
-    return entry->cFileName;
+    return entry->data.cFileName;
 #else
+    UNUSED(entry)
+
     return "";
 #endif
 }
@@ -464,34 +599,47 @@ long long dirent_size(DirectoryEntry entry) {
 #elif WINDOWS_OS
     LARGE_INTEGER li;
 
-    li.LowPart = entry->nFileSizeLow;
-    li.HighPart = entry->nFileSizeHigh;
+    li.LowPart = entry->data.nFileSizeLow;
+    li.HighPart = entry->data.nFileSizeHigh;
 
     return li.QuadPart;
 #else
+    UNUSED(entry)
+
     return -1LL;
 #endif
 }
 
 int dirent_is_archive(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE;
+    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE;
 #else
+    UNUSED(entry)
+
     return 0;
 #endif
 }
 
 int dirent_is_compressed(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED;
+    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED;
 #else
+    UNUSED(entry)
+
     return 0;
 #endif
 }
 
+int dirent_is_subdirectory(DirectoryEntry entry) {
+    if (!strcmp(dirent_name(entry), ".") || !strcmp(dirent_name(entry), ".."))
+        return 0;
+
+    return dirent_is_directory(entry);
+}
+
 int dirent_is_directory(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
 #else
     if (dirFillExtData(entry))
         return 0;
@@ -502,18 +650,22 @@ int dirent_is_directory(DirectoryEntry entry) {
 
 int dirent_is_encrypted(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED;
+    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED;
 #else
+    UNUSED(entry)
+
     return 0;
 #endif
 }
 
 int dirent_is_hidden(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->dwFileAttributes & FILE_ATTRIBUTE_HIDDEN;
+    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN;
 #elif LINUX_OS
     return entry->data.d_name[0] == '.' && strcmp(entry->data.d_name, ".") && strcmp(entry->data.d_name, "..");
 #else
+    UNUSED(entry)
+
     return 0;
 #endif
 }
@@ -525,56 +677,70 @@ int dirent_is_normal(DirectoryEntry entry) {
 
     return S_ISREG(entry->extData.st_mode);
 #elif WINDOWS_OS
-    return entry->dwFileAttributes == FILE_ATTRIBUTE_NORMAL;
+    return entry->data.dwFileAttributes == FILE_ATTRIBUTE_NORMAL;
 #else
+    UNUSED(entry)
+
     return 0;
 #endif
 }
 
 int dirent_is_not_indexed(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->dwFileAttributes & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
 #else
+    UNUSED(entry)
+
     return 0;
 #endif
 }
 
 int dirent_is_offline(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->dwFileAttributes & FILE_ATTRIBUTE_OFFLINE;
+    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE;
 #else
+    UNUSED(entry)
+
     return 0;
 #endif
 }
 
 int dirent_is_readonly(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->dwFileAttributes & FILE_ATTRIBUTE_READONLY;
+    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_READONLY;
 #else
+    UNUSED(entry)
+
     return 0;
 #endif
 }
 
 int dirent_is_sparse(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->dwFileAttributes & FILE_ATTRIBUTE_SPARSE_FILE;
+    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_SPARSE_FILE;
 #else
+    UNUSED(entry)
+
     return 0;
 #endif
 }
 
 int dirent_is_system(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->dwFileAttributes & FILE_ATTRIBUTE_SYSTEM;
+    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM;
 #else
+    UNUSED(entry)
+
     return 0;
 #endif
 }
 
 int dirent_is_temporary(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->dwFileAttributes & FILE_ATTRIBUTE_TEMPORARY;
+    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_TEMPORARY;
 #else
+    UNUSED(entry)
+
     return 0;
 #endif
 }
@@ -582,13 +748,16 @@ int dirent_is_temporary(DirectoryEntry entry) {
 int dirent_created_time(DirectoryEntry entry, struct tm *t) {
 #if WINDOWS_OS
     SYSTEMTIME time;
-    if (!FileTimeToSystemTime(&entry->ftCreationTime, &time))
+    if (!FileTimeToSystemTime(&entry->data.ftCreationTime, &time))
         return -1;
 
     systemTimeToTm(&time, t);
 
     return 0;
 #else
+    UNUSED(entry)
+    UNUSED(t)
+
     return -1;
 #endif
 }
@@ -603,13 +772,16 @@ int dirent_last_access_time(DirectoryEntry entry, struct tm *t) {
     return 0;
 #elif WINDOWS_OS
     SYSTEMTIME time;
-    if (!FileTimeToSystemTime(&entry->ftLastAccessTime, &time))
+    if (!FileTimeToSystemTime(&entry->data.ftLastAccessTime, &time))
         return -1;
 
     systemTimeToTm(&time, t);
 
     return 0;
 #else
+    UNUSED(entry)
+    UNUSED(t)
+
     return -1;
 #endif
 }
@@ -624,13 +796,16 @@ int dirent_last_modification_time(DirectoryEntry entry, struct tm *t) {
     return 0;
 #elif WINDOWS_OS
     SYSTEMTIME time;
-    if (!FileTimeToSystemTime(&entry->ftLastWriteTime, &time))
+    if (!FileTimeToSystemTime(&entry->data.ftLastWriteTime, &time))
         return -1;
 
     systemTimeToTm(&time, t);
 
     return 0;
 #else
+    UNUSED(entry)
+    UNUSED(t)
+
     return -1;
 #endif
 }
@@ -644,6 +819,9 @@ int dirent_last_status_update_time(DirectoryEntry entry, struct tm *t) {
 
     return 0;
 #else
+    UNUSED(entry)
+    UNUSED(t)
+
     return -1;
 #endif
 }
