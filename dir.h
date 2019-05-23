@@ -28,6 +28,10 @@ Path path_up(Path path);
  * Returns `path`; this function never fails
  */
 Path path_normalize(Path path);
+/* Returns the name-only portion of the string, i.e. the deepest subfolder or the filename */
+const char *path_name(Path path);
+/* Returns the extension of the filename, i.e. the last portion of the filename after the final '.' character */
+const char *path_ext(Path path);
 /* Returns the C-string representation of the path */
 const char *path_str(Path path);
 /* Constructs a new path pointing to a specified buffer */

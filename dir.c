@@ -377,6 +377,47 @@ Path path_normalize(Path path) {
     return path;
 }
 
+const char *path_name(Path path) {
+    char *pathStr = path_data(path);
+    size_t len = strlen(pathStr);
+    size_t endpos = len, pos;
+
+    for (; endpos > 0; --endpos) {
+        if (!path_check_separator(pathStr[endpos-1]))
+            break;
+    }
+
+    pathStr[endpos] = 0;
+
+    for (pos = endpos; pos > 0; --pos) {
+        if (path_check_separator(pathStr[pos-1]))
+            return pathStr + pos;
+    }
+
+#if WINDOWS_OS
+    if (endpos == 2 && len > endpos)
+        pathStr[endpos++] = '\\';
+    pathStr[endpos] = 0;
+#endif
+
+    return "";
+}
+
+const char *path_ext(Path path) {
+    const char *name = path_name(path);
+    char *find = strrchr(name, '.');
+
+    if (find == NULL)
+        return "";
+
+#if LINUX_OS
+    if (find == name) /* If file starts with '.', it's hidden, not an extension */
+        return "";
+#endif
+
+    return find + 1;
+}
+
 #if LINUX_OS
 struct DirEntryStruct {
     char *path; /* Points to path in DirStruct, doesn't have ownership */

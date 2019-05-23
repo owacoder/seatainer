@@ -452,8 +452,13 @@ int main()
         io_rewind(in);
     }
 
-    const char *data[] = {"C:", "Program Files", "..", "/somewhere"};
+    const char *data[] = {"C:\\something/something.pdfmobile"};
     Path path = path_construct_gather(data, sizeof(data)/sizeof(*data));
+
+    path = path_append(path, "data.txt");
+
+    printf("Name = %s\n", path_name(path));
+    printf("Ext = %s\n", path_ext(path));
 
     printf("Original = %s\n", path_str(path));
     printf("Normalized = %s\n", path_str(path_normalize(path)));
@@ -461,6 +466,8 @@ int main()
     printf("Parent Dir = %s\n", path_str(path_up(path)));
 
     path_destroy(path);
+
+    return 0;
 
     unsigned long long items = 0, size = 0;
     Directory dir = dir_open("C:\\");
