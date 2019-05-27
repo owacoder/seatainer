@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <platforms.h>
+#include <stdarg.h>
 
 /* **WARNING** - Only define CC_IO_STATIC_INSTANCES if you don't need thread safety */
 
@@ -107,6 +108,7 @@ int io_getc(IO io);
 int io_getpos(IO io, IO_Pos *pos);
 char *io_gets(char *str, int num, IO io);
 IO io_open(const char *filename, const char *mode);
+/* If `mode` contains "ncp" on Windows, the [n]ative [c]ode [p]age is used, instead of UTF-8 */
 IO io_open_native(const char *filename, const char *mode);
 /* TODO: io_open_native_file() not yet implemented */
 #if LINUX_OS

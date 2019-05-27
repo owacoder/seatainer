@@ -557,6 +557,40 @@ int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t dst[4]) {
 }
 #endif
 
+#if WINDOWS_OS
+int str_is_codepage_safe(LPCSTR utf8) {
+    for (; *utf8; ++utf8)
+        if ((unsigned char) *utf8 >= 0x80)
+            return 0;
+
+    return 1;
+}
+
+LPWSTR utf8_to_wide_alloc(LPCSTR utf8) {
+    int chars = MultiByteToWideChar(CP_UTF8, MB_PRECOMPOSED, utf8, -1, NULL, 0);
+
+    LPWSTR result = malloc(sizeof(*result) * chars);
+    if (!result)
+        return NULL;
+
+    MultiByteToWideChar(CP_UTF8, MB_PRECOMPOSED, utf8, -1, result, chars);
+
+    return result;
+}
+
+LPSTR wide_to_utf8_alloc(LPCWSTR wide) {
+    int bytes = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
+
+    LPSTR result = malloc(bytes);
+    if (!result)
+        return NULL;
+
+    WideCharToMultiByte(CP_UTF8, 0, wide, -1, result, bytes, NULL, NULL);
+
+    return result;
+}
+#endif
+
 #ifdef __cplusplus
 }
 #endif

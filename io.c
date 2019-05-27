@@ -662,7 +662,6 @@ IO io_open_native(const char *filename, const char *mode) {
     return io;
 }
 #elif WINDOWS_OS
-/* TODO: support UTF-8 encoding instead of Windows code page */
 IO io_open_native(const char *filename, const char *mode) {
     unsigned flags = io_flags_for_mode(mode);
     DWORD desiredAccess = 0;
@@ -690,13 +689,34 @@ IO io_open_native(const char *filename, const char *mode) {
     if (flags & IO_FLAG_FAIL_IF_EXISTS)
         createFlag = CREATE_NEW;
 
-    HANDLE file = CreateFileA(filename,
-                              desiredAccess,
-                              0,
-                              NULL,
-                              createFlag,
-                              FILE_ATTRIBUTE_NORMAL,
-                              NULL);
+    HANDLE file;
+
+    if (strstr(mode, "ncp") != NULL || str_is_codepage_safe(filename)) {
+        file = CreateFileA(filename,
+                           desiredAccess,
+                           0,
+                           NULL,
+                           createFlag,
+                           FILE_ATTRIBUTE_NORMAL,
+                           NULL);
+    } else {
+        LPWSTR wide = utf8_to_wide_alloc(filename);
+        if (!wide) {
+            io_destroy(io);
+            return NULL;
+        }
+
+        file = CreateFileW(wide,
+                           desiredAccess,
+                           0,
+                           NULL,
+                           createFlag,
+                           FILE_ATTRIBUTE_NORMAL,
+                           NULL);
+
+        free(wide);
+    }
+
     if (file == INVALID_HANDLE_VALUE) {
         io_destroy(io);
         return NULL;
@@ -860,6 +880,8 @@ struct io_printf_state {
     size_t bufferLength;
     unsigned flags;
 };
+
+#define VA_LIST_POINTER(args) (sizeof(va_list) != sizeof(void*)? ((va_list *) (args)): ((va_list *) &(args)))
 
 #define PRINTF_D(type, value, flags, prec, len, state)              \
     do {                                                            \
@@ -1597,7 +1619,7 @@ done_with_flags:
                         case 'i':
                             state.flags |= PRINTF_STATE_INTEGRAL | PRINTF_STATE_SIGNED;
 
-                            if (io_printf_signed_int(&state, fmt_flags, fmt_prec, fmt_len, &args) < 0)
+                            if (io_printf_signed_int(&state, fmt_flags, fmt_prec, fmt_len, VA_LIST_POINTER(args)) < 0)
                                 return -2;
 
                             if (!(fmt_flags & PRINTF_FLAG_HAS_PRECISION))
@@ -1609,7 +1631,7 @@ done_with_flags:
                         case 'X':
                             state.flags |= PRINTF_STATE_INTEGRAL;
 
-                            if (io_printf_unsigned_int(&state, *fmt, fmt_flags, fmt_prec, fmt_len, &args) < 0)
+                            if (io_printf_unsigned_int(&state, *fmt, fmt_flags, fmt_prec, fmt_len, VA_LIST_POINTER(args)) < 0)
                                 return -2;
 
                             if (!(fmt_flags & PRINTF_FLAG_HAS_PRECISION)) {
@@ -2176,7 +2198,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                 case 'o':
                 case 'x': {
                     unsigned result = discardResult? io_scanf_int_no_arg(*fmt, io, fmt_width):
-                                                     io_scanf_int(*fmt, io, fmt_width, fmt_len, &args);
+                                                     io_scanf_int(*fmt, io, fmt_width, fmt_len, VA_LIST_POINTER(args));
                     if (result == UINT_MAX || result == 0) {
                         bytes += result == 0;
                         goto cleanup;

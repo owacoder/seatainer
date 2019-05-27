@@ -24,14 +24,18 @@ char path_separator();
  * Returns `path`; this function never fails
  */
 Path path_up(Path path);
+char *path_up_cstr(char *path);
 /* Normalizes `path` to remove '.' and '..' entries
  * Returns `path`; this function never fails
  */
 Path path_normalize(Path path);
+char *path_normalize_cstr(char *path);
 /* Returns the name-only portion of the string, i.e. the deepest subfolder or the filename */
 const char *path_name(Path path);
+const char *path_name_cstr(char *path);
 /* Returns the extension of the filename, i.e. the last portion of the filename after the final '.' character */
 const char *path_ext(Path path);
+const char *path_ext_cstr(char *path);
 /* Returns the C-string representation of the path */
 const char *path_str(Path path);
 /* Constructs a new path pointing to a specified buffer */
@@ -76,17 +80,27 @@ int glob(const char *str, const char *pattern);
 
 /* Opens a directory for access, or returns NULL on allocation failure */
 Directory dir_open(const char *dir);
+/* Same as dir_open(), but uses ANSI functions on Windows if mode contains "ncp", for [n]ative [c]ode [p]age */
+Directory dir_open_with_mode(const char *dir, const char *mode);
 /* Returns path that open directory points to */
 const char *dir_path(Directory dir);
 /* Returns zero if no error occured while opening the directory, platform-specific non-zero value otherwise (errno for Linux, GetLastError for Windows) */
 int dir_error(Directory dir);
 /* Returns a pointer to the next available directory entry, or NULL if no more entries exist
- * This pointer MUST NOT be free()d!
+ * This pointer MUST NOT be stored permanently, as it references a temporary object. Calling dirent_destroy() on it has no effect
  */
 DirectoryEntry dir_next(Directory dir);
 /* Closes a directory and invalidates the handle */
 void dir_close(Directory dir);
 
+/* Opens a directory entry for a specific path */
+DirectoryEntry dirent_open(const char *path);
+/* Same as dirent_open(), but uses ANSI functions on Windows if mode contains "ncp", for [n]ative [c]ode [p]age */
+DirectoryEntry dirent_open_with_mode(const char *path, const char *mode);
+/* Returns zero if no error occured while opening the directory, platform-specific non-zero value otherwise (errno for Linux, GetLastError for Windows) */
+int dirent_error(DirectoryEntry entry);
+/* Destroys a directory entry */
+void dirent_close(DirectoryEntry entry);
 /* Returns the full path of the directory entry, without the entry name */
 const char *dirent_path(DirectoryEntry entry);
 /* Returns the full path of the directory entry, including the entry name */

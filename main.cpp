@@ -7,6 +7,7 @@
 #include "ccstring.h"
 #include "io.h"
 #include "platforms.h"
+#include "utility.h"
 
 #include <assert.h>
 
@@ -451,6 +452,23 @@ int main()
         printf("Matched = %d (%d, %s)\n", res, value, buf);
         io_rewind(in);
     }
+
+    DirectoryEntry entry = dirent_open("C:\\العربية\\share.txt");
+    if (!entry) {
+        fputs("Cannot open directory\n", stderr);
+        return 0;
+    }
+
+    FILE *out = fopen("F:\\Test_Data\\outf.txt", "w");
+
+    fprintf(out, "is directory? %d\n", dirent_is_directory(entry));
+    fprintf(out, "path = %s\n", dirent_path(entry));
+    fprintf(out, "name = %s\n", dirent_name(entry));
+    fprintf(out, "fullname = %s\n", dirent_fullname(entry));
+
+    fclose(out);
+
+    dirent_destroy(entry);
 
     const char *data[] = {"C:\\something/something.pdfmobile"};
     Path path = path_construct_gather(data, sizeof(data)/sizeof(*data));

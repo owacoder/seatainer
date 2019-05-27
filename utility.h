@@ -84,6 +84,12 @@ int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t dst[4]);
 
 #define TESTBIT(x, bit) ((x) & (1ull << bit))
 
+#if WINDOWS_OS
+int str_is_codepage_safe(LPCSTR utf8);
+LPWSTR utf8_to_wide_alloc(LPCSTR utf8);
+LPSTR wide_to_utf8_alloc(LPCWSTR wide);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

@@ -5,10 +5,13 @@
 
 #if LINUX_OS
 #include <sys/stat.h>
+#include <unistd.h>
 #include <dirent.h>
 #elif WINDOWS_OS
 #include <windows.h>
 #endif
+
+#include "utility.h"
 
 /* TODO: currently recursive. Change to iterative version later? */
 int glob(const char *str, const char *pattern) {
@@ -219,9 +222,7 @@ void path_destroy(Path path) {
     free(path);
 }
 
-/* Removes the last directory from the (either relative or absolute) path and returns `path` */
-Path path_up(Path path) {
-    char *pathStr = path_data(path);
+char *path_up_cstr(char *pathStr) {
     char *npath = pathStr;
     char *minAddr = pathStr;
 
@@ -258,7 +259,7 @@ Path path_up(Path path) {
     if (pathStr[0] == '\\' && pathStr[1] == '\\') {
         minAddr = strchr(pathStr + 2, '\\');
         if (minAddr == NULL)
-            return path;
+            return pathStr;
     }
 
     npath = pathStr + strlen(pathStr) - 1;
@@ -273,7 +274,7 @@ Path path_up(Path path) {
         /* Don't strip the name of resources of the form "\\.\name" (resources of this type won't have a trailing slash either) */
         if (pathStr[2] != '.' || pathStr[3] != '\\')
             minAddr[1] = 0;
-        return path;
+        return pathStr;
     }
 
     if (npath <= pathStr + 2 && pathStr[0] && pathStr[1] == ':') /* Absolute drive path, cannot go up */
@@ -282,12 +283,17 @@ Path path_up(Path path) {
         npath[0] = 0;
 #endif
 
+    return pathStr;
+}
+
+/* Removes the last directory from the (either relative or absolute) path and returns `path` */
+Path path_up(Path path) {
+    path_up_cstr(path_data(path));
     return path;
 }
 
 /* Normalizes `path` to remove consecutive '/' or '\' characters, remove './' references, and remove '../' references */
-Path path_normalize(Path path) {
-    char *pathStr = path_data(path);
+char *path_normalize_cstr(char *pathStr) {
     char *save = pathStr;
 
 #if WINDOWS_OS
@@ -345,7 +351,7 @@ Path path_normalize(Path path) {
 
             char *next = pathStr + 3;
             npath[0] = 0;
-            npath = path_data(path_up(path));
+            npath = path_up_cstr(pathStr);
 
             npath += strlen(npath);
             if (npath != save && npath[-1] != pathSep && *next)
@@ -374,11 +380,16 @@ Path path_normalize(Path path) {
     }
     *npath = 0;
 
+    return save;
+}
+
+/* Normalizes the absolute or relative path and returns `path` */
+Path path_normalize(Path path) {
+    path_normalize_cstr(path_data(path));
     return path;
 }
 
-const char *path_name(Path path) {
-    char *pathStr = path_data(path);
+const char *path_name_cstr(char *pathStr) {
     size_t len = strlen(pathStr);
     size_t endpos = len, pos;
 
@@ -403,8 +414,12 @@ const char *path_name(Path path) {
     return "";
 }
 
-const char *path_ext(Path path) {
-    const char *name = path_name(path);
+const char *path_name(Path path) {
+    return path_name_cstr(path_data(path));
+}
+
+const char *path_ext_cstr(char *path) {
+    const char *name = path_name_cstr(path);
     char *find = strrchr(name, '.');
 
     if (find == NULL)
@@ -418,21 +433,29 @@ const char *path_ext(Path path) {
     return find + 1;
 }
 
+const char *path_ext(Path path) {
+    return path_ext_cstr(path_data(path));
+}
+
 #if LINUX_OS
 struct DirEntryStruct {
     char *path; /* Points to path in DirStruct, doesn't have ownership */
     size_t path_len; /* Length of directory path in DirStruct */
-    struct dirent data;
+    struct dirent data; /* Only use name field if ownedDir is non-zero */
     struct stat extData;
     char hasExtData; /* non-zero if extData is valid, zero if extData is not valid */
-    char shouldBeFreed; /* non-zero if this structure should be free()d */
+    Directory ownedDir;  /* non-zero if this structure should be free()d.
+                          * This will only be non-zero if the entry was created
+                          * independently of a dir_next() call, i.e. using dirent_open()
+                          * This is because a Directory object is always needed for a DirectoryEntry to exist
+                          * If ownedDir is NULL, do not use `struct dirent` member `data` (except for the name field), only use `extData` using `dirFillExtData` */
 };
 
 struct DirStruct {
     DIR *handle;
     struct DirEntryStruct findData, lastFoundData;
     int error; /* Zero if no error occured while opening the directory, platform specific otherwise */
-    size_t pathLen;
+    size_t path_len;
     char path[]; /* Owned copy of path, plus capacity for directory separator, 256-byte name, and NUL-terminator */
 };
 
@@ -440,23 +463,26 @@ int dirFillExtData(DirectoryEntry entry) {
     if (entry->hasExtData)
         return 0;
 
-    strcpy(entry->path + entry->path_len, dirent_name(entry));
-
-    if (lstat(entry->path, &entry->extData)) {
-        entry->path[entry->path_len] = 0;
+    if (lstat(dirent_fullname(entry), &entry->extData))
         return -1;
-    }
 
     entry->hasExtData = 1;
-    entry->path[entry->path_len] = 0;
     return 0;
 }
 #elif WINDOWS_OS
 struct DirEntryStruct {
     char *path; /* Points to path in DirStruct, doesn't have ownership */
     size_t path_len; /* Length of directory path in DirStruct */
-    WIN32_FIND_DATAA data;
-    char shouldBeFreed; /* non-zero if this structure should be free()d */
+    int is_wide; /* Whether to use `data` (0) or `wdata` (1) */
+    union {
+        WIN32_FIND_DATAA data; /* Only use name field if ownedDir is non-zero */
+        WIN32_FIND_DATAW wdata; /* Only use name field if ownedDir is non-zero */
+    } fdata;
+    Directory ownedDir; /* non-zero if this structure should be free()d.
+                         * This will only be non-zero if the entry was created
+                         * independently of a dir_next() call, i.e. using dirent_open()
+                         * This is because a Directory object is always needed for a DirectoryEntry to exist */
+    char name[MAX_PATH * 6 + 1]; /* contains UTF-8 encoding of name if is_wide is true */
 };
 
 struct DirStruct {
@@ -481,7 +507,13 @@ void systemTimeToTm(LPSYSTEMTIME time, struct tm *t) {
 #endif
 
 Directory dir_open(const char *dir) {
+    return dir_open_with_mode(dir, "");
+}
+
+Directory dir_open_with_mode(const char *dir, const char *mode) {
 #if LINUX_OS
+    UNUSED(mode)
+
     size_t len = strlen(dir);
     Directory result = calloc(1, sizeof(*result) + len + 258);
     if (result == NULL)
@@ -496,6 +528,7 @@ Directory dir_open(const char *dir) {
 
     result->findData.path = result->lastFoundData.path = result->path;
     result->findData.path_len = result->lastFoundData.path_len = result->path_len;
+    result->findData.ownedDir = result->lastFoundData.ownedDir = NULL;
     result->handle = opendir(dir);
 
     struct dirent *dEntry;
@@ -537,17 +570,38 @@ Directory dir_open(const char *dir) {
     result->path_len = len;
     result->findData.path = result->lastFoundData.path = result->path;
     result->findData.path_len = result->lastFoundData.path_len = result->path_len;
+    result->findData.ownedDir = result->lastFoundData.ownedDir = NULL;
 
     /* Finish adding glob to end of path */
     name[len++] = '*';
     name[len] = 0;
 
-    result->findFirstHandle = FindFirstFileA(name, &result->findData.data);
+    if (strstr(mode, "ncp") != NULL) {
+        result->findFirstHandle = FindFirstFileA(name, &result->findData.fdata.data);
+
+        result->findData.is_wide = result->lastFoundData.is_wide = 0;
+    } else {
+        LPWSTR wide = utf8_to_wide_alloc(name);
+        if (!wide) {
+            free(result);
+            return NULL;
+        }
+
+        result->findFirstHandle = FindFirstFileW(wide, &result->findData.fdata.wdata);
+
+        free(wide);
+
+        result->findData.is_wide = result->lastFoundData.is_wide = 1;
+    }
+
     if (result->findFirstHandle == INVALID_HANDLE_VALUE)
         result->error = GetLastError();
 
     return result;
 #else
+    UNUSED(dir)
+    UNUSED(mode)
+
     return NULL;
 #endif
 }
@@ -581,9 +635,16 @@ DirectoryEntry dir_next(Directory dir) {
     dir->lastFoundData = dir->findData;
     DirectoryEntry entry = &dir->lastFoundData;
 
-    if (!FindNextFileA(dir->findFirstHandle, &dir->findData.data)) {
-        FindClose(dir->findFirstHandle);
-        dir->findFirstHandle = INVALID_HANDLE_VALUE;
+    if (dir->findData.is_wide) {
+        if (!FindNextFileW(dir->findFirstHandle, &dir->findData.fdata.wdata)) {
+            FindClose(dir->findFirstHandle);
+            dir->findFirstHandle = INVALID_HANDLE_VALUE;
+        }
+    } else {
+        if (!FindNextFileA(dir->findFirstHandle, &dir->findData.fdata.data)) {
+            FindClose(dir->findFirstHandle);
+            dir->findFirstHandle = INVALID_HANDLE_VALUE;
+        }
     }
 
     return entry;
@@ -609,6 +670,141 @@ void dir_close(Directory dir) {
     free(dir);
 }
 
+DirectoryEntry dirent_open(const char *path) {
+    return dirent_open_with_mode(path, "");
+}
+
+DirectoryEntry dirent_open_with_mode(const char *path, const char *mode) {
+    UNUSED(mode)
+
+    size_t pathLen = strlen(path);
+    DirectoryEntry entry = calloc(1, sizeof(*entry));
+    Directory dir = NULL;
+    if (!entry)
+        return NULL;
+
+#if LINUX_OS
+    dir = calloc(1, sizeof(*dir) + pathLen + 1);
+    if (!dir)
+        goto cleanup;
+#else
+    if (pathLen > MAX_PATH)
+        goto cleanup;
+
+    dir = calloc(1, sizeof(*dir));
+    if (!dir)
+        goto cleanup;
+#endif
+
+    strcpy(dir->path, path);
+
+    const char *name = path_name_cstr(dir->path);
+
+    /* Extract file/directory name from path and insert into status field */
+    size_t name_len = strlen(name);
+
+#if LINUX_OS
+    if (name_len > 255)
+        goto cleanup;
+    strcpy(entry->data.d_name, name);
+#elif WINDOWS_OS
+    if (strstr(mode, "ncp") != NULL) {
+        if (name_len > MAX_PATH - 1)
+            goto cleanup;
+
+        strcpy(entry->fdata.data.cFileName, name);
+        dir->findFirstHandle = FindFirstFileA(dirent_fullname(entry), &entry->fdata.data);
+
+        entry->is_wide = 0;
+    } else {
+        LPWSTR wide = utf8_to_wide_alloc(dir->path);
+        if (!wide)
+            goto cleanup;
+
+        LPWSTR wideName = utf8_to_wide_alloc(name);
+        if (!wideName || wcslen(wideName) > MAX_PATH - 1) {
+            free(wide);
+            free(wideName);
+            goto cleanup;
+        }
+
+        wcscpy(entry->fdata.wdata.cFileName, wideName);
+        dir->findFirstHandle = FindFirstFileW(wide, &entry->fdata.wdata);
+
+        free(wide);
+        free(wideName);
+
+        entry->is_wide = 1;
+    }
+
+    if (dir->findFirstHandle == INVALID_HANDLE_VALUE)
+        dir->error = GetLastError();
+#endif
+
+    /* Then remove filename from path */
+    path_up_cstr(dir->path);
+    dir->path_len = strlen(dir->path);
+    dir->path[dir->path_len++] = path_separator();
+    dir->path[dir->path_len] = 0;
+
+    entry->ownedDir = dir;
+    entry->path = dir->path;
+    entry->path_len = dir->path_len;
+
+    return entry;
+
+cleanup:
+    free(entry);
+    free(dir);
+    return NULL;
+}
+
+void dirent_destroy(DirectoryEntry entry) {
+    if (entry->ownedDir) {
+        dir_close(entry->ownedDir);
+        free(entry);
+    }
+}
+
+int dirent_error(DirectoryEntry entry) {
+    if (entry->ownedDir)
+        return entry->ownedDir->error;
+
+    return 0;
+}
+
+int dirent_refresh(DirectoryEntry entry) {
+#if LINUX_OS
+    entry->hasExtData = 0; /* Clear cache flag */
+    return 0;
+#elif WINDOWS_OS
+    if (entry->ownedDir) { /* Can only refresh independently-created entries, not those tied to a Directory */
+        if (entry->ownedDir->findFirstHandle != INVALID_HANDLE_VALUE)
+            FindClose(entry->ownedDir->findFirstHandle);
+
+        if (!entry->is_wide) {
+            entry->ownedDir->findFirstHandle = FindFirstFileA(dirent_fullname(entry), &entry->fdata.data);
+        } else {
+            LPWSTR wide = utf8_to_wide_alloc(dirent_fullname(entry));
+            if (!wide)
+                return -1;
+
+            entry->ownedDir->findFirstHandle = FindFirstFileW(wide, &entry->fdata.wdata);
+
+            free(wide);
+        }
+
+        if (entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+            entry->ownedDir->error = GetLastError();
+
+        return 0;
+    } else
+        return -1;
+#else
+    return 0;
+#endif
+}
+
 const char *dirent_path(DirectoryEntry entry) {
     entry->path[entry->path_len] = 0;
     return entry->path;
@@ -623,7 +819,13 @@ const char *dirent_name(DirectoryEntry entry) {
 #if LINUX_OS
     return entry->data.d_name;
 #elif WINDOWS_OS
-    return entry->data.cFileName;
+    if (entry->is_wide) {
+        printf("%ls\n", entry->fdata.data.cFileName);
+        WideCharToMultiByte(CP_UTF8, 0, entry->fdata.wdata.cFileName, -1, entry->name, sizeof(entry->name), NULL, NULL);
+        return entry->name;
+    }
+
+    return entry->fdata.data.cFileName;
 #else
     UNUSED(entry)
 
@@ -640,8 +842,15 @@ long long dirent_size(DirectoryEntry entry) {
 #elif WINDOWS_OS
     LARGE_INTEGER li;
 
-    li.LowPart = entry->data.nFileSizeLow;
-    li.HighPart = entry->data.nFileSizeHigh;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return -1LL;
+    else if (entry->is_wide) {
+        li.LowPart = entry->fdata.wdata.nFileSizeLow;
+        li.HighPart = entry->fdata.wdata.nFileSizeHigh;
+    } else {
+        li.LowPart = entry->fdata.data.nFileSizeLow;
+        li.HighPart = entry->fdata.data.nFileSizeHigh;
+    }
 
     return li.QuadPart;
 #else
@@ -651,9 +860,34 @@ long long dirent_size(DirectoryEntry entry) {
 #endif
 }
 
+int dirent_exists(DirectoryEntry entry) {
+#if LINUX_OS
+    return !dirFillExtData(entry);
+#elif WINDOWS_OS
+    if (entry->ownedDir)
+        return entry->ownedDir->findFirstHandle != INVALID_HANDLE_VALUE;
+
+    return 1;
+#else
+    FILE *file = fopen(dirent_fullname(entry), "r");
+    if (file) {
+        fclose(file);
+        return 1;
+    }
+
+    return 0;
+#endif
+}
+
 int dirent_is_archive(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE;
+    } else {
+        return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE;
+    }
 #else
     UNUSED(entry)
 
@@ -663,7 +897,13 @@ int dirent_is_archive(DirectoryEntry entry) {
 
 int dirent_is_compressed(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED;
+    } else {
+        return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED;
+    }
 #else
     UNUSED(entry)
 
@@ -680,7 +920,13 @@ int dirent_is_subdirectory(DirectoryEntry entry) {
 
 int dirent_is_directory(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+    } else {
+        return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+    }
 #else
     if (dirFillExtData(entry))
         return 0;
@@ -691,7 +937,13 @@ int dirent_is_directory(DirectoryEntry entry) {
 
 int dirent_is_encrypted(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED;
+    } else {
+        return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED;
+    }
 #else
     UNUSED(entry)
 
@@ -701,7 +953,13 @@ int dirent_is_encrypted(DirectoryEntry entry) {
 
 int dirent_is_hidden(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN;
+    } else {
+        return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN;
+    }
 #elif LINUX_OS
     return entry->data.d_name[0] == '.' && strcmp(entry->data.d_name, ".") && strcmp(entry->data.d_name, "..");
 #else
@@ -718,7 +976,13 @@ int dirent_is_normal(DirectoryEntry entry) {
 
     return S_ISREG(entry->extData.st_mode);
 #elif WINDOWS_OS
-    return entry->data.dwFileAttributes == FILE_ATTRIBUTE_NORMAL;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes == FILE_ATTRIBUTE_NORMAL;
+    } else {
+        return entry->fdata.data.dwFileAttributes == FILE_ATTRIBUTE_NORMAL;
+    }
 #else
     UNUSED(entry)
 
@@ -728,7 +992,13 @@ int dirent_is_normal(DirectoryEntry entry) {
 
 int dirent_is_not_indexed(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+    } else {
+        return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+    }
 #else
     UNUSED(entry)
 
@@ -738,7 +1008,13 @@ int dirent_is_not_indexed(DirectoryEntry entry) {
 
 int dirent_is_offline(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE;
+    } else {
+        return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE;
+    }
 #else
     UNUSED(entry)
 
@@ -748,7 +1024,13 @@ int dirent_is_offline(DirectoryEntry entry) {
 
 int dirent_is_readonly(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_READONLY;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_READONLY;
+    } else {
+        return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_READONLY;
+    }
 #else
     UNUSED(entry)
 
@@ -758,7 +1040,13 @@ int dirent_is_readonly(DirectoryEntry entry) {
 
 int dirent_is_sparse(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_SPARSE_FILE;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_SPARSE_FILE;
+    } else {
+        return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_SPARSE_FILE;
+    }
 #else
     UNUSED(entry)
 
@@ -768,7 +1056,13 @@ int dirent_is_sparse(DirectoryEntry entry) {
 
 int dirent_is_system(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM;
+    } else {
+        return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM;
+    }
 #else
     UNUSED(entry)
 
@@ -778,7 +1072,13 @@ int dirent_is_system(DirectoryEntry entry) {
 
 int dirent_is_temporary(DirectoryEntry entry) {
 #if WINDOWS_OS
-    return entry->data.dwFileAttributes & FILE_ATTRIBUTE_TEMPORARY;
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_TEMPORARY;
+    } else {
+        return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_TEMPORARY;
+    }
 #else
     UNUSED(entry)
 
@@ -788,8 +1088,11 @@ int dirent_is_temporary(DirectoryEntry entry) {
 
 int dirent_created_time(DirectoryEntry entry, struct tm *t) {
 #if WINDOWS_OS
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+
     SYSTEMTIME time;
-    if (!FileTimeToSystemTime(&entry->data.ftCreationTime, &time))
+    if (!FileTimeToSystemTime(entry->is_wide? &entry->fdata.wdata.ftCreationTime: &entry->fdata.data.ftCreationTime, &time))
         return -1;
 
     systemTimeToTm(&time, t);
@@ -812,8 +1115,11 @@ int dirent_last_access_time(DirectoryEntry entry, struct tm *t) {
 
     return 0;
 #elif WINDOWS_OS
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+
     SYSTEMTIME time;
-    if (!FileTimeToSystemTime(&entry->data.ftLastAccessTime, &time))
+    if (!FileTimeToSystemTime(entry->is_wide? &entry->fdata.wdata.ftLastAccessTime: &entry->fdata.data.ftLastAccessTime, &time))
         return -1;
 
     systemTimeToTm(&time, t);
@@ -836,8 +1142,11 @@ int dirent_last_modification_time(DirectoryEntry entry, struct tm *t) {
 
     return 0;
 #elif WINDOWS_OS
+    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+
     SYSTEMTIME time;
-    if (!FileTimeToSystemTime(&entry->data.ftLastWriteTime, &time))
+    if (!FileTimeToSystemTime(entry->is_wide? &entry->fdata.wdata.ftLastWriteTime: &entry->fdata.data.ftLastWriteTime, &time))
         return -1;
 
     systemTimeToTm(&time, t);
