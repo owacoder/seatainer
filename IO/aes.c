@@ -2,6 +2,7 @@
 #include "../platforms.h"
 #include "../utility.h"
 #include <limits.h>
+#include <stdlib.h>
 
 static unsigned char test_aes_plaintext[] = {
     0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96,

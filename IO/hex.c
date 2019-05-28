@@ -1,5 +1,5 @@
 #include "hex.h"
-#include "platforms.h"
+#include "../platforms.h"
 
 #include <stdlib.h>
 #include <string.h>

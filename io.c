@@ -1,9 +1,6 @@
 #define _FILE_OFFSET_BITS 64
 #define _LARGEFILE64_SOURCE
 
-#include "io.h"
-#include "utility.h"
-
 #include <stddef.h>
 #include <stdlib.h>
 #include <memory.h>
@@ -14,10 +11,22 @@
 #include <math.h> /* For printf and scanf */
 #include <float.h>
 
+#include "io.h"
+#include "utility.h"
+
 #if LINUX_OS
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+
+/* TODO: Odd issue on Raspbian where SSIZE_MAX is not defined? Investigate... */
+#ifndef SSIZE_MAX
+#define SSIZE_MAX ((ssize_t) (((uintmax_t) 1 << (sizeof(ssize_t)*CHAR_BIT-1))-1))
+#endif
+
+int fseeko(FILE *stream, off_t offset, int whence);
+off_t ftello(FILE *stream);
+
 #elif WINDOWS_OS
 #include <windows.h>
 #endif
@@ -122,7 +131,6 @@ struct InputOutputDevice {
 
 #define IO_FLAG_RESET (IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_UPDATE | IO_FLAG_APPEND | IO_FLAG_ERROR | IO_FLAG_EOF | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_BINARY)
 
-/* **WARNING** - Only define CC_IO_STATIC_INSTANCES if you don't need thread safety */
 #ifdef CC_IO_STATIC_INSTANCES
 #if CC_IO_STATIC_INSTANCES > 0
 #define CC_IO_HAS_STATIC_INSTANCES
@@ -793,7 +801,7 @@ static IO io_open_dynamic_buffer_internal(enum IO_Type type, const char *mode) {
         return NULL;
 
     io->ptr = NULL;
-    io->data.sizes.size = io->data.sizes.pos = 0;
+    io->data.sizes.size = io->data.sizes.pos = io->data.sizes.capacity = 0;
 
     io->flags |= io_flags_for_mode(mode);
 
@@ -881,7 +889,9 @@ struct io_printf_state {
     unsigned flags;
 };
 
-#define VA_LIST_POINTER(args) (sizeof(va_list) != sizeof(void*)? ((va_list *) (args)): ((va_list *) &(args)))
+typedef struct {
+    va_list args;
+} va_list_wrapper;
 
 #define PRINTF_D(type, value, flags, prec, len, state)              \
     do {                                                            \
@@ -1242,7 +1252,7 @@ static void io_printf_f(double value, unsigned flags, unsigned prec, unsigned le
     state->bufferLength = complete_len;
 }
 
-static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, unsigned prec, unsigned len, va_list *args) {
+static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, unsigned prec, unsigned len, va_list_wrapper *args) {
     UNUSED(flags)
     UNUSED(prec)
 
@@ -1252,7 +1262,7 @@ static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, u
         case PRINTF_LEN_H:
         case PRINTF_LEN_HH:
         {
-            int val = va_arg(*args, int);
+            int val = va_arg(args->args, int);
 
             if (len == PRINTF_LEN_H)
                 val = (signed char) val;
@@ -1264,26 +1274,26 @@ static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, u
         }
         case PRINTF_LEN_L:
         {
-            long val = va_arg(*args, long);
+            long val = va_arg(args->args, long);
             PRINTF_D(long, val, flags, prec, len, state);
             break;
         }
         case PRINTF_LEN_LL:
         {
-            long long val = va_arg(*args, long long);
+            long long val = va_arg(args->args, long long);
             PRINTF_D(long long, val, flags, prec, len, state);
             break;
         }
         case PRINTF_LEN_J:
         {
-            intmax_t val = va_arg(*args, intmax_t);
+            intmax_t val = va_arg(args->args, intmax_t);
             PRINTF_D(intmax_t, val, flags, prec, len, state);
             break;
         }
         case PRINTF_LEN_Z:
         case PRINTF_LEN_T:
         {
-            ptrdiff_t val = va_arg(*args, ptrdiff_t);
+            ptrdiff_t val = va_arg(args->args, ptrdiff_t);
             PRINTF_D(ptrdiff_t, val, flags, prec, len, state);
             break;
         }
@@ -1292,7 +1302,7 @@ static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, u
     return state->bufferLength;
 }
 
-static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsigned flags, unsigned prec, unsigned len, va_list *args) {
+static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsigned flags, unsigned prec, unsigned len, va_list_wrapper *args) {
     UNUSED(flags)
     UNUSED(prec)
 
@@ -1302,7 +1312,7 @@ static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsig
         case PRINTF_LEN_H:
         case PRINTF_LEN_HH:
         {
-            unsigned val = va_arg(*args, unsigned int);
+            unsigned val = va_arg(args->args, unsigned int);
 
             if (len == PRINTF_LEN_H)
                 val = (unsigned char) val;
@@ -1314,26 +1324,26 @@ static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsig
         }
         case PRINTF_LEN_L:
         {
-            unsigned long val = va_arg(*args, unsigned long);
+            unsigned long val = va_arg(args->args, unsigned long);
             PRINTF_U(unsigned long, fmt, val, flags, prec, len, state);
             break;
         }
         case PRINTF_LEN_LL:
         {
-            unsigned long long val = va_arg(*args, unsigned long long);
+            unsigned long long val = va_arg(args->args, unsigned long long);
             PRINTF_U(unsigned long long, fmt, val, flags, prec, len, state);
             break;
         }
         case PRINTF_LEN_J:
         {
-            uintmax_t val = va_arg(*args, uintmax_t);
+            uintmax_t val = va_arg(args->args, uintmax_t);
             PRINTF_U(uintmax_t, fmt, val, flags, prec, len, state);
             break;
         }
         case PRINTF_LEN_Z:
         case PRINTF_LEN_T:
         {
-            size_t val = va_arg(*args, size_t);
+            size_t val = va_arg(args->args, size_t);
             PRINTF_U(size_t, fmt, val, flags, prec, len, state);
             break;
         }
@@ -1357,17 +1367,17 @@ static unsigned io_scanf_int_no_arg(char fmt, IO io, unsigned width) {
 }
 
 /* fmt must be one of "diuox", returns UINT_MAX on failure, number of characters read on success */
-static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_list *args) {
+static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_list_wrapper *args) {
     switch (len) {
         default: return UINT_MAX;
         case PRINTF_LEN_NONE:
         {
             switch (fmt) {
-                case 'd': {signed int *val = va_arg(*args, signed int *); SCANF_D(signed int, *val, width, len, io); break;}
-                case 'i': {signed int *val = va_arg(*args, signed int *); SCANF_I(signed int, *val, width, len, io); break;}
-                case 'o': {unsigned int *val = va_arg(*args, unsigned int *); SCANF_O(unsigned int, *val, width, len, io); break;}
-                case 'u': {unsigned int *val = va_arg(*args, unsigned int *); SCANF_U(unsigned int, *val, width, len, io); break;}
-                case 'x': {unsigned int *val = va_arg(*args, unsigned int *); SCANF_X(unsigned int, *val, width, len, io); break;}
+                case 'd': {signed int *val = va_arg(args->args, signed int *); SCANF_D(signed int, *val, width, len, io); break;}
+                case 'i': {signed int *val = va_arg(args->args, signed int *); SCANF_I(signed int, *val, width, len, io); break;}
+                case 'o': {unsigned int *val = va_arg(args->args, unsigned int *); SCANF_O(unsigned int, *val, width, len, io); break;}
+                case 'u': {unsigned int *val = va_arg(args->args, unsigned int *); SCANF_U(unsigned int, *val, width, len, io); break;}
+                case 'x': {unsigned int *val = va_arg(args->args, unsigned int *); SCANF_X(unsigned int, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
@@ -1375,11 +1385,11 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
         case PRINTF_LEN_H:
         {
             switch (fmt) {
-                case 'd': {signed short *val = va_arg(*args, signed short *); SCANF_D(signed short, *val, width, len, io); break;}
-                case 'i': {signed short *val = va_arg(*args, signed short *); SCANF_I(signed short, *val, width, len, io); break;}
-                case 'o': {unsigned short *val = va_arg(*args, unsigned short *); SCANF_O(unsigned short, *val, width, len, io); break;}
-                case 'u': {unsigned short *val = va_arg(*args, unsigned short *); SCANF_U(unsigned short, *val, width, len, io); break;}
-                case 'x': {unsigned short *val = va_arg(*args, unsigned short *); SCANF_X(unsigned short, *val, width, len, io); break;}
+                case 'd': {signed short *val = va_arg(args->args, signed short *); SCANF_D(signed short, *val, width, len, io); break;}
+                case 'i': {signed short *val = va_arg(args->args, signed short *); SCANF_I(signed short, *val, width, len, io); break;}
+                case 'o': {unsigned short *val = va_arg(args->args, unsigned short *); SCANF_O(unsigned short, *val, width, len, io); break;}
+                case 'u': {unsigned short *val = va_arg(args->args, unsigned short *); SCANF_U(unsigned short, *val, width, len, io); break;}
+                case 'x': {unsigned short *val = va_arg(args->args, unsigned short *); SCANF_X(unsigned short, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
@@ -1387,11 +1397,11 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
         case PRINTF_LEN_HH:
         {
             switch (fmt) {
-                case 'd': {signed char *val = va_arg(*args, signed char *); SCANF_D(signed char, *val, width, len, io); break;}
-                case 'i': {signed char *val = va_arg(*args, signed char *); SCANF_I(signed char, *val, width, len, io); break;}
-                case 'o': {unsigned char *val = va_arg(*args, unsigned char *); SCANF_O(unsigned char, *val, width, len, io); break;}
-                case 'u': {unsigned char *val = va_arg(*args, unsigned char *); SCANF_U(unsigned char, *val, width, len, io); break;}
-                case 'x': {unsigned char *val = va_arg(*args, unsigned char *); SCANF_X(unsigned char, *val, width, len, io); break;}
+                case 'd': {signed char *val = va_arg(args->args, signed char *); SCANF_D(signed char, *val, width, len, io); break;}
+                case 'i': {signed char *val = va_arg(args->args, signed char *); SCANF_I(signed char, *val, width, len, io); break;}
+                case 'o': {unsigned char *val = va_arg(args->args, unsigned char *); SCANF_O(unsigned char, *val, width, len, io); break;}
+                case 'u': {unsigned char *val = va_arg(args->args, unsigned char *); SCANF_U(unsigned char, *val, width, len, io); break;}
+                case 'x': {unsigned char *val = va_arg(args->args, unsigned char *); SCANF_X(unsigned char, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
@@ -1399,11 +1409,11 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
         case PRINTF_LEN_L:
         {
             switch (fmt) {
-                case 'd': {signed long *val = va_arg(*args, signed long *); SCANF_D(signed long, *val, width, len, io); break;}
-                case 'i': {signed long *val = va_arg(*args, signed long *); SCANF_I(signed long, *val, width, len, io); break;}
-                case 'o': {unsigned long *val = va_arg(*args, unsigned long *); SCANF_O(unsigned long, *val, width, len, io); break;}
-                case 'u': {unsigned long *val = va_arg(*args, unsigned long *); SCANF_U(unsigned long, *val, width, len, io); break;}
-                case 'x': {unsigned long *val = va_arg(*args, unsigned long *); SCANF_X(unsigned long, *val, width, len, io); break;}
+                case 'd': {signed long *val = va_arg(args->args, signed long *); SCANF_D(signed long, *val, width, len, io); break;}
+                case 'i': {signed long *val = va_arg(args->args, signed long *); SCANF_I(signed long, *val, width, len, io); break;}
+                case 'o': {unsigned long *val = va_arg(args->args, unsigned long *); SCANF_O(unsigned long, *val, width, len, io); break;}
+                case 'u': {unsigned long *val = va_arg(args->args, unsigned long *); SCANF_U(unsigned long, *val, width, len, io); break;}
+                case 'x': {unsigned long *val = va_arg(args->args, unsigned long *); SCANF_X(unsigned long, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
@@ -1411,11 +1421,11 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
         case PRINTF_LEN_LL:
         {
             switch (fmt) {
-                case 'd': {signed long long *val = va_arg(*args, signed long long *); SCANF_D(signed long long, *val, width, len, io); break;}
-                case 'i': {signed long long *val = va_arg(*args, signed long long *); SCANF_I(signed long long, *val, width, len, io); break;}
-                case 'o': {unsigned long long *val = va_arg(*args, unsigned long long *); SCANF_O(unsigned long long, *val, width, len, io); break;}
-                case 'u': {unsigned long long *val = va_arg(*args, unsigned long long *); SCANF_U(unsigned long long, *val, width, len, io); break;}
-                case 'x': {unsigned long long *val = va_arg(*args, unsigned long long *); SCANF_X(unsigned long long, *val, width, len, io); break;}
+                case 'd': {signed long long *val = va_arg(args->args, signed long long *); SCANF_D(signed long long, *val, width, len, io); break;}
+                case 'i': {signed long long *val = va_arg(args->args, signed long long *); SCANF_I(signed long long, *val, width, len, io); break;}
+                case 'o': {unsigned long long *val = va_arg(args->args, unsigned long long *); SCANF_O(unsigned long long, *val, width, len, io); break;}
+                case 'u': {unsigned long long *val = va_arg(args->args, unsigned long long *); SCANF_U(unsigned long long, *val, width, len, io); break;}
+                case 'x': {unsigned long long *val = va_arg(args->args, unsigned long long *); SCANF_X(unsigned long long, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
@@ -1423,18 +1433,18 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
         case PRINTF_LEN_J:
         {
             switch (fmt) {
-                case 'd': {intmax_t *val = va_arg(*args, intmax_t *); SCANF_D(intmax_t, *val, width, len, io); break;}
-                case 'i': {intmax_t *val = va_arg(*args, intmax_t *); SCANF_I(intmax_t, *val, width, len, io); break;}
-                case 'o': {uintmax_t *val = va_arg(*args, uintmax_t *); SCANF_O(uintmax_t, *val, width, len, io); break;}
-                case 'u': {uintmax_t *val = va_arg(*args, uintmax_t *); SCANF_U(uintmax_t, *val, width, len, io); break;}
-                case 'x': {uintmax_t *val = va_arg(*args, uintmax_t *); SCANF_X(uintmax_t, *val, width, len, io); break;}
+                case 'd': {intmax_t *val = va_arg(args->args, intmax_t *); SCANF_D(intmax_t, *val, width, len, io); break;}
+                case 'i': {intmax_t *val = va_arg(args->args, intmax_t *); SCANF_I(intmax_t, *val, width, len, io); break;}
+                case 'o': {uintmax_t *val = va_arg(args->args, uintmax_t *); SCANF_O(uintmax_t, *val, width, len, io); break;}
+                case 'u': {uintmax_t *val = va_arg(args->args, uintmax_t *); SCANF_U(uintmax_t, *val, width, len, io); break;}
+                case 'x': {uintmax_t *val = va_arg(args->args, uintmax_t *); SCANF_X(uintmax_t, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
         }
         case PRINTF_LEN_Z:
         {
-            size_t *val = va_arg(*args, size_t *);
+            size_t *val = va_arg(args->args, size_t *);
             switch (fmt) {
                 case 'd': SCANF_D(size_t, *val, width, len, io); break;
                 case 'i': SCANF_I(size_t, *val, width, len, io); break;
@@ -1447,7 +1457,7 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
         }
         case PRINTF_LEN_T:
         {
-            ptrdiff_t *val = va_arg(*args, ptrdiff_t *);
+            ptrdiff_t *val = va_arg(args->args, ptrdiff_t *);
             switch (fmt) {
                 case 'd': SCANF_D(ptrdiff_t, *val, width, len, io); break;
                 case 'i': SCANF_I(ptrdiff_t, *val, width, len, io); break;
@@ -1472,6 +1482,7 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
     unsigned fmt_flags = 0, fmt_width = 0, fmt_prec = 0, fmt_len = 0;
 
     struct io_printf_state state;
+    va_list_wrapper args_copy;
 
     state.buffer = state.internalBuffer;
     state.bufferLength = 0;
@@ -1487,13 +1498,15 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
         case IO_File:
         case IO_OwnFile: return vfprintf(io->ptr, fmt, args);
         default:
+            va_copy(args_copy.args, args);
+
             for (; *fmt; ++fmt) {
                 if (*fmt == '%') {
                     ++fmt;
 
                     if (*fmt == '%') {
-                        if (io_putc('%', io) == EOF)
-                            return -2;
+                        if (io_putc('%', io) == EOF) 
+                            CLEANUP(-1);
                         ++written;
                         continue;
                     }
@@ -1515,7 +1528,7 @@ done_with_flags:
 
                     /* read minimum field width */
                     if (*fmt == '*') {
-                        int width = va_arg(args, int);
+                        int width = va_arg(args_copy.args, int);
 
                         ++fmt;
                         if (width < 0) {
@@ -1536,7 +1549,7 @@ done_with_flags:
                     if (*fmt == '.') {
                         ++fmt;
                         if (*fmt == '*') {
-                            int prec = va_arg(args, int);
+                            int prec = va_arg(args_copy.args, int);
 
                             ++fmt;
                             if (prec >= 0) {
@@ -1583,16 +1596,16 @@ done_with_flags:
 
                     /* read format specifier */
                     switch (*fmt) {
-                        default: return -2; /* incomplete format specifier */
+                        default: CLEANUP(-2); /* incomplete format specifier */
                         case 'c':
                         {
-                            state.internalBuffer[0] = va_arg(args, int);
+                            state.internalBuffer[0] = va_arg(args_copy.args, int);
                             state.bufferLength = 1;
                             break;
                         }
                         case 's':
                         {
-                            char *s = va_arg(args, char *);
+                            char *s = va_arg(args_copy.args, char *);
                             size_t len = strlen(s);
 
                             if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && fmt_prec < len)
@@ -1604,23 +1617,23 @@ done_with_flags:
                         }
                         case 'n':
                             switch (fmt_len) {
-                                case PRINTF_LEN_NONE: *(va_arg(args, int *)) = written; break;
-                                case PRINTF_LEN_H: *(va_arg(args, signed char *)) = (signed char) written; break;
-                                case PRINTF_LEN_HH: *(va_arg(args, short *)) = (short) written; break;
-                                case PRINTF_LEN_L: *(va_arg(args, long *)) = written; break;
-                                case PRINTF_LEN_LL: *(va_arg(args, long long *)) = written; break;
-                                case PRINTF_LEN_J: *(va_arg(args, intmax_t *)) = written; break;
+                                case PRINTF_LEN_NONE: *(va_arg(args_copy.args, int *)) = written; break;
+                                case PRINTF_LEN_H: *(va_arg(args_copy.args, signed char *)) = (signed char) written; break;
+                                case PRINTF_LEN_HH: *(va_arg(args_copy.args, short *)) = (short) written; break;
+                                case PRINTF_LEN_L: *(va_arg(args_copy.args, long *)) = written; break;
+                                case PRINTF_LEN_LL: *(va_arg(args_copy.args, long long *)) = written; break;
+                                case PRINTF_LEN_J: *(va_arg(args_copy.args, intmax_t *)) = written; break;
                                 case PRINTF_LEN_Z:
-                                case PRINTF_LEN_T: *(va_arg(args, ptrdiff_t *)) = written; break;
-                                default: return -2;
+                                case PRINTF_LEN_T: *(va_arg(args_copy.args, ptrdiff_t *)) = written; break;
+                                default: CLEANUP(-2);
                             }
                             break;
                         case 'd':
                         case 'i':
                             state.flags |= PRINTF_STATE_INTEGRAL | PRINTF_STATE_SIGNED;
 
-                            if (io_printf_signed_int(&state, fmt_flags, fmt_prec, fmt_len, VA_LIST_POINTER(args)) < 0)
-                                return -2;
+                            if (io_printf_signed_int(&state, fmt_flags, fmt_prec, fmt_len, &args_copy) < 0)
+                                CLEANUP(-2);
 
                             if (!(fmt_flags & PRINTF_FLAG_HAS_PRECISION))
                                 fmt_prec = 1;
@@ -1631,8 +1644,8 @@ done_with_flags:
                         case 'X':
                             state.flags |= PRINTF_STATE_INTEGRAL;
 
-                            if (io_printf_unsigned_int(&state, *fmt, fmt_flags, fmt_prec, fmt_len, VA_LIST_POINTER(args)) < 0)
-                                return -2;
+                            if (io_printf_unsigned_int(&state, *fmt, fmt_flags, fmt_prec, fmt_len, &args_copy) < 0)
+                                CLEANUP(-2);
 
                             if (!(fmt_flags & PRINTF_FLAG_HAS_PRECISION)) {
                                 switch (*fmt) {
@@ -1657,10 +1670,10 @@ done_with_flags:
                             state.flags |= PRINTF_STATE_FLOATING_POINT;
 
                             if (fmt_len == PRINTF_LEN_BIG_L) {
-                                long double value = va_arg(args, long double);
+                                long double value = va_arg(args_copy.args, long double);
                                 PRINTF_F(long double, *fmt, value, fmt_flags, fmt_prec, fmt_len, &state);
                             } else {
-                                double value = va_arg(args, double);
+                                double value = va_arg(args_copy.args, double);
                                 PRINTF_F(double, *fmt, value, fmt_flags, fmt_prec, fmt_len, &state);
                             }
 
@@ -1674,7 +1687,7 @@ done_with_flags:
                             fmt_flags |= PRINTF_FLAG_HASH | PRINTF_FLAG_HAS_PRECISION;
                             fmt_prec = sizeof(void *) * 2 /* for hex encoding */ * CHAR_BIT / 8;
 
-                            size_t val = (size_t) va_arg(args, void *);
+                            size_t val = (size_t) va_arg(args_copy.args, void *);
                             PRINTF_U(size_t, 'x', val, fmt_flags, fmt_prec, PRINTF_LEN_NONE, &state);
 
                             break;
@@ -1770,6 +1783,8 @@ done_with_flags:
 cleanup:
     if (state.flags & PRINTF_STATE_FREE_BUFFER)
         free(state.buffer);
+
+    va_end(args_copy.args);
 
     return result;
 }
@@ -2133,6 +2148,10 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
     int items = 0;
     size_t bytes = 0;
 
+    va_list_wrapper args_copy;
+
+    va_copy(args_copy.args, args);
+
     for (; *fmt; ++fmt) {
         unsigned char chr = *fmt;
 
@@ -2198,7 +2217,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                 case 'o':
                 case 'x': {
                     unsigned result = discardResult? io_scanf_int_no_arg(*fmt, io, fmt_width):
-                                                     io_scanf_int(*fmt, io, fmt_width, fmt_len, VA_LIST_POINTER(args));
+                                                     io_scanf_int(*fmt, io, fmt_width, fmt_len, &args_copy);
                     if (result == UINT_MAX || result == 0) {
                         bytes += result == 0;
                         goto cleanup;
@@ -2218,7 +2237,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                             ++bytes;
                         }
                     } else {
-                        char *cptr = va_arg(args, char *);
+                        char *cptr = va_arg(args_copy.args, char *);
                         size_t read = 0;
 
                         if ((read = io_read(cptr, 1, fmt_width, io)) != fmt_width) {
@@ -2231,7 +2250,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                     break;
                 }
                 case 's': {
-                    char *dst = discardResult? NULL: va_arg(args, char *);
+                    char *dst = discardResult? NULL: va_arg(args_copy.args, char *);
 
                     for (; fmt_width; --fmt_width) {
                         int chr = io_getc(io);
@@ -2277,7 +2296,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                     }
 
                     const char *oldfmt = fmt;
-                    char *cptr = discardResult? NULL: va_arg(args, char *);
+                    char *cptr = discardResult? NULL: va_arg(args_copy.args, char *);
                     int match = 0;
 
                     for (; fmt_width; --fmt_width) {
@@ -2339,14 +2358,14 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                 }
                 case 'n': {
                     switch (fmt_len) {
-                        case PRINTF_LEN_NONE: {int *n = va_arg(args, int *); *n = bytes; break;}
-                        case PRINTF_LEN_HH: {signed char *n = va_arg(args, signed char *); *n = bytes; break;}
-                        case PRINTF_LEN_H: {signed short *n = va_arg(args, signed short *); *n = bytes; break;}
-                        case PRINTF_LEN_L: {long int *n = va_arg(args, long int *); *n = bytes; break;}
-                        case PRINTF_LEN_LL: {long long int *n = va_arg(args, long long int *); *n = bytes; break;}
-                        case PRINTF_LEN_J: {intmax_t *n = va_arg(args, intmax_t *); *n = bytes; break;}
-                        case PRINTF_LEN_Z: {size_t *n = va_arg(args, size_t *); *n = bytes; break;}
-                        case PRINTF_LEN_T: {ptrdiff_t *n = va_arg(args, ptrdiff_t *); *n = bytes; break;}
+                        case PRINTF_LEN_NONE: {int *n = va_arg(args_copy.args, int *); *n = bytes; break;}
+                        case PRINTF_LEN_HH: {signed char *n = va_arg(args_copy.args, signed char *); *n = bytes; break;}
+                        case PRINTF_LEN_H: {signed short *n = va_arg(args_copy.args, signed short *); *n = bytes; break;}
+                        case PRINTF_LEN_L: {long int *n = va_arg(args_copy.args, long int *); *n = bytes; break;}
+                        case PRINTF_LEN_LL: {long long int *n = va_arg(args_copy.args, long long int *); *n = bytes; break;}
+                        case PRINTF_LEN_J: {intmax_t *n = va_arg(args_copy.args, intmax_t *); *n = bytes; break;}
+                        case PRINTF_LEN_Z: {size_t *n = va_arg(args_copy.args, size_t *); *n = bytes; break;}
+                        case PRINTF_LEN_T: {ptrdiff_t *n = va_arg(args_copy.args, ptrdiff_t *); *n = bytes; break;}
                     }
                     break;
                 }
@@ -2367,7 +2386,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                 io_ungetc(charRead, io);
 
             if (charRead == EOF)
-                return bytes == 0? EOF: items;
+                goto cleanup;
         } else {
             if (chr == '%')
                 ++fmt; /* Skip one of two '%' characters */
@@ -2376,10 +2395,10 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
             int charRead = io_getc(io);
 
             if (charRead == EOF)
-                return bytes == 0? EOF: items;
+                goto cleanup;
             else if (charRead != chr) {
                 io_ungetc(charRead, io);
-                return items;
+                goto cleanup;
             }
 
             ++bytes;
@@ -2387,6 +2406,8 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
     }
 
 cleanup:
+    va_end(args_copy.args);
+
     return bytes == 0? EOF: items;
 }
 

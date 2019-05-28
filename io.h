@@ -2,10 +2,9 @@
 #define IO_H
 
 #include <stdio.h>
-#include <platforms.h>
 #include <stdarg.h>
 
-/* **WARNING** - Only define CC_IO_STATIC_INSTANCES if you don't need thread safety */
+#include "platforms.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <errno.h>
+#include <stdlib.h>
 
 #if LINUX_OS
 #include <sys/stat.h>
@@ -759,7 +760,7 @@ cleanup:
     return NULL;
 }
 
-void dirent_destroy(DirectoryEntry entry) {
+void dirent_close(DirectoryEntry entry) {
     if (entry->ownedDir) {
         dir_close(entry->ownedDir);
         free(entry);

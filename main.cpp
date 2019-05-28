@@ -328,8 +328,9 @@ void test_io() {
     test_aes();
     test_hex();
 
-    IO tmp = io_open_minimal_buffer("wt");
+    IO tmp = io_open_dynamic_buffer("wt");
     IO hex = io_open_hex_encode(tmp, "w");
+    fflush(stdout);
     io_puts("Some data", tmp);
     io_puts(" and some more data", tmp);
     printf("Written: %d\n", io_printf(tmp, " and something more, with a number (%d) and a string (%10s)\n", 1443, "str"));
@@ -444,6 +445,7 @@ int main()
         {"Some really long string - with some special ranges like [ and ]", "*[^ ] really*]*"}
     };
 
+#if 1
     IO in = io_open_file(stdin);
     if (1) {
         char buf[20];
@@ -452,8 +454,9 @@ int main()
         printf("Matched = %d (%d, %s)\n", res, value, buf);
         io_rewind(in);
     }
+#endif
 
-    DirectoryEntry entry = dirent_open("C:\\العربية\\share.txt");
+    DirectoryEntry entry = dirent_open("/");
     if (!entry) {
         fputs("Cannot open directory\n", stderr);
         return 0;
@@ -468,9 +471,9 @@ int main()
 
     fclose(out);
 
-    dirent_destroy(entry);
+    dirent_close(entry);
 
-    const char *data[] = {"C:\\something/something.pdfmobile"};
+    const char *data[] = {"/", "home", "pi"};
     Path path = path_construct_gather(data, sizeof(data)/sizeof(*data));
 
     path = path_append(path, "data.txt");
@@ -485,10 +488,9 @@ int main()
 
     path_destroy(path);
 
-    return 0;
-
+#if 0
     unsigned long long items = 0, size = 0;
-    Directory dir = dir_open("C:\\");
+    Directory dir = dir_open("/");
     walk(dir, &items, &size);
 
     printf("Walk of %s completed: %llu files found with a total size of %llu bytes\n", dir_path(dir), items, size);
@@ -501,7 +503,9 @@ int main()
     while ((entry = dir_next(dir)) != NULL)
         printf("%s %s %lld\n", dirent_fullname(entry), dirent_is_directory(entry)? "(dir)": "", dirent_size(entry));
 #endif
+
     dir_close(dir);
+#endif
 
     for (size_t i = 0; i < sizeof(strs)/sizeof(*strs); ++i)
         printf("glob(\"%s\", \"%s\") = %d\n", strs[i][0], strs[i][1], glob(strs[i][0], strs[i][1]));
@@ -510,7 +514,7 @@ int main()
 
     return 0;
 
-    const size_t cnt = 800000;
+    const size_t cnt = 8000;
 
     test_ht(cnt);
 

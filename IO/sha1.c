@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <memory.h>
+#include <stdlib.h>
 
 #if defined(__SSSE3__)
 #define SHA1_COMPILE_SUPPORTS_X86_INTRINSICS

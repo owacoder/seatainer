@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <memory.h>
+#include <stdlib.h>
 
 #define MD5_HASH_BYTES 16
 
