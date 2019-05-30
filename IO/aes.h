@@ -1,3 +1,9 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #ifndef AES_H
 #define AES_H
 
@@ -7,12 +13,14 @@
 extern "C" {
 #endif
 
+/** Specifies the length of an AES key. */
 enum AES_Type {
     AES_128,
     AES_192,
     AES_256
 };
 
+/** Specifies the block-cipher mode for the AES IO device. */
 enum AES_Mode {
     AES_ECB,
     AES_CBC,
@@ -24,22 +32,7 @@ enum AES_Mode {
     AES_CTR /* TODO: CTR mode not implemented yet (defaults back to ECB). Can't find a really good resource to specify the standardized size of the counter (if there is one) */
 };
 
-/* Open as "r" only: to decrypt data from IO and obtain the plaintext
- *
- * Open as "w" only: to decrypt the ciphertext written and push the plaintext to the underlying IO device
- *
- * Open as "rw": Both modes allowed
- *
- */
 IO io_open_aes_decrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode);
-
-/* Open as "r" only: to encrypt data from IO and obtain the ciphertext
- *
- * Open as "w" only: to encrypt the ciphertext written and push the ciphertext to the underlying IO device
- *
- * Open as "rw": Both modes allowed
- *
- */
 IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode);
 
 void test_aes();

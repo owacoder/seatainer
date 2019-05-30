@@ -1,3 +1,9 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #ifndef CCDBLLST_H
 #define CCDBLLST_H
 

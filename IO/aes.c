@@ -1,5 +1,10 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #include "aes.h"
-#include "../platforms.h"
 #include "../utility.h"
 #include <limits.h>
 #include <stdlib.h>
@@ -124,19 +129,53 @@ void test_aes() {
     io_close(plaintext);
 }
 
+/** @brief Stores all the information needed for encoding or decoding (but not both) one 16-byte block of AES
+ *
+ * This structure is not designed to be used by the end-user (nor is it accessible as such), but is designed to be used
+ * internally in using an AES IO object:
+ *
+ * @code
+ *     IO out = io_open_file(stdout);
+ *     IO aes = io_open_aes_encrypt(out, AES_128, AES_ECB, key, NULL, "w");
+ *
+ *     ... // Write data to `aes`, since it and the underlying device are opened for writing
+ *
+ *     io_close(aes);
+ *     io_close(out);
+ * @endcode
+ */
 struct AES_ctx {
-    unsigned char iv[16]; /* Initialization vector */
-    unsigned char previous[16]; /* Stores previous-block/IV/data-needed-for-next-iteration */
-    unsigned char state[16]; /* Data payload should be put in this buffer before encryption/decryption */
-    unsigned char expandedKey[16 * 15]; /* Key schedule; first bytes are original key */
-    unsigned char *buffer; /* Data payload should be read out from here after encryption/decryption */
-    IO io; /* Underlying IO device */
-    void (*cb)(struct AES_ctx *ctx); /* Callback for encryption/decryption; pass pointer to this struct as argument */
-    enum AES_Mode mode; /* Encryption mode, handled by AESEncode/AESDecode */
-    unsigned char rounds; /* Number of iterations required for current key size (the number of rounds is stored instead of key size) */
+    /** Stores the 16-byte initialization vector. Does not have to be initialized if mode does not require it. */
+    unsigned char iv[16];
+
+    /** Temporary storage for next iteration, depending on current mode. */
+    unsigned char previous[16];
+
+    /** Stores the data payload before sending off for encryption or decryption. */
+    unsigned char state[16];
+
+    /** Stores the entire expanded Rijndael key. The original key is at the beginning of the array. */
+    unsigned char expandedKey[16 * 15];
+
+    /** Where to read the data payload from after encryption or decryption has completed. */
+    unsigned char *buffer;
+
+    /** The underlying IO device to read data from or send data to. This device is not closed when the context is destroyed. */
+    IO io;
+
+    /** The callback to do the actual encryption or decryption. The function signature for each is identical. The argument `ctx` is a pointer to this struct. */
+    void (*cb)(struct AES_ctx *ctx);
+
+    /** Specifies the block-cipher mode of operation, one of `AES_ECB`, `AES_CBC`, `AES_PCBC`, `AES_CFB`, `AES_OFB`, or `AES_CTR` */
+    enum AES_Mode mode;
+
+    /** Specifies the number of iterations required for the current key size (the number of rounds is stored instead of key size) */
+    unsigned char rounds;
+
+    /** When writing, `pos` contains the number of bytes written to the state (0-15), 16 means flush the state.
+     *  When reading, `pos` contains the number of bytes read from the state (1-16), 0 means fill the state.
+     */
     unsigned char pos;
-    /* pos contains the number of bytes written from the state when writing (0-15), 16 means flush the state */
-    /* pos contains the number of bytes available to read from the state when reading (1-16), 0 means fill the state */
 };
 
 static const unsigned char sbox[] = {
@@ -652,14 +691,16 @@ static size_t aes_read(void *ptr, size_t size, size_t count, void *userdata, IO 
     return count;
 }
 
-int aes_close(void *userdata, IO io) {
+static int aes_close(void *userdata, IO io) {
     UNUSED(io)
+
+    memset(userdata, 0, sizeof(struct AES_ctx));
 
     free(userdata);
     return 0;
 }
 
-int aes_seek64(void *userdata, long long int offset, int origin, IO io) {
+static int aes_seek64(void *userdata, long long int offset, int origin, IO io) {
     UNUSED(io)
 
     struct AES_ctx *aes = userdata;
@@ -679,6 +720,26 @@ static const struct InputOutputDeviceCallbacks aes_callbacks = {
     .seek64 = NULL
 };
 
+/** @brief Opens an AES encryption device.
+ *
+ *  It is not possible to use the resulting device for decryption. To do so, use io_open_aes_decrypt() instead.
+ *
+ *  The @p mode specifier changes how data flows in the filter:
+ *
+ *    - Open as "r" only: encrypts data read from @p io and obtains the plaintext when read from the filter
+ *    - Open as "w" only: encrypts the ciphertext written to the filter and pushes the plaintext to @p io
+ *    - Open as "rw": Both modes allowed
+ *
+ *  Hardware acceleration is supported on x86 devices, and is detected at runtime. To refuse access to acceleration, include a '<' in @p mode.
+ *
+ *  @param io is the underlying device to read data from and write data to. Must not be `NULL`.
+ *  @param type is the size of the AES key to be used.
+ *  @param cipherMode is the block-cipher mode of operation for this encryption device.
+ *  @param key contains the binary key, size dependent on @p type, either 16-, 24-, or 32-byte key if @p type is `AES_128`, `AES_192`, or `AES_256`, respectively. Must not be `NULL`.
+ *  @param iv contains the initialization vector to use for encryption, and may be NULL if @p cipherMode does not require one.
+ *  @param mode contains the standard IO device mode specifiers (i.e. "r", "w", "rw"), but has special behavior for each. Must not be `NULL`. See the notes for more info.
+ *  @return A new IO device filter that encrypts AES data, or `NULL` if a failure occured.
+ */
 IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode) {
     struct AES_ctx *ctx = calloc(1, sizeof(struct AES_ctx));
     if (ctx == NULL)
@@ -720,6 +781,26 @@ IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, cons
     return result;
 }
 
+/** @brief Opens an AES decryption device.
+ *
+ *  It is not possible to use the resulting device for encryption. To do so, use io_open_aes_encrypt() instead.
+ *
+ *  The @p mode specifier changes how data flows in the filter:
+ *
+ *    - Open as "r" only: decrypts data read from @p io and obtains the plaintext when read from the filter
+ *    - Open as "w" only: decrypts the ciphertext written to the filter and pushes the plaintext to @p io
+ *    - Open as "rw": Both modes allowed
+ *
+ *  Hardware acceleration is supported on x86 devices, and is detected at runtime. To refuse access to acceleration, include a '<' in @p mode.
+ *
+ *  @param io is the underlying device to read data from and write data to. Must not be `NULL`.
+ *  @param type is the size of the AES key to be used.
+ *  @param cipherMode is the block-cipher mode of operation for this decryption device.
+ *  @param key contains the binary key, size dependent on @p type, either 16-, 24-, or 32-byte key if @p type is `AES_128`, `AES_192`, or `AES_256`, respectively. Must not be `NULL`.
+ *  @param iv contains the initialization vector to use for decryption, and may be NULL if @p cipherMode does not require one.
+ *  @param mode contains the standard IO device mode specifiers (i.e. "r", "w", "rw"), but has special behavior for each. Must not be `NULL`. See the notes for more info.
+ *  @return A new IO device filter that decrypts AES data, or `NULL` if a failure occured.
+ */
 IO io_open_aes_decrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode) {
     struct AES_ctx *ctx = calloc(1, sizeof(struct AES_ctx));
     if (ctx == NULL)

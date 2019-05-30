@@ -1,3 +1,9 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #include "utility.h"
 #include "platforms.h"
 
@@ -226,6 +232,16 @@ AtomicPointer atomicp_cmpxchg(volatile AtomicPointer *location, AtomicPointer va
 }
 #endif
 
+/**
+ * @brief Swaps a number of bytes in @p p and @p q.
+ *
+ * The memory spans must not overlap.
+ *
+ * @param p is a pointer to a memory block to swap. Must not be `NULL`.
+ * @param q is a pointer to a second memory block to swap. Must not be `NULL`.
+ * @param size is the number of the bytes to swap.
+ * @return This function always returns 0.
+ */
 int memswap(void *p, void *q, size_t size) {
     char *pchar = p, *qchar = q;
 
@@ -239,6 +255,16 @@ int memswap(void *p, void *q, size_t size) {
     return 0;
 }
 
+/**
+ * @brief XORs a number of bytes in @p p and @p q.
+ *
+ * The memory spans must not overlap.
+ *
+ * @param dst is a pointer to the destination memory block to XOR. Must not be `NULL`.
+ * @param src is a pointer to the source memory block to XOR. Must not be `NULL`.
+ * @param size is the number of the bytes to XOR.
+ * @return This function always returns 0.
+ */
 int memxor(void *dst, void *src, size_t size) {
     char *pdst = dst, *psrc = src;
 
@@ -262,7 +288,16 @@ static uint64_t exp_mod(uint64_t base, uint64_t exp, uint64_t mod) {
     return result;
 }
 
-/* Adapted from https://en.wikipedia.org/wiki/Miller%E2%80%93Rabin_primality_test#Deterministic_variants */
+/* The following is adapted from https://en.wikipedia.org/wiki/Miller%E2%80%93Rabin_primality_test#Deterministic_variants */
+/**
+ * @brief Detects whether a number is prime.
+ *
+ * This function is deterministic, i.e. the number is definitely prime if this function says so.
+ * `is_prime()` is specifically designed for use for testing hash table sizes for primality.
+ *
+ * @param number is the number to test for primality.
+ * @return 1 if @p number is prime, 0 if @p number is composite.
+ */
 int is_prime(size_t number) {
     size_t i, j;
     static int divisors[] = {3, 5, 7, 11, 13};
@@ -302,6 +337,13 @@ next:;
     return 1;
 }
 
+/**
+ * @brief Attempts to find the lowest prime number not less than @p number.
+ *
+ * @param number is the number to begin testing for primality from.
+ * @return If the result would be greater than 32 bits wide, @p number itself is returned.
+ *         Otherwise, the lowest prime not less than @p number is returned.
+ */
 size_t next_prime(size_t number) {
     number |= 1;
     while (!is_prime(number) && number < 0xffffffffu)
@@ -351,6 +393,16 @@ static unsigned char *pearson_lookup_table() {
     return lookup;
 }
 
+/**
+ * @brief Performs a Pearson hash on specified data.
+ *
+ * Performs a Pearson hash on an arbitrary amount of data, using a pseudo-randomly shuffled hash table.
+ * The output is uniformly-distributed if the input is uniformly-distributed too.
+ *
+ * @param data points to the data to hash.
+ * @param size is the size in bytes of the data to hash.
+ * @return The Pearson hash of the data.
+ */
 unsigned pearson_hash(const char *data, size_t size)
 {
     const unsigned char *lookup = pearson_lookup_table();
@@ -376,26 +428,47 @@ unsigned pearson_hash(const char *data, size_t size)
     return result;
 }
 
+/** @brief Rotates @p v left by @p amount bits.
+ *
+ *  @param v is the 32-bit number to rotate.
+ *  @param amount is the number of bits to rotate @p v by. @p amount @bold must be limited to the range [0, 32)
+ *  @return @p v, rotated left (toward the MSB) by @p amount bits
+ */
 uint32_t rotate_left32(uint32_t v, unsigned amount) {
     return (v << amount) | (v >> (-amount & 0x1f));
 }
 
+/** @brief Rotates @p v right by @p amount bits.
+ *
+ *  @param v is the 32-bit number to rotate.
+ *  @param amount is the number of bits to rotate @p v by. @p amount @bold must be limited to the range [0, 32)
+ *  @return @p v, rotated right (toward the LSB) by @p amount bits
+ */
 uint32_t rotate_right32(uint32_t v, unsigned amount) {
     return (v >> amount) | (v << (-amount & 0x1f));
 }
 
+/** @brief Rotates @p v left by @p amount bits.
+ *
+ *  @param v is the 64-bit number to rotate.
+ *  @param amount is the number of bits to rotate @p v by. @p amount @bold must be limited to the range [0, 64)
+ *  @return @p v, rotated left (toward the MSB) by @p amount bits
+ */
 uint64_t rotate_left64(uint64_t v, unsigned amount) {
     return (v << amount) | (v >> (-amount & 0x3f));
 }
 
+/** @brief Rotates @p v right by @p amount bits.
+ *
+ *  @param v is the 64-bit number to rotate.
+ *  @param amount is the number of bits to rotate @p v by. @p amount @bold must be limited to the range [0, 64)
+ *  @return @p v, rotated right (toward the LSB) by @p amount bits
+ */
 uint64_t rotate_right64(uint64_t v, unsigned amount) {
     return (v >> amount) | (v << (-amount & 0x3f));
 }
 
 /* PUT FUNCTIONS */
-
-/* NOTE: the big- and little-endian raw cast functions ONLY WORK
- * if unaligned access is allowed on the platform. Use the safe version otherwise */
 
 /* Little-endian? */
 #if (X86_CPU | AMD64_CPU) && CHAR_BIT == 8

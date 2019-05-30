@@ -1,3 +1,9 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #include "dir.h"
 
 #include <string.h>
@@ -1087,7 +1093,7 @@ int dirent_is_temporary(DirectoryEntry entry) {
 #endif
 }
 
-int dirent_created_time(DirectoryEntry entry, struct tm *t) {
+int dirent_created_time_utc(DirectoryEntry entry, struct tm *t) {
 #if WINDOWS_OS
     if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
@@ -1107,7 +1113,7 @@ int dirent_created_time(DirectoryEntry entry, struct tm *t) {
 #endif
 }
 
-int dirent_last_access_time(DirectoryEntry entry, struct tm *t) {
+int dirent_last_access_time_utc(DirectoryEntry entry, struct tm *t) {
 #if LINUX_OS
     if (dirFillExtData(entry))
         return -1;
@@ -1134,7 +1140,7 @@ int dirent_last_access_time(DirectoryEntry entry, struct tm *t) {
 #endif
 }
 
-int dirent_last_modification_time(DirectoryEntry entry, struct tm *t) {
+int dirent_last_modification_time_utc(DirectoryEntry entry, struct tm *t) {
 #if LINUX_OS
     if (dirFillExtData(entry))
         return -1;
@@ -1161,7 +1167,7 @@ int dirent_last_modification_time(DirectoryEntry entry, struct tm *t) {
 #endif
 }
 
-int dirent_last_status_update_time(DirectoryEntry entry, struct tm *t) {
+int dirent_last_status_update_time_utc(DirectoryEntry entry, struct tm *t) {
 #if LINUX_OS
     if (dirFillExtData(entry))
         return -1;

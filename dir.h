@@ -1,7 +1,14 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #ifndef DIR_H
 #define DIR_H
 
 #include "platforms.h"
+
 #include <time.h>
 
 #ifdef __cplusplus
@@ -12,13 +19,41 @@ struct DirStruct;
 struct DirEntryStruct;
 struct PathStruct;
 
+/** @brief The root object type to perform all directory operations on.
+ *
+ * A Directory object must be created to iterate over directories using `dir_next()`.
+ *
+ * This is an opaque handle to an object that does not need (or want) any member access.
+ */
 typedef struct DirStruct *Directory;
+/** @brief The root object type to perform all file information operations on.
+ *
+ * A DirectoryEntry object is created for each call to `dir_next()`, but may also be created independently with `dirent_open()`.
+ *
+ * This is an opaque handle to an object that does not need (or want) any member access.
+ */
 typedef struct DirEntryStruct *DirectoryEntry;
+/** @brief The root object type to perform all path operations on.
+ *
+ * A path object allows some convenient path manipulation functions that are difficult to accomplish with raw strings.
+ *
+ * This is an opaque handle to an object that does not need (or want) any member access.
+ */
 typedef struct PathStruct *Path;
 
-/* Checks whether `c` is a valid path separator or not, returns non-zero if `c` is a separator, zero otherwise */
+/** @brief Checks whether @p c is a valid path separator.
+ *
+ *  @param c The character to check.
+ *  @return 1 if @p c is a valid path separator, 0 otherwise.
+ */
 int path_check_separator(char c);
-/* Returns the system-specific path separator */
+
+/** @brief Gives system-specific path separator.
+ *
+ * The system-specific separator defaults to '\' on Windows and '/' everywhere else.
+ *
+ * @return The system-specific path separator.
+ */
 char path_separator();
 /* Edits `path` to point to parent directory, or if no parent directory exists, doesn't edit the path
  * Returns `path`; this function never fails
@@ -93,7 +128,7 @@ DirectoryEntry dir_next(Directory dir);
 /* Closes a directory and invalidates the handle */
 void dir_close(Directory dir);
 
-/* Opens a directory entry for a specific path */
+/* Opens a directory entry for a specific UTF-8 path */
 DirectoryEntry dirent_open(const char *path);
 /* Same as dirent_open(), but uses ANSI functions on Windows if mode contains "ncp", for [n]ative [c]ode [p]age */
 DirectoryEntry dirent_open_with_mode(const char *path, const char *mode);
@@ -127,10 +162,10 @@ int dirent_is_temporary(DirectoryEntry entry);
 
 /* Obtain the UTC time of file traits */
 /* Returns 0 on success, -1 on failure (failure may occur because the requested trait doesn't exist for the platform) */
-int dirent_created_time(DirectoryEntry entry, struct tm *t);
-int dirent_last_access_time(DirectoryEntry entry, struct tm *t);
-int dirent_last_modification_time(DirectoryEntry entry, struct tm *t);
-int dirent_last_status_update_time(DirectoryEntry entry, struct tm *t);
+int dirent_created_time_utc(DirectoryEntry entry, struct tm *t);
+int dirent_last_access_time_utc(DirectoryEntry entry, struct tm *t);
+int dirent_last_modification_time_utc(DirectoryEntry entry, struct tm *t);
+int dirent_last_status_update_time_utc(DirectoryEntry entry, struct tm *t);
 
 #ifdef __cplusplus
 }

@@ -1,8 +1,12 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #include "md5.h"
 #include "../utility.h"
 
-#include <stdint.h>
-#include <memory.h>
 #include <stdlib.h>
 
 #define MD5_HASH_BYTES 16

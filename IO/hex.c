@@ -1,5 +1,10 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #include "hex.h"
-#include "../platforms.h"
 
 #include <stdlib.h>
 #include <string.h>

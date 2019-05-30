@@ -1,5 +1,10 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #include "crypto_rand.h"
-#include "../platforms.h"
 #include <limits.h>
 
 #if WINDOWS_OS

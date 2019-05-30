@@ -1,3 +1,9 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #include "element.h"
 #include "ccvector.h"
 #include "cclnklst.h"
@@ -8,7 +14,6 @@
 #include "utility.h"
 
 #include <string.h>
-#include <memory.h>
 #include <stdlib.h>
 
 #ifdef __cplusplus
@@ -943,7 +948,7 @@ static int cc_el_update_type_information(HElementData data, ContainerElementType
         /* Proof of an external storage location. Since we don't want to store external information of a different type,
            the program should return an error message. Also, since we don't know the size limit of the external storage
            location, we shouldn't try to put anything there that might cause a larger error */
-            return CC_BAD_PARAM;
+            CC_BAD_PARAM_HANDLER("attempted to assign value of different type to external data reference");
     }
 
     ElementDataCallback cb = NULL;

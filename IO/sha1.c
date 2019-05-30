@@ -1,9 +1,12 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #include "sha1.h"
 #include "../utility.h"
-#include "../platforms.h"
 
-#include <stdint.h>
-#include <memory.h>
 #include <stdlib.h>
 
 #if defined(__SSSE3__)

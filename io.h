@@ -1,3 +1,9 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #ifndef IO_H
 #define IO_H
 
@@ -12,6 +18,10 @@ extern "C" {
 
 struct InputOutputDevice;
 
+/** @brief The root object type to perform all IO on.
+ *
+ * This is an opaque handle to a runtime-polymorphic object that does not need (or want) any member access.
+ */
 typedef struct InputOutputDevice *IO;
 
 enum IO_Type

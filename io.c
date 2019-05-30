@@ -1,11 +1,16 @@
+/** @file
+ *
+ *  Basic IO services with flexible backends
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #define _FILE_OFFSET_BITS 64
 #define _LARGEFILE64_SOURCE
 
 #include <stddef.h>
 #include <stdlib.h>
-#include <memory.h>
-#include <stdarg.h>
-#include <stdint.h>
 #include <limits.h>
 #include <ctype.h>
 #include <math.h> /* For printf and scanf */
@@ -96,7 +101,7 @@ struct InputOutputDevice {
     } data;
     enum IO_Type type;
 
-    unsigned long flags; /* Upper 8 bits are last-written character */
+    unsigned long flags;
 
     unsigned ungetAvail;
     unsigned char ungetBuf[4];

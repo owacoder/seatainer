@@ -1,3 +1,9 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #ifndef CCUTILITY_H
 #define CCUTILITY_H
 
@@ -40,16 +46,8 @@ AtomicPointer atomicp_add(volatile AtomicPointer *location, intptr_t value);
 AtomicPointer atomicp_sub(volatile AtomicPointer *location, intptr_t value);
 AtomicPointer atomicp_cmpxchg(volatile AtomicPointer *location, AtomicPointer value, AtomicPointer compare);
 
-/* Swaps a number of bytes in p and q, specified by the size parameter
- *
- * p and q must not overlap
- */
 int memswap(void *p, void *q, size_t size);
 
-/* XORs memory block in dst with src
- *
- * p and q must not overlap
- */
 int memxor(void *dst, void *src, size_t size);
 
 /* Performs a Pearson hash on the specified data, with a pseudo-random shuffle of hash bytes */
@@ -66,22 +64,85 @@ uint32_t rotate_right32(uint32_t v, unsigned amount);
 uint64_t rotate_left64(uint64_t v, unsigned amount);
 uint64_t rotate_right64(uint64_t v, unsigned amount);
 
+/** @brief Copies @p v safely into @p dst as a little-endian value.
+ *
+ *  @param dst is the location to store the little-endian representation of @p v in. The buffer pointed to by @p dst must be at least 4 bytes long.
+ *  @param v is the 32-bit number to copy.
+ */
 void u32cpy_le(unsigned char *dst, uint32_t v);
+
+/** @brief Copies @p v safely into @p dst as a big-endian value.
+ *
+ *  @param dst is the location to store the big-endian representation of @p v in. The buffer pointed to by @p dst must be at least 4 bytes long.
+ *  @param v is the 32-bit number to copy.
+ */
 void u32cpy_be(unsigned char *dst, uint32_t v);
+
+/** @brief Copies @p v safely into @p dst as a little-endian value.
+ *
+ *  @param dst is the location to store the little-endian representation of @p v in. The buffer pointed to by @p dst must be at least 8 bytes long.
+ *  @param v is the 64-bit number to copy.
+ */
 void u64cpy_le(unsigned char *dst, uint64_t v);
+
+/** @brief Copies @p v safely into @p dst as a big-endian value.
+ *
+ *  @param dst is the location to store the big-endian representation of @p v in. The buffer pointed to by @p dst must be at least 8 bytes long.
+ *  @param v is the 64-bit number to copy.
+ */
 void u64cpy_be(unsigned char *dst, uint64_t v);
 
+/** @brief Copies @p src safely into @p dst as a little-endian value.
+ *
+ *  @param dst is the location to store @p src in.
+ *  @param src is the little-endian representation of the 32-bit number to copy. The buffer pointed to by @p src must be at least 4 bytes long.
+ *  @return The value that was read into @p dst.
+ */
 uint32_t u32get_le(uint32_t *dst, unsigned char *src);
+
+/** @brief Copies @p src safely into @p dst as a big-endian value.
+ *
+ *  @param dst is the location to store @p src in.
+ *  @param src is the big-endian representation of the 32-bit number to copy. The buffer pointed to by @p src must be at least 4 bytes long.
+ *  @return The value that was read into @p dst.
+ */
 uint32_t u32get_be(uint32_t *dst, unsigned char *src);
+
+/** @brief Copies @p src safely into @p dst as a little-endian value.
+ *
+ *  @param dst is the location to store @p src in.
+ *  @param src is the little-endian representation of the 64-bit number to copy. The buffer pointed to by @p src must be at least 8 bytes long.
+ *  @return The value that was read into @p dst.
+ */
 uint64_t u64get_le(uint64_t *dst, unsigned char *src);
+
+/** @brief Copies @p src safely into @p dst as a big-endian value.
+ *
+ *  @param dst is the location to store @p src in.
+ *  @param src is the big-endian representation of the 64-bit number to copy. The buffer pointed to by @p src must be at least 8 bytes long.
+ *  @return The value that was read into @p dst.
+ */
 uint64_t u64get_be(uint64_t *dst, unsigned char *src);
 
 #if X86_CPU | AMD64_CPU
+/** @brief Obtains x86 CPU information.
+ *
+ *  @param function is the main leaf to extract data from with the `CPUID` function.
+ *  @param subfunction is the sub-leaf to extract data from with the `CPUID` function. If the main leaf does not require one, just use 0.
+ *  @param dst is the location to store the extracted data in. The indexes 0, 1, 2, and 3 reference EAX, EBX, ECX, and EDX, respectively.
+ *  @return 0 on success, non-zero on failure to complete the operation.
+ */
 /* Requires that `dst` be able to store at least 4 32-bit integers */
 /* Returns 0 on success, non-zero on failure */
 int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t dst[4]);
 #endif
 
+/** @brief Tests a specific bit number @p bit in the parameter @p x.
+ *
+ *  @param x is an integral value to test.
+ *  @param bit is the bit position to test.
+ *  @return Non-zero if the bit at the specified location is set, zero if the bit is cleared.
+ */
 #define TESTBIT(x, bit) ((x) & (1ull << bit))
 
 #if WINDOWS_OS

@@ -2,7 +2,7 @@ appname := seatainer
 path := $(PATH)
 
 CC = gcc
-CFLAGS = -std=c99
+CFLAGS = -Wall -std=c99 -maes -msse4.1 -msha
 
 SRCFILES = ccdbllst.c \
            ccstring.c \
@@ -47,10 +47,12 @@ $(appname): $(OBJS)
 	$(CC) $(LDFLAGS) -o $(appname) $(OBJS) $(LDLIBS)
 
 %.o: %.c
-	$(CC) $(CFLAGS) -I./.. -o $(subst .c,.o,$<) -c $<
+	$(CC) $(CFLAGS) $(DEFINES) -o $(subst .c,.o,$<) -c $<
 
+.PHONY: clean
 clean:
 	$(RM) $(OBJS)
 
+.PHONY: distclean
 distclean:
 	$(RM) $(appname)

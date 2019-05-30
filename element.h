@@ -1,3 +1,9 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #ifndef CCELEMENT_H
 #define CCELEMENT_H
 
@@ -281,10 +287,19 @@ extern "C" {
     typedef int (*ElementDualDataCallback)(HElementData lhs, HElementData rhs);
     typedef int (*StringCompareCallback)(char lhs, char rhs);
 
-    /* Returns the error description as a human-readable string */
+    /** @brief Returns a Seatainer error description as a human-readable string.
+      *
+      * @return A human-readable string containing a description of the response code.
+      */
     const char *cc_el_error_reason(int error);
 
     /* Returns the (either internal or external) storage location pointing to the actual data */
+    /** @brief Returns the storage location pointing to the actual data.
+      *
+      * In the case of primitive types, the returned location points to the actual data storage. In the case of containers, the returned location points to the handle to the container.
+      *
+      * @return The storage location pointing to the data.
+      */
     void *cc_el_storage_location(HElementData data);
     /* Returns a reference to the pointer pointing to the actual data
      * Thus the HElementData can be used as a reference to the actual data site, allowing modification (cc_el_assign_xxx() family of functions)
