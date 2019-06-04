@@ -12,7 +12,7 @@
 /*
  * Not the most efficient linked list implementation, but does provide a measure of run-time type safety.
  *
- * It allocates the list, the nodes, and the elements in the nodes (so two allocations per element, even for trivial types)
+ * It allocates the list, the nodes, and the elements in the nodes (so two allocations per element for C89, even for trivial types, just one for C99)
  *
  */
 
@@ -48,6 +48,16 @@ extern "C" {
      * Returns NULL if allocation failed
      */
     HDoublyLinkedList cc_dll_copy(HDoublyLinkedList list, ElementDataCallback construct, ElementDataCallback destruct);
+
+    /** @brief Assigns one linked list to another.
+     *
+     * The destination linked list need not be the same type as the source linked list; it will be changed automatically.
+     *
+     * @param dst The destination linked list.
+     * @param src The source linked list.
+     * @return CC_OK on success, CC_NO_MEM on failure to allocate
+     */
+    int cc_dll_assign(HDoublyLinkedList dst, HDoublyLinkedList src);
 
     /* Swaps two linked lists
      *
@@ -189,6 +199,13 @@ extern "C" {
      */
     size_t cc_dll_size(HDoublyLinkedList list);
 
+    /** @brief Clears a doubly linked list.
+     *
+     * @param list The list to clear.
+     * @param destruct An optional destructor callback for each element in the list. Must be `NULL` if not used.
+     */
+    void cc_dll_clear(HDoublyLinkedList list, ElementDataCallback destruct);
+
     /* Returns the metadata (type and callback information) of the linked list
      *
      * Note that this operation is performed in O(1) time
@@ -209,6 +226,16 @@ extern "C" {
      *
      */
     Iterator cc_dll_rnext(HDoublyLinkedList list, Iterator node);
+
+    /** @brief Returns the value of the specified element in the internal buffer.
+     *
+     * The return value of this function **must not** be freed.
+     *
+     * @param list A list to get an element from. Must not be `NULL`.
+     * @param node An iterator that references an element in @p list.
+     * @return A pointer to the internal buffer that references the element at @p node.
+     */
+    HElementData cc_dll_node_data_easy(HDoublyLinkedList list, Iterator node);
 
     /* Returns the value of the specified element in `out`
      *

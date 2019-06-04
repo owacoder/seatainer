@@ -115,7 +115,7 @@ int glob(const char *str, const char *pattern);
 
 /* Opens a directory for access, or returns NULL on allocation failure */
 Directory dir_open(const char *dir);
-/* Same as dir_open(), but uses ANSI functions on Windows if mode contains "ncp", for [n]ative [c]ode [p]age */
+/* Same as dir_open(), but uses ANSI functions on Windows if mode contains "@ncp", for [n]ative [c]ode [p]age */
 Directory dir_open_with_mode(const char *dir, const char *mode);
 /* Returns path that open directory points to */
 const char *dir_path(Directory dir);
@@ -130,7 +130,7 @@ void dir_close(Directory dir);
 
 /* Opens a directory entry for a specific UTF-8 path */
 DirectoryEntry dirent_open(const char *path);
-/* Same as dirent_open(), but uses ANSI functions on Windows if mode contains "ncp", for [n]ative [c]ode [p]age */
+/* Same as dirent_open(), but uses ANSI functions on Windows if mode contains "@ncp", for [n]ative [c]ode [p]age */
 DirectoryEntry dirent_open_with_mode(const char *path, const char *mode);
 /* Returns zero if no error occured while opening the directory, platform-specific non-zero value otherwise (errno for Linux, GetLastError for Windows) */
 int dirent_error(DirectoryEntry entry);

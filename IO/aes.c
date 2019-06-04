@@ -68,7 +68,7 @@ void test_aes() {
     io_close(rand);
 
     enum AES_Mode mode = AES_OFB;
-    IO input = io_open_cstring("Hello World!    This is a text!!SomeMoreTextForU");
+    IO input = io_open_cstring("Hello World!    This is a text!!SomeMoreTextForU", "r");
     IO ciphertext = io_open_aes_encrypt(input, AES_192, mode, test_aes_ecb_key192, iv, "rb");
     IO pciphertext = io_open_aes_encrypt(input, AES_192, mode, test_aes_ecb_key192, iv, "rb<");
     IO aes = io_open_aes_decrypt(ciphertext, AES_192, mode, test_aes_ecb_key192, iv, "rb");

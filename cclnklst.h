@@ -12,7 +12,7 @@
 /*
  * Not the most efficient linked list implementation, but does provide a measure of run-time type safety.
  *
- * It allocates the list, the nodes, and the elements in the nodes (so two allocations per element, even for trivial types)
+ * It allocates the list, the nodes, and the elements in the nodes (so two allocations per element for C89, even for trivial types, just one for C99)
  *
  */
 
@@ -28,11 +28,16 @@ extern "C" {
 
     /* Initializes a new linked list with specified type
      *
+     * The provided metadata is used if non-NULL, but no ownership is taken of it
+     *
      * Returns NULL if allocation failed
      */
     HLinkedList cc_ll_init(ContainerElementType type, HContainerElementMetaData externalMeta);
 
     /* Initializes a new linked list at the specified buffer
+     *
+     * The provided metadata is used if non-NULL, but no ownership is taken of it
+     *
      * Returns CC_BAD_PARAM if the buffer is not big enough, or a constructor response error code
      * Returns CC_OK if all went well
      */
@@ -40,6 +45,7 @@ extern "C" {
 
     /* Returns a copy of the linked list
      *
+     * The provided metadata is used if non-NULL, but no ownership is taken of it
      * The provided callback `construct` is used to construct the new elements
      * The provided callback `destruct` is used to destruct the elements on failure to allocate, if necessary
      *
@@ -47,7 +53,17 @@ extern "C" {
      *
      * Returns NULL if allocation failed
      */
-    HLinkedList cc_ll_copy(HLinkedList list, ElementDataCallback construct, ElementDataCallback destruct);
+    HLinkedList cc_ll_copy(HLinkedList list, HContainerElementMetaData externalMeta, ElementDataCallback construct, ElementDataCallback destruct);
+
+    /** @brief Assigns one linked list to another.
+     *
+     * The destination linked list need not be the same type as the source linked list; it will be changed automatically.
+     *
+     * @param dst The destination linked list.
+     * @param src The source linked list.
+     * @return CC_OK on success, CC_NO_MEM on failure to allocate
+     */
+    int cc_ll_assign(HLinkedList dst, HLinkedList src);
 
     /* Swaps two linked lists
      *
@@ -185,6 +201,13 @@ extern "C" {
      */
     size_t cc_ll_size(HLinkedList list);
 
+    /** @brief Clears a linked list.
+     *
+     * @param list The list to clear.
+     * @param destruct An optional destructor callback for each element in the list. Must be `NULL` if not used.
+     */
+    void cc_ll_clear(HLinkedList list, ElementDataCallback destruct);
+
     /* Returns the metadata (type and callback information) of the linked list
      *
      * Note that this operation is performed in O(1) time
@@ -198,6 +221,16 @@ extern "C" {
      *
      */
     Iterator cc_ll_next(HLinkedList list, Iterator node);
+
+    /** @brief Returns the value of the specified element in the internal buffer.
+     *
+     * The return value of this function **must not** be freed.
+     *
+     * @param list A list to get an element from. Must not be `NULL`.
+     * @param node An iterator that references an element in @p list.
+     * @return A pointer to the internal buffer that references the element at @p node.
+     */
+    HElementData cc_ll_node_data_easy(HLinkedList list, Iterator node);
 
     /* Returns the value of the specified element in `out`
      *
@@ -220,7 +253,6 @@ extern "C" {
      *
      * Returns CC_TYPE_MISMATCH if lists don't contain compatible types
      * Returns CC_BAD_PARAM if `cmp` is NULL
-     *
      */
     int cc_ll_compare(HLinkedList lhs, HLinkedList rhs, ElementDualDataCallback cmp);
 
@@ -233,6 +265,7 @@ extern "C" {
      * Note that this operation is performed in O(n) time
      */
     void cc_ll_destroy(HLinkedList list, ElementDataCallback destruct);
+    void cc_ll_destroy_at(HLinkedList list, ElementDataCallback destruct);
 
 #ifdef __cplusplus
 }

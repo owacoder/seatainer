@@ -252,25 +252,57 @@ extern "C" {
     int ExIteratorNonNull(ExIterator it);
 
     struct String;
+
+    /** A generic 8-bit character string. */
     typedef struct String *HString;
 
     struct Vector;
+    /** A generic vector.
+      *
+      * Vectors are a dynamic array that contains the underlying data consecutively without space overhead per element.
+      */
     typedef struct Vector *HVector;
 
     struct LinkedList;
+    /** A generic linked list.
+     *
+     * Linked lists are a dynamic list that contains each element linked to the next with some space overhead per element.
+     */
     typedef struct LinkedList *HLinkedList;
 
     struct DoublyLinkedList;
+    /** A generic doubly linked list.
+     *
+     * Doubly linked lists are a dynamic list that contains each element linked to the next and the previous with some space overhead per element.
+     */
     typedef struct DoublyLinkedList *HDoublyLinkedList;
 
     struct HashTable;
+    /** A generic hash table.
+     *
+     * Hash tables are a collection that allows for fast lookup operations for a specific element. Insertion performance is comparable to a linked list.
+     */
     typedef struct HashTable *HHashTable;
 
     struct ElementData;
+
+    /** A generic element type.
+     *
+     * Elements store data of any type, but also can be references to external data. This allows modification of existing containers by using a reference element.
+     */
     typedef struct ElementData *HElementData;
+
+    /** A const generic element type.
+     *
+     * Identical to `HElementData`, just made `const` so no editing is possible.
+     */
     typedef const struct ElementData *HConstElementData;
 
     struct ContainerElementMetaData;
+    /** A generic element metadata type.
+     *
+     * Metadata, referenced by an element or container, allows constructors, destructors, and comparison operations to be defined per type.
+     */
     typedef struct ContainerElementMetaData *HContainerElementMetaData;
 
     /* Regarding callback invariants:
@@ -289,6 +321,7 @@ extern "C" {
 
     /** @brief Returns a Seatainer error description as a human-readable string.
       *
+      * @param error An error code returned by a Seatainer container function.
       * @return A human-readable string containing a description of the response code.
       */
     const char *cc_el_error_reason(int error);
@@ -298,16 +331,37 @@ extern "C" {
       *
       * In the case of primitive types, the returned location points to the actual data storage. In the case of containers, the returned location points to the handle to the container.
       *
+      * @param data An element to get the storage location of. Must not be `NULL`.
       * @return The storage location pointing to the data.
       */
     void *cc_el_storage_location(HElementData data);
-    /* Returns a reference to the pointer pointing to the actual data
-     * Thus the HElementData can be used as a reference to the actual data site, allowing modification (cc_el_assign_xxx() family of functions)
-     * If the storage pointer is NULL, an internal memory block will be used to store the value (that memory is only accessible through `cc_el_storage_location()`)
+
+    /** @brief Returns a reference to the pointer pointing to the actual data.
      *
-     * _DO NOT CALL_ in a user-defined callback (constructor, copy-constructor, or destructor)
+     * @p data can be used as a reference to the actual data site, allowing modification (cc_el_assign_xxx() family of functions).
+     * If the storage pointer is NULL, an internal memory block will be used to store the value (that memory is only accessible through `cc_el_storage_location()`).
+     *
+     * **DO NOT CALL** in a user-defined callback (constructor, copy-constructor, or destructor).
+     *
+     * @param data An element to get the pointer to the internal storage of. Must not be `NULL`.
+     * @return A pointer to the external storage pointer.
      */
     void **cc_el_storage_location_ptr(HElementData data);
+
+    /** @brief Returns whether @p data references external data or owns a copy.
+     *
+     * @param data The element to test.
+     * @return 1 if @p data references external data, or 0 if @p data owns the data
+     */
+    int cc_el_is_external_reference(HConstElementData data);
+
+    /** @brief Clears a reference to external data, reverting to using the internal data.
+     *
+     * Identical to `*cc_el_storage_location_ptr(data) = NULL;`.
+     *
+     * @param data The element to clear the reference of.
+     */
+    void cc_el_clear_external_reference(HElementData data);
 
     /* Initializes new element handle. Does _NOT_ take ownership of the metadata!
      * If the return value is NULL, returns the error in `*err`, if provided. If the return value is non-null, *err is not modified
@@ -403,6 +457,16 @@ extern "C" {
     HDoublyLinkedList *cc_el_get_doubly_linked_list(HElementData data);
     HHashTable *cc_el_get_hash_table(HElementData);
 
+    /** @brief Pretty-prints an element or container
+     *
+     * @param out Where to print the data to.
+     * @param data The element to print. Either containers or primitive types are accepted.
+     * @param flags One or more of the following:
+     *
+     *     0x01 - Print type information along with the value itself
+     */
+    void cc_el_pretty_print(FILE *out, HElementData data, unsigned flags);
+
     /* Set the metadata block for the specified element
      *
      * Returns CC_TYPE_MISMATCH if the metadata type does not match the current element type
@@ -475,6 +539,14 @@ extern "C" {
     int cc_el_call_copy_constructor_in(HContainerElementMetaData metadata, HElementData dest, HElementData src);
     int cc_el_call_destructor_in(HContainerElementMetaData metadata, HElementData data);
     int cc_el_call_compare_in(HContainerElementMetaData metadata, HElementData lhs, HElementData rhs);
+
+    /** @brief Obtains the container-repair function for the specified type
+     *
+     * @param type The type to get the container-repair function for.
+     * @return The container-repair function, or `NULL` if no such function exists.
+     */
+    typedef void (*ContainerRepairCallback)(void *container);
+    ContainerRepairCallback cc_el_container_repair_for_type(ContainerElementType type);
 
     /* Returns the size of the data type specified
      */

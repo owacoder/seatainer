@@ -97,6 +97,16 @@ void **cc_el_storage_location_ptr(HElementData data)
     return &data->_src;
 }
 
+int cc_el_is_external_reference(HConstElementData data)
+{
+    return data->_src != NULL;
+}
+
+void cc_el_clear_external_reference(HElementData data)
+{
+    data->_src = NULL;
+}
+
 struct ContainerElementMetaData
 {
     ElementDataCallback el_constructor;
@@ -191,6 +201,41 @@ static int cc_el_voidp_constructor(HElementData data)
     void **p = (void **) (cc_el_storage_location(data));
     *p = 0;
     return CC_OK;
+}
+static int cc_el_string_constructor(HElementData data)
+{
+    if (data->_src) /* External, means container already exists */
+        return cc_s_init_at(data->_src, cc_s_sizeof());
+
+    return cc_el_voidp_constructor(data);
+}
+static int cc_el_vector_constructor(HElementData data)
+{
+    if (data->_src) /* External, means container already exists */
+        return cc_v_init_at(data->_src, cc_v_sizeof(), El_Null); /* TODO: figure out how to change type of vector data to something different after initial construction? */
+
+    return cc_el_voidp_constructor(data);
+}
+static int cc_el_linked_list_constructor(HElementData data)
+{
+    if (data->_src) /* External, means container already exists */
+        return cc_ll_init_at(data->_src, cc_ll_sizeof(), El_Null, NULL); /* TODO: figure out how to change type of list data to something different after initial construction? */
+
+    return cc_el_voidp_constructor(data);
+}
+static int cc_el_doubly_linked_list_constructor(HElementData data)
+{
+    if (data->_src) /* External, means container already exists */
+        return cc_dll_init_at(data->_src, cc_dll_sizeof(), El_Null); /* TODO: figure out how to change type of list data to something different after initial construction? */
+
+    return cc_el_voidp_constructor(data);
+}
+static int cc_el_hash_table_constructor(HElementData data)
+{
+    if (data->_src) /* External, means container already exists */
+        return cc_ht_init_at(data->_src, cc_ht_sizeof(), El_Null, El_Null); /* TODO: figure out how to change type of vector data to something different after initial construction? */
+
+    return cc_el_voidp_constructor(data);
 }
 
 static int cc_el_char_copy_constructor(HElementData lhs, HElementData rhs)
@@ -321,13 +366,16 @@ static int cc_el_voidp_copy_constructor(HElementData lhs, HElementData rhs)
 
 static int cc_el_string_copy_constructor(HElementData lhs, HElementData rhs)
 {
-    HString *l = cc_el_storage_location(lhs);
-    HString *r = cc_el_storage_location(rhs);
+    HString *l = cc_el_get_string(lhs);
+    HString *r = cc_el_get_string(rhs);
 
-    if (*l)
+    if (lhs->_src) /* External data, so container must already exist */
         return cc_s_assign_cstring_n(*l, cc_s_raw(*r), cc_s_size(*r));
     else
     {
+        if (*l)
+            cc_s_destroy(*l);
+
         *l = cc_s_copy(*r);
         if (!*l)
             CC_NO_MEM_HANDLER("out of memory");
@@ -338,69 +386,91 @@ static int cc_el_string_copy_constructor(HElementData lhs, HElementData rhs)
 
 static int cc_el_vector_copy_constructor(HElementData lhs, HElementData rhs)
 {
-    HVector *l = cc_el_storage_location(lhs);
-    HVector *r = cc_el_storage_location(rhs);
+    HVector *l = cc_el_get_vector(lhs);
+    HVector *r = cc_el_get_vector(rhs);
 
-    if (*l)
-        cc_v_destroy(*l, NULL);
+    if (lhs->_src) /* External data, so container must already exist */
+        return cc_v_assign(*l, *r);
+    else
+    {
+        if (*l)
+            cc_v_destroy(*l, NULL);
 
-    *l = cc_v_copy(*r, NULL, NULL);
-    if (!*l)
-        CC_NO_MEM_HANDLER("out of memory");
+        *l = cc_v_copy(*r, NULL, NULL);
+        if (!*l)
+            CC_NO_MEM_HANDLER("out of memory");
+    }
 
     return CC_OK;
 }
 
 static int cc_el_linked_list_copy_constructor(HElementData lhs, HElementData rhs)
 {
-    HLinkedList *l = cc_el_storage_location(lhs);
-    HLinkedList *r = cc_el_storage_location(rhs);
+    HLinkedList *l = cc_el_get_linked_list(lhs);
+    HLinkedList *r = cc_el_get_linked_list(rhs);
 
-    if (*l)
-        cc_ll_destroy(*l, NULL);
+    if (lhs->_src) /* External data, so container must already exist */
+        return cc_ll_assign(*l, *r);
+    else
+    {
+        if (*l)
+            cc_ll_destroy(*l, NULL);
 
-    *l = cc_ll_copy(*r, NULL, NULL);
-    if (!*l)
-        CC_NO_MEM_HANDLER("out of memory");
+        *l = cc_ll_copy(*r, NULL, NULL, NULL);
+        if (!*l)
+            CC_NO_MEM_HANDLER("out of memory");
+    }
 
     return CC_OK;
 }
 
 static int cc_el_doubly_linked_list_copy_constructor(HElementData lhs, HElementData rhs)
 {
-    HDoublyLinkedList *l = cc_el_storage_location(lhs);
-    HDoublyLinkedList *r = cc_el_storage_location(rhs);
+    HDoublyLinkedList *l = cc_el_get_doubly_linked_list(lhs);
+    HDoublyLinkedList *r = cc_el_get_doubly_linked_list(rhs);
 
-    if (*l)
-        cc_dll_destroy(*l, NULL);
+    if (lhs->_src) /* External data, so container must already exist */
+        return cc_dll_assign(*l, *r);
+    else
+    {
+        if (*l)
+            cc_dll_destroy(*l, NULL);
 
-    *l = cc_dll_copy(*r, NULL, NULL);
-    if (!*l)
-        CC_NO_MEM_HANDLER("out of memory");
+        *l = cc_dll_copy(*r, NULL, NULL);
+        if (!*l)
+            CC_NO_MEM_HANDLER("out of memory");
+    }
 
     return CC_OK;
 }
 
 static int cc_el_hash_table_copy_constructor(HElementData lhs, HElementData rhs)
 {
-    HHashTable *l = cc_el_storage_location(lhs);
-    HHashTable *r = cc_el_storage_location(rhs);
+    HHashTable *l = cc_el_get_hash_table(lhs);
+    HHashTable *r = cc_el_get_hash_table(rhs);
 
-    if (*l)
-        cc_ht_destroy(*l);
+    if (lhs->_src) /* External data, so container must already exist */
+        return cc_ht_assign(*l, *r);
+    else
+    {
+        if (*l)
+            cc_ht_destroy(*l);
 
-    *l = cc_ht_copy(*r);
-    if (!*l)
-        CC_NO_MEM_HANDLER("out of memory");
+        *l = cc_ht_copy(*r);
+        if (!*l)
+            CC_NO_MEM_HANDLER("out of memory");
+    }
 
     return CC_OK;
 }
 
 static int cc_el_string_destructor(HElementData data)
 {
-    HString *d = cc_el_storage_location(data);
+    HString *d = cc_el_get_string(data);
 
-    if (*d)
+    if (data->_src)
+        cc_s_destroy_at(*d);
+    else if (*d)
         cc_s_destroy(*d);
 
     return CC_OK;
@@ -408,9 +478,11 @@ static int cc_el_string_destructor(HElementData data)
 
 static int cc_el_vector_destructor(HElementData data)
 {
-    HVector *d = cc_el_storage_location(data);
+    HVector *d = cc_el_get_vector(data);
 
-    if (*d)
+    if (data->_src)
+        cc_v_destroy_at(*d, NULL);
+    else if (*d)
         cc_v_destroy(*d, NULL);
 
     return CC_OK;
@@ -418,9 +490,11 @@ static int cc_el_vector_destructor(HElementData data)
 
 static int cc_el_linked_list_destructor(HElementData data)
 {
-    HLinkedList *d = cc_el_storage_location(data);
+    HLinkedList *d = cc_el_get_linked_list(data);
 
-    if (*d)
+    if (data->_src)
+        cc_ll_destroy_at(*d, NULL);
+    else if (*d)
         cc_ll_destroy(*d, NULL);
 
     return CC_OK;
@@ -428,9 +502,11 @@ static int cc_el_linked_list_destructor(HElementData data)
 
 static int cc_el_doubly_linked_list_destructor(HElementData data)
 {
-    HDoublyLinkedList *d = cc_el_storage_location(data);
+    HDoublyLinkedList *d = cc_el_get_doubly_linked_list(data);
 
-    if (*d)
+    if (data->_src)
+        cc_dll_destroy_at(*d, NULL);
+    else if (*d)
         cc_dll_destroy(*d, NULL);
 
     return CC_OK;
@@ -438,9 +514,11 @@ static int cc_el_doubly_linked_list_destructor(HElementData data)
 
 static int cc_el_hash_table_destructor(HElementData data)
 {
-    HHashTable *d = cc_el_storage_location(data);
+    HHashTable *d = cc_el_get_hash_table(data);
 
-    if (*d)
+    if (data->_src)
+        cc_ht_destroy_at(*d);
+    else if (*d)
         cc_ht_destroy(*d);
 
     return CC_OK;
@@ -560,40 +638,40 @@ static int cc_el_voidp_compare(HElementData lhs, HElementData rhs)
 
 static int cc_el_string_compare(HElementData lhs, HElementData rhs)
 {
-    HString *l = cc_el_storage_location(lhs);
-    HString *r = cc_el_storage_location(rhs);
+    HString *l = cc_el_get_string(lhs);
+    HString *r = cc_el_get_string(rhs);
 
     return cc_s_compare(*l, *r, NULL);
 }
 
 static int cc_el_vector_compare(HElementData lhs, HElementData rhs)
 {
-    HVector *l = cc_el_storage_location(lhs);
-    HVector *r = cc_el_storage_location(rhs);
+    HVector *l = cc_el_get_vector(lhs);
+    HVector *r = cc_el_get_vector(rhs);
 
     return cc_v_compare(*l, *r, NULL);
 }
 
 static int cc_el_linked_list_compare(HElementData lhs, HElementData rhs)
 {
-    HLinkedList *l = cc_el_storage_location(lhs);
-    HLinkedList *r = cc_el_storage_location(rhs);
+    HLinkedList *l = cc_el_get_linked_list(lhs);
+    HLinkedList *r = cc_el_get_linked_list(rhs);
 
     return cc_ll_compare(*l, *r, NULL);
 }
 
 static int cc_el_doubly_linked_list_compare(HElementData lhs, HElementData rhs)
 {
-    HDoublyLinkedList *l = cc_el_storage_location(lhs);
-    HDoublyLinkedList *r = cc_el_storage_location(rhs);
+    HDoublyLinkedList *l = cc_el_get_doubly_linked_list(lhs);
+    HDoublyLinkedList *r = cc_el_get_doubly_linked_list(rhs);
 
     return cc_dll_compare(*l, *r, NULL);
 }
 
 static int cc_el_hash_table_compare(HElementData lhs, HElementData rhs)
 {
-    HHashTable *l = cc_el_storage_location(lhs);
-    HHashTable *r = cc_el_storage_location(rhs);
+    HHashTable *l = cc_el_get_hash_table(lhs);
+    HHashTable *r = cc_el_get_hash_table(rhs);
 
     return cc_ht_compare(*l, *r, NULL);
 }
@@ -632,13 +710,12 @@ ElementDataCallback cc_el_constructor(ContainerElementType type)
         case El_UnsignedLongLong: return cc_el_unsigned_long_long_constructor;
         case El_Float: return cc_el_float_constructor;
         case El_Double: return cc_el_double_constructor;
-        case El_VoidPtr:
-        case El_String:
-        case El_Vector:
-        case El_LinkedList:
-        case El_DoublyLinkedList:
-        case El_HashTable:
-            return cc_el_voidp_constructor;
+        case El_VoidPtr: return cc_el_voidp_constructor;
+        case El_String: return cc_el_string_constructor;
+        case El_Vector: return cc_el_vector_constructor;
+        case El_LinkedList: return cc_el_linked_list_constructor;
+        case El_DoublyLinkedList: return cc_el_doubly_linked_list_constructor;
+        case El_HashTable: return cc_el_hash_table_constructor;
     }
 }
 
@@ -865,6 +942,11 @@ int cc_el_move_contents(HElementData dest, HConstElementData src)
 
     memcpy(cc_el_storage_location(dest), cc_el_storage_location((HElementData) src), size_to_copy);
 
+    /* Repair destination as needed */
+    ContainerRepairCallback repair = cc_el_container_repair_for_type(dest->type);
+    if (repair)
+        repair(dest->_src? cc_el_storage_location_ptr(dest): *((void **) cc_el_storage_location(dest)));
+
     /* Initialize source again */
     cb = NULL;
     if (dest->meta)
@@ -940,15 +1022,148 @@ size_t cc_el_sizeof()
     return sizeof(struct ElementData);
 }
 
+void cc_el_pretty_print(FILE *out, HElementData data, unsigned flags)
+{
+    const unsigned int FLAG_PRINT_TYPE = 0x01;
+    const unsigned int FLAG_SUPPRESS_TYPE = 0x02;
+
+    if ((flags & FLAG_PRINT_TYPE) && !(flags & FLAG_SUPPRESS_TYPE))
+        fprintf(out, "<%s> ", cc_el_typename(data->type));
+
+    flags &= ~FLAG_SUPPRESS_TYPE;
+
+    switch (data->type)
+    {
+        default: fputs("<?>", out); break;
+        case El_Char: fprintf(out, "%c (%d)", *cc_el_get_char(data), *cc_el_get_char(data)); break;
+        case El_SignedChar: fprintf(out, "%c (%hd)", *cc_el_get_signed_char(data), *cc_el_get_signed_char(data)); break;
+        case El_UnsignedChar: fprintf(out, "%c (%hd)", *cc_el_get_unsigned_char(data), *cc_el_get_unsigned_char(data)); break;
+        case El_SignedShort: fprintf(out, "%hhd (%#hhx)", *cc_el_get_signed_short(data), *cc_el_get_signed_short(data)); break;
+        case El_UnsignedShort: fprintf(out, "%hhd (%#hhx)", *cc_el_get_unsigned_short(data), *cc_el_get_unsigned_short(data)); break;
+        case El_SignedInt: fprintf(out, "%d (%#x)", *cc_el_get_signed_int(data), *cc_el_get_signed_int(data)); break;
+        case El_UnsignedInt: fprintf(out, "%d (%#x)", *cc_el_get_unsigned_int(data), *cc_el_get_unsigned_int(data)); break;
+        case El_SignedLong: fprintf(out, "%ld (%lx)", *cc_el_get_signed_long(data), *cc_el_get_signed_long(data)); break;
+        case El_UnsignedLong: fprintf(out, "%ld (%lx)", *cc_el_get_unsigned_long(data), *cc_el_get_unsigned_long(data)); break;
+        case El_SignedLongLong: fprintf(out, "%lld (%llx)", *cc_el_get_signed_long_long(data), *cc_el_get_signed_long_long(data)); break;
+        case El_UnsignedLongLong: fprintf(out, "%lld (%llx)", *cc_el_get_unsigned_long_long(data), *cc_el_get_unsigned_long_long(data)); break;
+        case El_Float: fprintf(out, "%.8g", *cc_el_get_float(data)); break;
+        case El_Double: fprintf(out, "%.17g", *cc_el_get_double(data)); break;
+        case El_VoidPtr: fprintf(out, "%p", *cc_el_get_voidp(data)); break;
+        case El_String: fprintf(out, "%.*s", (int) cc_s_size(*cc_el_get_string(data)), cc_s_raw(*cc_el_get_string(data))); break;
+        case El_Vector:
+        {
+            HVector vector = *cc_el_get_vector(data);
+            Iterator it, begin = cc_v_begin(vector);
+
+            if (flags & FLAG_PRINT_TYPE)
+                fprintf(out, "(%u, <%s>)[ ", (unsigned) cc_v_size(vector),
+                        cc_el_typename(cc_el_metadata_type(cc_v_metadata(vector))));
+            else
+                fprintf(out, "(%u)[", (unsigned) cc_v_size(vector));
+
+            for (it = begin; it; it = cc_v_next(vector, it)) {
+                if (it != begin)
+                    fputc(' ', out);
+                cc_el_pretty_print(out, cc_v_node_data_easy(vector, it), flags);
+            }
+
+            fputs(" ]", out);
+
+            break;
+        }
+        case El_LinkedList:
+        {
+            HLinkedList list = *cc_el_get_linked_list(data);
+            Iterator it, begin = cc_ll_begin(list);
+
+            if (flags & FLAG_PRINT_TYPE)
+                fprintf(out, "(%u, <%s>)[ ", (unsigned) cc_ll_size(list),
+                        cc_el_typename(cc_el_metadata_type(cc_ll_metadata(list))));
+            else
+                fprintf(out, "(%u)[ ", (unsigned) cc_ll_size(list));
+
+            for (it = begin; it; it = cc_ll_next(list, it)) {
+                if (it != begin)
+                    fputc(' ', out);
+                cc_el_pretty_print(out, cc_ll_node_data_easy(list, it), flags);
+            }
+
+            fputs(" ]", out);
+
+            break;
+        }
+        case El_DoublyLinkedList:
+        {
+            HDoublyLinkedList list = *cc_el_get_doubly_linked_list(data);
+            Iterator it, begin = cc_dll_begin(list);
+
+            if (flags & FLAG_PRINT_TYPE)
+                fprintf(out, "(%u, <%s>)[ ", (unsigned) cc_dll_size(list),
+                        cc_el_typename(cc_el_metadata_type(cc_dll_metadata(list))));
+            else
+                fprintf(out, "(%u)[ ", (unsigned) cc_dll_size(list));
+
+            for (it = begin; it; it = cc_dll_next(list, it)) {
+                if (it != begin)
+                    fputc(' ', out);
+                cc_el_pretty_print(out, cc_dll_node_data_easy(list, it), flags);
+            }
+
+            fputs(" ]", out);
+
+            break;
+        }
+        case El_HashTable:
+        {
+            HHashTable list = *cc_el_get_hash_table(data);
+            ExIterator it, begin = cc_ht_begin(list);
+
+            if (flags & FLAG_PRINT_TYPE)
+                fprintf(out, "(%u, <%s, %s>)[ ", (unsigned) cc_ht_size(list),
+                        cc_el_typename(cc_el_metadata_type(cc_ht_key_metadata(list))),
+                        cc_el_typename(cc_el_metadata_type(cc_ht_value_metadata(list))));
+            else
+                fprintf(out, "(%u)[ ", (unsigned) cc_ht_size(list));
+
+            for (it = begin; ExIteratorNonNull(it); it = cc_ht_next(list, it)) {
+                if (!ExIteratorEquals(it, begin))
+                    fputc(' ', out);
+                fputc('{', out);
+                cc_el_pretty_print(out, cc_ht_node_key_easy(list, it), flags | FLAG_SUPPRESS_TYPE);
+                fputs(": ", out);
+                cc_el_pretty_print(out, cc_ht_node_data_easy(list, it), flags | FLAG_SUPPRESS_TYPE);
+                fputc('}', out);
+            }
+
+            fputs(" ]", out);
+
+            break;
+        }
+    }
+}
+
 /* Returns CC_BAD_PARAM if there is an error, or CC_OK if successful */
 static int cc_el_update_type_information(HElementData data, ContainerElementType new_)
 {
-    if (data->type != new_ && data->_src != NULL)
-    {
-        /* Proof of an external storage location. Since we don't want to store external information of a different type,
-           the program should return an error message. Also, since we don't know the size limit of the external storage
-           location, we shouldn't try to put anything there that might cause a larger error */
-            CC_BAD_PARAM_HANDLER("attempted to assign value of different type to external data reference");
+    if (data->_src != NULL) {
+        if (data->type != new_)
+        {
+            /* Proof of an external storage location. Since we don't want to store external information of a different type,
+               the program should return an error message. Also, since we don't know the size limit of the external storage
+               location, we shouldn't try to put anything there that might cause a larger error */
+                CC_BAD_PARAM_HANDLER("attempted to assign value of different type to external data reference");
+        } else { /* Type is not changing, we're just changing the value, so clear it if it's a container */
+            switch (new_) {
+                default: break;
+                case El_String: cc_s_clear(*cc_el_get_string(data)); break;
+                case El_Vector: cc_v_clear(*cc_el_get_vector(data), NULL); break;
+                case El_LinkedList: cc_ll_clear(*cc_el_get_linked_list(data), NULL); break;
+                case El_DoublyLinkedList: cc_dll_clear(*cc_el_get_doubly_linked_list(data), NULL); break;
+                case El_HashTable: cc_ht_clear(*cc_el_get_hash_table(data)); break;
+            }
+
+            return CC_OK;
+        }
     }
 
     ElementDataCallback cb = NULL;
@@ -1056,7 +1271,17 @@ int cc_el_assign_voidp(HElementData data, void *p)
 int cc_el_assign_string(HElementData data, HString d)
 {
     CC_RETURN_ON_ERROR(cc_el_update_type_information(data, El_String));
-    HString *ptr = cc_el_storage_location(data);
+
+    HString *ptr = cc_el_get_string(data);
+    if (data->_src) /* External storage, container already exists */
+    {
+        if (d)
+            return cc_s_assign_cstring_n(*ptr, cc_s_raw(d), cc_s_size(d));
+
+        cc_s_clear(*ptr);
+        return CC_OK;
+    }
+
     if (d)
     {
         *ptr = cc_s_copy(d);
@@ -1076,7 +1301,16 @@ int cc_el_assign_cstring(HElementData data, const char *p)
 int cc_el_assign_cstring_n(HElementData data, const char *c, size_t len)
 {
     CC_RETURN_ON_ERROR(cc_el_update_type_information(data, El_String));
-    HString *ptr = cc_el_storage_location(data);
+    HString *ptr = cc_el_get_string(data);
+    if (data->_src) /* External storage, container already exists */
+    {
+        if (c)
+            return cc_s_assign_cstring_n(*ptr, c, len);
+
+        cc_s_clear(*ptr);
+        return CC_OK;
+    }
+
     if (c)
     {
         *ptr = cc_s_init();
@@ -1092,7 +1326,16 @@ int cc_el_assign_cstring_n(HElementData data, const char *c, size_t len)
 int cc_el_assign_vector(HElementData data, HVector d)
 {
     CC_RETURN_ON_ERROR(cc_el_update_type_information(data, El_Vector));
-    HVector *ptr = cc_el_storage_location(data);
+    HVector *ptr = cc_el_get_vector(data);
+    if (data->_src) /* External storage, container already exists */
+    {
+        if (d)
+            return cc_v_assign(*ptr, d);
+
+        cc_v_clear(*ptr, NULL);
+        return CC_OK;
+    }
+
     if (d)
     {
         *ptr = cc_v_copy(d, NULL, NULL);
@@ -1108,10 +1351,19 @@ int cc_el_assign_vector(HElementData data, HVector d)
 int cc_el_assign_linked_list(HElementData data, HLinkedList d)
 {
     CC_RETURN_ON_ERROR(cc_el_update_type_information(data, El_LinkedList));
-    HLinkedList *ptr = cc_el_storage_location(data);
+    HLinkedList *ptr = cc_el_get_linked_list(data);
+    if (data->_src) /* External storage, container already exists */
+    {
+        if (d)
+            return cc_ll_assign(*ptr, d);
+
+        cc_ll_clear(*ptr, NULL);
+        return CC_OK;
+    }
+
     if (d)
     {
-        *ptr = cc_ll_copy(d, NULL, NULL);
+        *ptr = cc_ll_copy(d, NULL, NULL, NULL);
         if (!*ptr)
             CC_NO_MEM_HANDLER("out of memory");
 
@@ -1124,7 +1376,16 @@ int cc_el_assign_linked_list(HElementData data, HLinkedList d)
 int cc_el_assign_doubly_linked_list(HElementData data, HDoublyLinkedList d)
 {
     CC_RETURN_ON_ERROR(cc_el_update_type_information(data, El_DoublyLinkedList));
-    HDoublyLinkedList *ptr = cc_el_storage_location(data);
+    HDoublyLinkedList *ptr = cc_el_get_doubly_linked_list(data);
+    if (data->_src) /* External storage, container already exists */
+    {
+        if (d)
+            return cc_dll_assign(*ptr, d);
+
+        cc_dll_clear(*ptr, NULL);
+        return CC_OK;
+    }
+
     if (d)
     {
         *ptr = cc_dll_copy(d, NULL, NULL);
@@ -1140,7 +1401,16 @@ int cc_el_assign_doubly_linked_list(HElementData data, HDoublyLinkedList d)
 int cc_el_assign_hash_table(HElementData data, HHashTable d)
 {
     CC_RETURN_ON_ERROR(cc_el_update_type_information(data, El_HashTable));
-    HHashTable *ptr = cc_el_storage_location(data);
+    HHashTable *ptr = cc_el_get_hash_table(data);
+    if (data->_src) /* External storage, container already exists */
+    {
+        if (d)
+            return cc_ht_assign(*ptr, d);
+
+        cc_ht_clear(*ptr);
+        return CC_OK;
+    }
+
     if (d)
     {
         *ptr = cc_ht_copy(d);
@@ -1168,11 +1438,11 @@ unsigned long long *cc_el_get_unsigned_long_long(HElementData data) {return data
 float *cc_el_get_float(HElementData data) {return data->type == El_Float? (float *) (cc_el_storage_location(data)): NULL;}
 double *cc_el_get_double(HElementData data) {return data->type == El_Double? (double *) (cc_el_storage_location(data)): NULL;}
 void **cc_el_get_voidp(HElementData data) {return data->type == El_VoidPtr? (void **) (cc_el_storage_location(data)): NULL;}
-HString *cc_el_get_string(HElementData data) {return data->type == El_String? (HString *) (cc_el_storage_location(data)): NULL;}
-HVector *cc_el_get_vector(HElementData data) {return data->type == El_Vector? (HVector *) (cc_el_storage_location(data)): NULL;}
-HLinkedList *cc_el_get_linked_list(HElementData data) {return data->type == El_LinkedList? (HLinkedList *) (cc_el_storage_location(data)): NULL;}
-HDoublyLinkedList *cc_el_get_doubly_linked_list(HElementData data) {return data->type == El_DoublyLinkedList? (HDoublyLinkedList *) (cc_el_storage_location(data)): NULL;}
-HHashTable *cc_el_get_hash_table(HElementData data) {return data->type == El_HashTable? (HHashTable *) (cc_el_storage_location(data)): NULL;}
+HString *cc_el_get_string(HElementData data) {return data->type == El_String? data->_src? (HString *) cc_el_storage_location_ptr(data): (HString *) (cc_el_storage_location(data)): NULL;}
+HVector *cc_el_get_vector(HElementData data) {return data->type == El_Vector? data->_src? (HVector *) cc_el_storage_location_ptr(data): (HVector *) (cc_el_storage_location(data)): NULL;}
+HLinkedList *cc_el_get_linked_list(HElementData data) {return data->type == El_LinkedList? data->_src? (HLinkedList *) cc_el_storage_location_ptr(data): (HLinkedList *) (cc_el_storage_location(data)): NULL;}
+HDoublyLinkedList *cc_el_get_doubly_linked_list(HElementData data) {return data->type == El_DoublyLinkedList? data->_src? (HDoublyLinkedList *) cc_el_storage_location_ptr(data): (HDoublyLinkedList *) (cc_el_storage_location(data)): NULL;}
+HHashTable *cc_el_get_hash_table(HElementData data) {return data->type == El_HashTable? data->_src? (HHashTable *) cc_el_storage_location_ptr(data): (HHashTable *) (cc_el_storage_location(data)): NULL;}
 
 int cc_el_set_metadata(HElementData data, HContainerElementMetaData meta)
 {
@@ -1185,6 +1455,15 @@ int cc_el_set_metadata(HElementData data, HContainerElementMetaData meta)
 HContainerElementMetaData cc_el_get_metadata(HConstElementData data)
 {
     return data->meta;
+}
+
+ContainerRepairCallback cc_el_container_repair_for_type(ContainerElementType type)
+{
+    switch (type)
+    {
+        default: return NULL;
+        case El_HashTable: return (ContainerRepairCallback) cc_ht_repair;
+    }
 }
 
 size_t cc_el_size_type(ContainerElementType type)
@@ -1207,11 +1486,11 @@ size_t cc_el_size_type(ContainerElementType type)
         case El_Float: return sizeof(float);
         case El_Double: return sizeof(double);
         case El_VoidPtr: return sizeof(void *);
-        case El_String: return sizeof(HString);
-        case El_Vector: return sizeof(HVector);
-        case El_LinkedList: return sizeof(HLinkedList);
-        case El_DoublyLinkedList: return sizeof(HDoublyLinkedList);
-        case El_HashTable: return sizeof(HHashTable);
+        case El_String: return cc_s_sizeof();
+        case El_Vector: return cc_v_sizeof();
+        case El_LinkedList: return cc_ll_sizeof();
+        case El_DoublyLinkedList: return cc_dll_sizeof();
+        case El_HashTable: return cc_ht_sizeof();
     }
 }
 
@@ -1378,7 +1657,7 @@ int cc_el_hash_default(HConstElementData element, unsigned *hash)
             break;
         case El_String:
         {
-            HString string = *((HString *) cc_el_storage_location(data));
+            HString string = *cc_el_get_string(data);
 
             if (cc_s_size(string))
                 *hash = pearson_hash(cc_s_raw(string), cc_s_size(string));
@@ -1389,7 +1668,7 @@ int cc_el_hash_default(HConstElementData element, unsigned *hash)
         }
         case El_Vector:
         {
-            HVector vector = *((HVector *) cc_el_storage_location(data));
+            HVector vector = *cc_el_get_vector(data);
 
             switch (cc_el_metadata_type(cc_el_contained_value_metadata(data)))
             {

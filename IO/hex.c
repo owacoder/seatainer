@@ -235,7 +235,7 @@ IO io_open_hex_decode(IO io, const char *mode) {
 }
 
 void test_hex() {
-    IO buffer = io_open_cstring("A string to try encoding");
+    IO buffer = io_open_cstring("A string to try encoding", "r");
     IO encode = io_open_hex_encode(buffer, "r");
     IO decode = io_open_hex_decode(encode, "r");
     IO out = io_open_file(stdout);

@@ -52,7 +52,7 @@ void test_ll(size_t cnt)
     cc_el_assign_signed_int(data, 23);
     assert(cc_ll_push_front(list, 0, data, NULL) != CC_TYPE_MISMATCH);
 
-    list2 = cc_ll_copy(list, NULL, NULL);
+    list2 = cc_ll_copy(list, NULL, NULL, NULL);
 
     size_t i;
     for (i = 0; i < cnt; ++i)
@@ -199,32 +199,50 @@ void test_v_sort(size_t cnt)
 
 void test_vv(size_t cnt)
 {
+    const char *strings[] = {"alpha", "omega", "pi", "a much much longer string that contains some text"};
     puts("test_vv");
 
-    HVector list = cc_v_init(El_Vector), list2, sub = cc_v_init(El_SignedInt);
-    HElementData data = cc_el_init(El_Vector, NULL, NULL, NULL);
+    HHashTable list = cc_ht_init(El_SignedInt, El_String), list2;
+    HVector sub = cc_v_init(El_String);
+    HString str = cc_s_init();
+    HElementData data = cc_el_init(El_String, NULL, NULL, NULL), key = cc_el_init(El_SignedInt, NULL, NULL, NULL);
 
-    cc_el_assign_signed_int(data, 42);
-    cc_v_push_back(sub, 0, data, NULL);
+    cc_el_assign_signed_int(key, rand());
 
-    cc_el_assign_vector(data, sub);
-    assert(cc_v_push_back(list, 0, data, NULL) != CC_TYPE_MISMATCH);
+    cc_s_assign_cstring(str, strings[rand() % 4]);
+    *cc_el_storage_location_ptr(data) = str;
 
-    list2 = cc_v_copy(list, NULL, NULL);
+    cc_ht_insert(list, 0, key, data, NULL);
+
+    // cc_el_clear_external_reference(data);
+    // assert(cc_el_assign_vector(data, sub) != CC_BAD_PARAM);
+    // assert(cc_ll_push_back(list, 0, data, NULL) != CC_TYPE_MISMATCH);
+
+    list2 = cc_ht_copy(list);
 
     size_t i;
     for (i = 0; i < cnt; ++i)
     {
-        cc_el_assign_vector(data, sub);
-        cc_v_push_back(list, 0, data, NULL);
+        cc_el_assign_signed_int(key, rand());
+        cc_s_assign_cstring(str, strings[rand() % 4]);
+        cc_ht_insert(list, CC_MOVE_VALUE | CC_MULTI_VALUE | CC_ORGANIZE_AUTO, key, data, NULL);
     }
 
+    HElementData master = cc_el_init(El_HashTable, NULL, NULL, NULL);
+    cc_el_assign_hash_table(master, list);
+    cc_el_pretty_print(stdout, master, 0x01);
+    cc_el_destroy(master);
+
+    printf("Most collisions: %zu\n", cc_ht_max_bucket_collisions(list));
+    printf("Capacity: %zu\n", cc_ht_capacity(list));
     printf("element is %d bytes\n", (int) cc_el_sizeof());
 
     cc_v_destroy(sub, NULL);
-    cc_v_destroy(list, NULL);
-    cc_v_destroy(list2, NULL);
-    cc_el_destroy(data);
+    cc_ht_destroy(list);
+    cc_ht_destroy(list2);
+    cc_el_destroy_reference(key);
+    cc_el_destroy_reference(data);
+    cc_s_destroy(str);
 }
 
 #include <time.h>
@@ -257,14 +275,14 @@ void test_ht(size_t cnt)
         cc_ht_insert(table, CC_MULTI_VALUE | CC_MOVE_VALUE, key, value, NULL);
     }
 
-    printf("Hash size: %u\n", cc_ht_size(table));
-    printf("Hash total collisions: %u\n", cc_ht_total_collisions(table));
-    printf("Hash most bucket collisions: %u\n", cc_ht_max_bucket_collisions(table));
-    printf("Hash load factor: %f (capacity %u)\n", cc_ht_load_factor(table), cc_ht_capacity(table));
+    printf("Hash size: %zu\n", cc_ht_size(table));
+    printf("Hash total collisions: %zu\n", cc_ht_total_collisions(table));
+    printf("Hash most bucket collisions: %zu\n", cc_ht_max_bucket_collisions(table));
+    printf("Hash load factor: %f (capacity %zu)\n", cc_ht_load_factor(table), cc_ht_capacity(table));
     /* cc_ht_adjust_load_factor(table, 0.41); */
-    printf("Hash total collisions: %u\n", cc_ht_total_collisions(table));
-    printf("Hash most bucket collisions: %u\n", cc_ht_max_bucket_collisions(table));
-    printf("Hash load factor: %f (capacity %u)\n", cc_ht_load_factor(table), cc_ht_capacity(table));
+    printf("Hash total collisions: %zu\n", cc_ht_total_collisions(table));
+    printf("Hash most bucket collisions: %zu\n", cc_ht_max_bucket_collisions(table));
+    printf("Hash load factor: %f (capacity %zu)\n", cc_ht_load_factor(table), cc_ht_capacity(table));
 
     /*cc_ht_iterate(table, printIntKeyStringValue, NULL);
     cc_el_assign_signed_int(key, 0);
@@ -323,6 +341,7 @@ void test_small_dll()
 #include "IO/hex.h"
 #include "IO/md5.h"
 #include "IO/sha1.h"
+#include "IO/net.h"
 
 void test_io() {
     test_aes();
@@ -392,7 +411,7 @@ void test_io() {
     for (size_t i = 0; i < sizeof(buffer); ++i)
         printf("%d ", buffer[i]);
 
-    io = io_open_cstring("");
+    io = io_open_cstring("", "r");
     IO io2 = io_open_sha1(io, "r");
 
     size_t read = io_read(buffer, 1, 32, io2);
@@ -445,12 +464,36 @@ int main()
         {"Some really long string - with some special ranges like [ and ]", "*[^ ] really*]*"}
     };
 
+    const char *err;
+    const char *host = "jw.org";
+    IO net = io_open_tcp_socket(host, 80, "rwb", &err);
+    IO stdio = io_open_file(stdout);
+
+    io_printf(net, "GET / HTTP/1.0\r\nHost: %s\r\n\r\n", host);
+    io_seek(net, 0, SEEK_CUR);
+
+    if (io_error(net))
+        io_puts("Error occured while writing\n", stdio);
+
+    io_puts("Waiting for response...\n", stdio);
+
+    if (net == NULL)
+        io_puts(err, stdio);
+    else if (io_copy(net, stdio) != 0)
+        io_puts("Error while copying\n", stdio);
+
+    io_puts("End of response.\n", stdio);
+
+    io_close(net);
+    io_close(stdio);
+    return 0;
+
 #if 1
     IO in = io_open_file(stdin);
     if (1) {
         char buf[20];
         int value = 0, res;
-        res = io_scanf(io_open_cstring("+123 Some-long-string"), "%d %8[A-Za-z]", &value, buf);
+        res = io_scanf(io_open_cstring("+123 Some-long-string", "r"), "%d %8[A-Za-z]", &value, buf);
         printf("Matched = %d (%d, %s)\n", res, value, buf);
         io_rewind(in);
     }

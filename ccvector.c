@@ -106,6 +106,14 @@ HVector cc_v_grow(HVector list, size_t size)
     if (new_data == NULL)
         return NULL; /* Leave `list` unchanged on failure to allocate */
 
+    ContainerRepairCallback repair = cc_el_container_repair_for_type(cc_el_metadata_type(list->metadata));
+    if (repair != NULL) {
+        size_t i;
+        size_t element_size = cc_el_metadata_type_size(list->metadata);
+        for (i = 0; i < list->size; ++i)
+            repair(new_data + i * element_size);
+    }
+
     list->data = new_data;
     list->capacity = new_size;
 
@@ -166,6 +174,20 @@ cleanup:
 
     cc_v_destroy(new_list, NULL);
     return NULL;
+}
+
+int cc_v_assign(HVector dst, HVector src)
+{
+    cc_v_clear(dst, NULL);
+
+    HVector copy = cc_v_copy(src, NULL, NULL);
+    if (!copy)
+        CC_NO_MEM_HANDLER("out of memory");
+
+    cc_v_swap(dst, copy);
+    cc_v_destroy(copy, NULL);
+
+    return CC_OK;
 }
 
 void cc_v_swap(HVector lhs, HVector rhs)
@@ -357,6 +379,14 @@ Iterator cc_v_rnext(HVector list, Iterator node)
         return NULL;
 
     return (char *) node - cc_el_metadata_type_size(list->metadata);
+}
+
+HElementData cc_v_node_data_easy(HVector list, Iterator node)
+{
+    if (cc_v_node_data(list, node, list->buffer) != CC_OK)
+        return NULL;
+
+    return list->buffer;
 }
 
 int cc_v_node_data(HVector list, Iterator element, HElementData out)

@@ -48,6 +48,16 @@ extern "C" {
      */
     HVector cc_v_copy(HVector list, ElementDataCallback construct, ElementDataCallback destruct);
 
+    /** @brief Assigns one vector to another.
+     *
+     * The destination vector need not be the same type as the source vector; it will be changed automatically.
+     *
+     * @param dst The destination vector.
+     * @param src The source vector.
+     * @return CC_OK on success, CC_NO_MEM on failure to allocate
+     */
+    int cc_v_assign(HVector dst, HVector src);
+
     /* Swaps two vectors
      *
      * Guaranteed not to fail
@@ -179,6 +189,16 @@ extern "C" {
      * This function never fails
      */
     void cc_v_reverse(HVector list);
+
+    /** @brief Returns the value of the specified element in the internal buffer.
+     *
+     * The return value of this function **must not** be freed.
+     *
+     * @param list A list to get an element from. Must not be `NULL`.
+     * @param node An iterator that references an element in @p list.
+     * @return A pointer to the internal buffer that references the element at @p node.
+     */
+    HElementData cc_v_node_data_easy(HVector list, Iterator node);
 
     /* Returns a reference to the value of the specified element in `out`
      *

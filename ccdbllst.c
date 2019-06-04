@@ -177,6 +177,20 @@ HDoublyLinkedList cc_dll_copy(HDoublyLinkedList list, ElementDataCallback constr
     return new_list;
 }
 
+int cc_dll_assign(HDoublyLinkedList dst, HDoublyLinkedList src)
+{
+    cc_dll_clear(dst, NULL);
+
+    HDoublyLinkedList copy = cc_dll_copy(src, NULL, NULL);
+    if (!copy)
+        CC_NO_MEM_HANDLER("out of memory");
+
+    cc_dll_swap(dst, copy);
+    cc_dll_destroy(copy, NULL);
+
+    return CC_OK;
+}
+
 void cc_dll_swap(HDoublyLinkedList lhs, HDoublyLinkedList rhs)
 {
     struct DoublyLinkedList temp = *lhs;
@@ -464,6 +478,14 @@ Iterator cc_dll_rnext(HDoublyLinkedList list, Iterator node)
 {
     (void) list; /* Not needed for a linked list! */
     return ((HDoublyLinkedListNode) node)->prev;
+}
+
+HElementData cc_dll_node_data_easy(HDoublyLinkedList list, Iterator node)
+{
+    if (cc_dll_node_data(list, node, list->buffer) != CC_OK)
+        return NULL;
+
+    return list->buffer;
 }
 
 int cc_dll_node_data(HDoublyLinkedList list, Iterator node, HElementData out)

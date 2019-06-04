@@ -15,11 +15,13 @@ SRCFILES = ccdbllst.c \
            IO/hex.c \
            IO/md5.c \
            IO/sha1.c \
+           IO/net.c \
            io.c \
            dir.c \
            main.c \
            utility.c \
-           ccpair.c
+           ccpair.c \
+           cctuple.c
 
 HEADERFILES = ccpair.h \
               ccdbllst.h \
@@ -32,11 +34,13 @@ HEADERFILES = ccpair.h \
               IO/hex.h \
               IO/md5.h \
               IO/sha1.h \
+              IO/net.h \
               io.h \
               cclnklst.h \
               dir.h \
               platforms.h \
-              utility.h
+              utility.h \
+              cctuple.h
 
 OBJS = $(subst .c,.o,$(SRCFILES))
 LDLIBS = -lm

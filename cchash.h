@@ -67,6 +67,22 @@ extern "C" {
      */
     int cc_ht_adjust_capacity(HHashTable table, size_t capacity);
 
+    /** @brief Assigns one hash table to another.
+     *
+     * The destination hash table need not be the same type as the source hash table; it will be changed automatically.
+     *
+     * @param dst The destination hash table.
+     * @param src The source hash table.
+     * @return CC_OK on success, CC_NO_MEM on failure to allocate
+     */
+    int cc_ht_assign(HHashTable dst, HHashTable src);
+
+    /** @brief Repairs the hash table
+     *
+     * This function must be called when the hash table data itself has been moved to a new location
+     */
+    void cc_ht_repair(HHashTable dst);
+
     /* Swaps two hash tables
      *
      * Guaranteed not to fail
@@ -113,6 +129,7 @@ extern "C" {
      *
      * supported in flags:
      *   - Multi-value: CC_MULTI_VALUE or CC_SINGLE_VALUE
+     *   - Direction: CC_FORWARD inserts at beginning of identical-key block, CC_BACKWARD inserts at end of identical-key block
      *   - Auto-organize: resizes the hash table to keep the load factor around 60%
      *
      * Returns CC_OK on success
@@ -167,6 +184,26 @@ extern "C" {
      * Returns CC_BAD_PARAM if `callback` is NULL
      */
     int cc_ht_iterate(HHashTable table, ExtendedElementDualDataCallback callback, void *userdata);
+
+    /** @brief Returns the key of the specified element in the internal buffer.
+     *
+     * The return value of this function **must not** be freed.
+     *
+     * @param table A table to get a key from. Must not be `NULL`.
+     * @param node An iterator that references an element in @p table.
+     * @return A pointer to the internal buffer that references the element at @p node.
+     */
+    HElementData cc_ht_node_key_easy(HHashTable table, ExIterator node);
+
+    /** @brief Returns the value of the specified element in the internal buffer.
+     *
+     * The return value of this function **must not** be freed.
+     *
+     * @param table A table to get a value from. Must not be `NULL`.
+     * @param node An iterator that references an element in @p table.
+     * @return A pointer to the internal buffer that references the element at @p node.
+     */
+    HElementData cc_ht_node_data_easy(HHashTable table, ExIterator node);
 
     /* Returns a reference to the value of the specified element in `out`
      *
@@ -232,6 +269,7 @@ extern "C" {
      * Note that this operation is performed in O(n) time
      */
     void cc_ht_destroy(HHashTable table);
+    void cc_ht_destroy_at(HHashTable table);
 
 #ifdef __cplusplus
 }

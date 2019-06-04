@@ -134,7 +134,7 @@ static int compare_block_pair_key(HElementData block_data, HElementData user_key
 
     HHashTable table = cc_el_userdata_in(cc_el_get_metadata(block_data));
 
-    *cc_el_storage_location_ptr(table->key_buffer) = pblock_data;
+    *cc_el_storage_location_ptr(table->key_buffer) = KEY_ADDR(pblock_data, table);
 
     if (compare)
         return compare(table->key_buffer, user_key);
@@ -201,6 +201,28 @@ static Iterator find_first_key_in_bucket(HHashTable table, HLinkedList bucket, H
     return NULL;
 }
 
+/* Finds the location of the last key in the bucket with an identical key to `key`, and returns it */
+static Iterator find_last_key_in_bucket(HHashTable table, HLinkedList bucket, HConstElementData key, ElementDualDataCallback compare)
+{
+    int found = 0;
+    Iterator it, last = NULL;
+
+    for (it = cc_ll_begin(bucket); it; last = it, it = cc_ll_next(bucket, it))
+    {
+        cc_ll_node_data(bucket, it, table->bucket_buffer);
+        int res = compare_block_pair_key(table->bucket_buffer, (HElementData) key, compare);
+
+        if (res == 0)
+            found = 1;
+        else if (res < -1 || res > 1)
+            break;
+        else if (found)
+            return last;
+    }
+
+    return found? last: NULL;
+}
+
 /* Counts number of identical keys after the first (designated by `start`) in the bucket */
 static size_t count_remaining_keys_in_bucket(HHashTable table, Iterator start, HLinkedList bucket, HConstElementData key, ElementDualDataCallback compare)
 {
@@ -225,17 +247,23 @@ size_t cc_ht_sizeof()
     return sizeof(struct HashTable);
 }
 
+void cc_ht_repair(HHashTable table)
+{
+    /* Fix self-references in metadata */
+    cc_el_set_userdata_in(table->bucket_meta, table);
+}
+
 size_t cc_ht_max_capacity()
 {
     return SIZE_MAX;
 }
 
-HHashTable cc_ht_init_with_capacity(ContainerElementType keyType, ContainerElementType valueType, size_t capacity)
+int cc_ht_init_at_with_capacity(void *buf, size_t buffer_size, ContainerElementType keyType, ContainerElementType valueType, size_t capacity)
 {
-    HHashTable table = CALLOC(cc_ht_sizeof(), 1);
+    if (buffer_size < cc_ht_sizeof())
+        CC_BAD_PARAM_HANDLER("buffer size too small");
 
-    if (!table)
-        return NULL;
+    HHashTable table = buf;
 
     if (NULL == (table->table = CALLOC(sizeof(*table->table), capacity)) ||
             NULL == (table->key_meta = cc_el_make_metadata(keyType)) ||
@@ -252,7 +280,7 @@ HHashTable cc_ht_init_with_capacity(ContainerElementType keyType, ContainerEleme
 
     table->capacity = capacity;
 
-    return table;
+    return CC_OK;
 
 cleanup:
     cc_el_destroy_reference(table->key_buffer);
@@ -264,12 +292,42 @@ cleanup:
     FREE(table->table);
     FREE(table);
 
-    return NULL;
+    CC_NO_MEM_HANDLER("out of memory");
+}
+
+HHashTable cc_ht_init_with_capacity(ContainerElementType keyType, ContainerElementType valueType, size_t capacity)
+{
+    HHashTable result = CALLOC(cc_ht_sizeof(), 1);
+    if (!result)
+        return NULL;
+
+    CC_CLEANUP_ON_ERROR(cc_ht_init_at_with_capacity(result, cc_ht_sizeof(), keyType, valueType, capacity), FREE(result); result = NULL);
+
+    return result;
 }
 
 HHashTable cc_ht_init(ContainerElementType keyType, ContainerElementType valueType)
 {
     return cc_ht_init_with_capacity(keyType, valueType, 31);
+}
+
+int cc_ht_init_at(void *buf, size_t buffer_size, ContainerElementType keyType, ContainerElementType valueType)
+{
+    return cc_ht_init_at_with_capacity(buf, buffer_size, keyType, valueType, 31);
+}
+
+int cc_ht_assign(HHashTable dst, HHashTable src)
+{
+    cc_ht_clear(dst);
+
+    HHashTable copy = cc_ht_copy(src);
+    if (!copy)
+        CC_NO_MEM_HANDLER("out of memory");
+
+    cc_ht_swap(dst, copy);
+    cc_ht_destroy(copy);
+
+    return CC_OK;
 }
 
 static HHashTable cc_ht_copy_with_capacity_and_flags(HHashTable table, size_t capacity, unsigned flags)
@@ -288,12 +346,13 @@ static HHashTable cc_ht_copy_with_capacity_and_flags(HHashTable table, size_t ca
         cc_ht_node_key(table, it, table->key_buffer);
         cc_ht_node_data(table, it, table->value_buffer);
 
-        /* TODO: order of elements with identical keys will be backwards; fix? */
-        if (CC_OK != cc_ht_insert(new_table, CC_MULTI_VALUE | flags, table->key_buffer, table->value_buffer, NULL))
+        /* TODO: proper semantics for same-key ordering are enabled if CC_BACKWARD is used, but gives a massive performance hit if there are lots of identical keys */
+        if (CC_OK != cc_ht_insert(new_table, CC_MULTI_VALUE | CC_BACKWARD | flags, table->key_buffer, table->value_buffer, NULL))
             goto cleanup;
     }
 
     new_table->size = table->size;
+
     return new_table;
 
 cleanup:
@@ -308,27 +367,7 @@ HHashTable cc_ht_copy_with_capacity(HHashTable table, size_t capacity)
 
 HHashTable cc_ht_copy(HHashTable table)
 {
-    HHashTable new_table = cc_ht_init_with_capacity(cc_el_metadata_type(table->key_meta), cc_el_metadata_type(table->value_meta), table->capacity);
-
-    if (!new_table)
-        return NULL;
-
-    cc_el_copy_metadata(new_table->key_meta, table->key_meta);
-    cc_el_copy_metadata(new_table->value_meta, table->value_meta);
-
-    size_t idx;
-    for (idx = 0; idx < table->capacity; ++idx)
-    {
-        if (table->table[idx] && NULL == (new_table->table[idx] = cc_ll_copy(table->table[idx], NULL, NULL)))
-            goto cleanup;
-    }
-
-    new_table->size = table->size;
-    return new_table;
-
-cleanup:
-    cc_ht_destroy(new_table);
-    return NULL;
+    return cc_ht_copy_with_capacity(table, cc_ht_capacity(table));
 }
 
 int cc_ht_adjust_load_factor(HHashTable table, float desired_load_factor)
@@ -359,9 +398,8 @@ void cc_ht_swap(HHashTable lhs, HHashTable rhs)
     *lhs = *rhs;
     *rhs = table;
 
-    /* Fix self-references in metadata */
-    cc_el_set_userdata_in(lhs->bucket_meta, lhs);
-    cc_el_set_userdata_in(rhs->bucket_meta, rhs);
+    cc_ht_repair(lhs);
+    cc_ht_repair(rhs);
 }
 
 float cc_ht_load_factor(HHashTable table)
@@ -434,17 +472,19 @@ int cc_ht_insert(HHashTable table, unsigned flags, HConstElementData key, HConst
             CC_NO_MEM_HANDLER("out of memory");
     }
     /* If bucket already exists, look for our key in it */
-    else
+    else if (CC_DIRECTION(flags) == CC_FORWARD)
         list_iter = find_first_key_in_bucket(table, bucket, key, compare, &prior);
+    else
+        list_iter = prior = find_last_key_in_bucket(table, bucket, key, compare);
 
     /* Then create data block itself */
     void *block = create_block_pair(table, key, data, flags);
     if (!block)
         CC_NO_MEM_HANDLER("out of memory");
 
-    /* If multi-value, insert just before identical key
-     * This means for multi-value hashes, all keys will be grouped with identical keys (but in undefined order in relation to each other),
-     * and the first key of a multi-value group will always be the most recently inserted.
+    /* If multi-value, insert just before identical key (or after if CC_BACKWARD is specified)
+     * This means for multi-value hashes, all keys will be grouped with identical keys,
+     * and the first key of a multi-value group will always be the most recently inserted, if CC_FORWARD is used (the default).
      */
     if (list_iter == NULL || CC_MULTIVALUE(flags) == CC_MULTI_VALUE)
     {
@@ -640,6 +680,22 @@ int cc_ht_iterate(HHashTable table, ExtendedElementDualDataCallback callback, vo
     return CC_OK;
 }
 
+HElementData cc_ht_node_key_easy(HHashTable table, ExIterator node)
+{
+    if (cc_ht_node_key(table, node, table->key_buffer) != CC_OK)
+        return NULL;
+
+    return table->key_buffer;
+}
+
+HElementData cc_ht_node_data_easy(HHashTable table, ExIterator node)
+{
+    if (cc_ht_node_data(table, node, table->value_buffer) != CC_OK)
+        return NULL;
+
+    return table->value_buffer;
+}
+
 int cc_ht_node_key(HHashTable table, ExIterator node, HElementData out)
 {
     if (!cc_el_compatible_metadata_element(table->key_meta, out))
@@ -694,7 +750,7 @@ void cc_ht_clear(HHashTable table)
     table->size = 0;
 }
 
-void cc_ht_destroy(HHashTable table)
+void cc_ht_destroy_at(HHashTable table)
 {
     cc_ht_clear(table);
 
@@ -705,6 +761,11 @@ void cc_ht_destroy(HHashTable table)
     cc_el_kill_metadata(table->value_meta);
     cc_el_kill_metadata(table->bucket_meta);
     FREE(table->table);
+}
+
+void cc_ht_destroy(HHashTable table)
+{
+    cc_ht_destroy_at(table);
     FREE(table);
 }
 

@@ -21,6 +21,26 @@ struct InputOutputDevice;
 /** @brief The root object type to perform all IO on.
  *
  * This is an opaque handle to a runtime-polymorphic object that does not need (or want) any member access.
+ *
+ * Use of an IO device that references a FILE * will pass all calls on to the C Standard Library. Invariants held in the rest of the library may not apply.
+ * If you want more standardized file IO, use the native file functions.
+ *
+ * Standard IO mode flags include:
+ *
+ *   - `r` - Make IO device readable.
+ *   - `w` - Make IO device writable.
+ *   - `+` - Make IO device open for update (implies `rw`).
+ *   - `a` - Make IO device open for append. Writes will always occur at the end of the device. Not all IO devices support this mode.
+ *   - `x` - Make opening the device fail if the file already exists. Only relevant for file devices.
+ *   - `t` - Open device in text mode. On Linux, the stream is left unchanged. On Windows, CRLF is converted to LF when reading, and vice versa when writing.
+ *   - `b` - Open device in binary mode. This is the opposite of `t`. If both are specified, the last in the mode string is used.
+ *   - `<` - Disable hardware acceleration. Currently only implemented for AES IO.
+ *   - `g` - Grab ownership of handle when opening a native file descriptor.
+ *   - `@ncp` - If specified in this order, the [n]ative [c]ode [p]age is used on Windows to open files instead of UTF-8.
+ *
+ * The C Standard Library seek() rules apply to this library as well. You must have a call to `io_seek()`, `io_seek64()`, or `io_rewind()` before switching between reading and writing.
+ * The call `io_seek(device, 0, SEEK_CUR)` will only ever fail if an internal buffer failed to flush, even if the stream does not support seeking.
+ *  A call to `io_rewind()` also works for non-seekable streams, but has no way of reporting buffer-flush errors directly, although the error flag on the device will still be set.
  */
 typedef struct InputOutputDevice *IO;
 
@@ -38,12 +58,20 @@ enum IO_Type
     IO_Custom /* Custom callback for reading and/or writing */
 };
 
+/** @brief A structure to hold a stream position for an IO object.
+ *
+ * This class is not designed to be edited by the end user. It's a get-only/set-only object via `io_getpos()` and `io_setpos()`.
+ */
 typedef struct
 {
     fpos_t _fpos;
     long long _pos;
 } IO_Pos;
 
+/** @brief An enum to specify where the either the next or all subsequent IO devices should be opened.
+ *
+ * IO_HintStatic specifies to use static-duration storage if available, and IO_HintDynamic forces all dynamic memory allocations.
+ */
 enum IO_OpenHint {
     IO_HintStatic,
     IO_HintDynamic,
@@ -52,8 +80,11 @@ enum IO_OpenHint {
     IO_HintLongLived = IO_HintDynamic
 };
 
-/* Hint the life-duration of the next open
- * (or if permanentHint is set, where to allocate all subsequent IO devices if possible, until the next call to this function)
+/** @brief Hint the life-duration of the next open.
+ *
+ * @param hint A hint as to where to store the next IO device opened.
+ * @param permanentHint If @p permanentHint is non-zero, where to allocate all subsequent IO devices if possible, until the next call to this function.
+ *                      If @p permanentHint is zero, the hint only applies to the next open of an IO device.
  */
 void io_hint_next_open(enum IO_OpenHint hint, int permanentHint);
 
@@ -62,13 +93,63 @@ typedef size_t (*IO_ReadCallback)(void *ptr, size_t size, size_t count, void *us
 typedef size_t (*IO_WriteCallback)(const void *ptr, size_t size, size_t count, void *userdata, IO io);
 typedef int (*IO_SimpleCallback)(void *userdata, IO io);
 
+/** @brief User-defined callbacks for a custom IO device.
+ *
+ * This class allows the user to define a custom IO device (openable with `io_open_custom()`), without the need to reinvent the wheel.
+ *
+ * Either reading or writing must be implemented, or the IO device will not be capable of doing anything, much like `io_open_empty()`.
+ * If any field is `NULL`, it signifies that the specified operation is not available, and fails automatically.
+ * It is allowable for only one type of `seek()` or `tell()` to be implemented. The permitted operations will be limited or expanded to the necessary range.
+ * For each field, the `io` object is the custom IO device itself. This is to allow the individual callbacks access to functions such as `io_readable()` or `io_writable()`.
+ *
+ * The `userdata` parameter is similar, except in the case of `open`. See the member details for more information.
+ *
+ * ## Example
+ *
+ * ```
+ *     // Define callback structure
+ *     static struct InputOutputDeviceCallbacks {
+ *         .open = custom_open,
+ *         .close = custom_close,
+ *         .read = custom_read,
+ *         .write = custom_write,
+ *         .flush = NULL,
+ *         .tell = NULL,
+ *         .tell64 = NULL,
+ *         .seek = NULL,
+ *         .seek64 = NULL
+ *     } custom_callbacks;
+ *
+ *     ...
+ *
+ *     // Open the custom device with callback structure
+ *     IO device = io_open_custom(&custom_callbacks, "r");
+ * ```
+ */
 struct InputOutputDeviceCallbacks {
+    /** @brief Reads some data from the IO device.
+     *
+     * Read callbacks function identically to the `fread()` standard C library call, except for the return value.
+     * If a read callback returns `SIZE_MAX`, then a read error occured. Otherwise, if the return value is less than the requested number of objects, EOF is assumed to have been reached.
+     */
     IO_ReadCallback read;
+
+    /** @brief Writes some data to the IO device.
+     *
+     * Read callbacks function identically to the `fwrite()` standard C library call.
+     * If a write callback return value is less than the requested number of objects, a write error occured.
+     */
     IO_WriteCallback write;
 
-    /* Userdata given to io_open_custom is passed as an argument to `open`, then the userdata in the IO object is set to the return value of this function.
-     * If this function returns NULL, the call to open will fail and no IO device will be opened
-     * If `open` itself is NULL, the userdata in the IO object is set to the userdata parameter of io_open_custom, and there is no way to prevent opening the IO device here
+    /** @brief Opens the IO device and can signify failure.
+     *
+     * Userdata given to `io_open_custom()` is passed as an argument to `open`, then the userdata in the IO object is set to the return value of this function.
+     * If this function returns NULL, the call to open will fail and no IO device will be opened.
+     * If `open` itself is NULL, the userdata in the IO object is set to the userdata parameter of `io_open_custom()`, and there is no way to prevent opening the IO device here.
+     *
+     * @param userdata Userdata field passed as parameter to `io_open_custom()`.
+     * @param io The IO device being opened. No reads from or writes to the device should be performed.
+     * @return The userdata that should be set in @p io, or NULL if the operation should fail.
      */
     void *(*open)(void *userdata, IO io);
     IO_SimpleCallback close, flush;
@@ -96,6 +177,11 @@ int io_close(IO io);
 int io_readable(IO io);
 int io_writable(IO io);
 int io_binary(IO io);
+int io_text(IO io);
+
+void io_grab_file(IO io);
+void io_ungrab_file(IO io);
+
 /* Returns pointer to under-the-hood data
  * This pointer should *never* be freed
  */
@@ -117,17 +203,16 @@ int io_getc(IO io);
 int io_getpos(IO io, IO_Pos *pos);
 char *io_gets(char *str, int num, IO io);
 IO io_open(const char *filename, const char *mode);
-/* If `mode` contains "ncp" on Windows, the [n]ative [c]ode [p]age is used, instead of UTF-8 */
+/* If `mode` contains "@ncp" on Windows, the [n]ative [c]ode [p]age is used, instead of UTF-8 */
 IO io_open_native(const char *filename, const char *mode);
-/* TODO: io_open_native_file() not yet implemented */
 #if LINUX_OS
-IO io_open_native_file(int descriptor);
+IO io_open_native_file(int descriptor, const char *mode);
 #elif WINDOWS_OS
-IO io_open_native_file(HANDLE descriptor);
+IO io_open_native_file(HANDLE descriptor, const char *mode);
 #endif
 IO io_open_file(FILE *file);
 IO io_open_empty(void); /* No input is read (i.e. the first read returns EOF) and all writes fail to this device */
-IO io_open_cstring(const char *str);
+IO io_open_cstring(const char *str, const char *mode);
 IO io_open_buffer(char *buf, size_t size, const char *mode);
 IO io_open_minimal_buffer(const char *mode);
 IO io_open_dynamic_buffer(const char *mode);
@@ -149,6 +234,8 @@ int io_seek64(IO io, long long int offset, int origin);
 int io_setpos(IO io, const IO_Pos *pos);
 long int io_tell(IO io);
 long long int io_tell64(IO io);
+long int io_size(IO io);
+long long int io_size64(IO io);
 size_t io_write(const void *ptr, size_t size, size_t count, IO io);
 void io_rewind(IO io);
 void io_setbuf(IO io, char *buf);
@@ -180,7 +267,7 @@ public:
         other.m_io = NULL;
     }
     IODevice() : m_io(io_open_empty()) {if (!m_io) throw std::bad_alloc();}
-    IODevice(const char *cstring) : m_io(io_open_cstring(cstring)) {if (!m_io) throw std::bad_alloc();}
+    IODevice(const char *cstring) : m_io(io_open_cstring(cstring, "r")) {if (!m_io) throw std::bad_alloc();}
     IODevice(char *buffer, size_t size, const char *mode) : m_io(io_open_buffer(buffer, size, mode)) {if (!m_io) throw std::bad_alloc();}
     IODevice(const char *filename, const char *mode) : m_io(io_open_native(filename, mode)) {if (!m_io) throw std::bad_alloc();}
     IODevice(FILE *file) : m_io(io_open_file(file)) {if (!m_io) throw std::bad_alloc();}

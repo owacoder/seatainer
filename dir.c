@@ -583,7 +583,7 @@ Directory dir_open_with_mode(const char *dir, const char *mode) {
     name[len++] = '*';
     name[len] = 0;
 
-    if (strstr(mode, "ncp") != NULL) {
+    if (strstr(mode, "@ncp") != NULL) {
         result->findFirstHandle = FindFirstFileA(name, &result->findData.fdata.data);
 
         result->findData.is_wide = result->lastFoundData.is_wide = 0;
@@ -715,7 +715,7 @@ DirectoryEntry dirent_open_with_mode(const char *path, const char *mode) {
         goto cleanup;
     strcpy(entry->data.d_name, name);
 #elif WINDOWS_OS
-    if (strstr(mode, "ncp") != NULL) {
+    if (strstr(mode, "@ncp") != NULL) {
         if (name_len > MAX_PATH - 1)
             goto cleanup;
 

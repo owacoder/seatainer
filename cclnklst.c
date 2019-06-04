@@ -121,15 +121,15 @@ int cc_ll_init_at(void *buf, size_t buffer_size, ContainerElementType type, HCon
     return CC_OK;
 }
 
-HLinkedList cc_ll_copy(HLinkedList list, ElementDataCallback construct, ElementDataCallback destruct)
+HLinkedList cc_ll_copy(HLinkedList list, HContainerElementMetaData externalMeta, ElementDataCallback construct, ElementDataCallback destruct)
 {
-    HLinkedList new_list = cc_ll_init(cc_el_metadata_type(list->metadata), cc_ll_has_external_metadata(list)? cc_ll_metadata(list): NULL);
+    HLinkedList new_list = cc_ll_init(cc_el_metadata_type(list->metadata), externalMeta);
     HLinkedListNode old = list->head, node = NULL;
 
     if (!new_list)
         return NULL;
 
-    if (!cc_ll_has_external_metadata(list))
+    if (!externalMeta)
         cc_el_copy_metadata(new_list->metadata, list->metadata); /* Copy metadata (type and callbacks) from old list to this list */
 
     while (old)
@@ -151,6 +151,20 @@ HLinkedList cc_ll_copy(HLinkedList list, ElementDataCallback construct, ElementD
     }
 
     return new_list;
+}
+
+int cc_ll_assign(HLinkedList dst, HLinkedList src)
+{
+    cc_ll_clear(dst, NULL);
+
+    HLinkedList copy = cc_ll_copy(src, NULL, NULL, NULL);
+    if (!copy)
+        CC_NO_MEM_HANDLER("out of memory");
+
+    cc_ll_swap(dst, copy);
+    cc_ll_destroy(copy, NULL);
+
+    return CC_OK;
 }
 
 void cc_ll_swap(HLinkedList lhs, HLinkedList rhs)
@@ -401,6 +415,14 @@ Iterator cc_ll_next(HLinkedList list, Iterator node)
     return ((HLinkedListNode) node)->next;
 }
 
+HElementData cc_ll_node_data_easy(HLinkedList list, Iterator node)
+{
+    if (cc_ll_node_data(list, node, list->buffer) != CC_OK)
+        return NULL;
+
+    return list->buffer;
+}
+
 int cc_ll_node_data(HLinkedList list, Iterator node, HElementData out)
 {
     HLinkedListNode ll_node = node;
@@ -485,7 +507,7 @@ void cc_ll_clear(HLinkedList list, ElementDataCallback destruct)
     cc_ll_set_size(list, 0);
 }
 
-void cc_ll_destroy(HLinkedList list, ElementDataCallback destruct)
+void cc_ll_destroy_at(HLinkedList list, ElementDataCallback destruct)
 {
     cc_ll_clear(list, destruct);
 
@@ -495,6 +517,11 @@ void cc_ll_destroy(HLinkedList list, ElementDataCallback destruct)
 #endif
     if (!cc_ll_has_external_metadata(list))
         cc_el_kill_metadata(list->metadata);
+}
+
+void cc_ll_destroy(HLinkedList list, ElementDataCallback destruct)
+{
+    cc_ll_destroy_at(list, destruct);
     FREE(list);
 }
 
