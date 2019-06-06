@@ -152,7 +152,24 @@ struct InputOutputDeviceCallbacks {
      * @return The userdata that should be set in @p io, or NULL if the operation should fail.
      */
     void *(*open)(void *userdata, IO io);
-    IO_SimpleCallback close, flush;
+
+    /** @brief Closes the IO device and frees any storage allocated.
+     *
+     * @param userdata The userdata stored in @p io.
+     * @param io The IO device being closed. Reads from or writes to the device are allowed.
+     * @return Zero on success, non-zero on error.
+     */
+    IO_SimpleCallback close;
+
+    /** @brief Flushes the input buffer or output buffer of the device.
+     *
+     * This callback must not call any seek function.
+     *
+     * @param userdata The userdata stored in @p io.
+     * @param io The IO device being closed. Reads from or writes to the device are allowed.
+     * @return Zero on success, non-zero on error.
+     */
+    IO_SimpleCallback flush;
 
     long int (*tell)(void *userdata, IO io);
     long long int (*tell64)(void *userdata, IO io);
