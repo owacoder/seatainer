@@ -448,10 +448,7 @@ int io_flush(IO io) {
             return 0;
         case IO_Custom:
             if (io->callbacks->flush == NULL)
-            {
-                io->flags |= IO_FLAG_ERROR;
-                return EOF;
-            }
+                return 0;
             return io->callbacks->flush(io->ptr, io);
     }
 }

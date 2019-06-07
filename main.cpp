@@ -466,7 +466,7 @@ int main()
 
     const char *err;
     const char *host = "jw.org";
-    IO net = io_open_tcp_socket(host, 80, "rwb", &err);
+    IO net = io_open_tcp_socket(host, 80, NetAddressAny, "rwb", &err);
     IO stdio = io_open_file(stdout);
 
     io_printf(net, "GET / HTTP/1.0\r\nHost: %s\r\n\r\n", host);
