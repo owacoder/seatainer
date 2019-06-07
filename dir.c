@@ -827,7 +827,6 @@ const char *dirent_name(DirectoryEntry entry) {
     return entry->data.d_name;
 #elif WINDOWS_OS
     if (entry->is_wide) {
-        printf("%ls\n", entry->fdata.data.cFileName);
         WideCharToMultiByte(CP_UTF8, 0, entry->fdata.wdata.cFileName, -1, entry->name, sizeof(entry->name), NULL, NULL);
         return entry->name;
     }
