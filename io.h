@@ -207,9 +207,13 @@ void *io_userdata(IO io);
 char *io_underlying_buffer(IO io);
 size_t io_underlying_buffer_size(IO io);
 size_t io_underlying_buffer_capacity(IO io);
-/* Returns pointer to object-specific raw buffer (the size is given by io_tempdata_size(), but is guaranteed to be >= 8 for Custom-type objects)
- * This buffer can be used for anything
- * If this function returns NULL, no buffer is available
+/** @brief Returns pointer to object-specific raw buffer
+ *
+ * The size of the returned buffer is given by io_tempdata_size(), and is guaranteed to be >= 8 for Custom-type objects and hold at least two pointers.
+ * The returned buffer can be used for anything.
+ *
+ * @param io The object to obtain the temporary buffer of.
+ * @return If this function returns NULL, no buffer is available. Otherwise, the object-specific raw buffer is returned.
  */
 unsigned char *io_tempdata(IO io);
 size_t io_tempdata_size(IO io);

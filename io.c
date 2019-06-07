@@ -97,7 +97,7 @@ struct InputOutputDevice {
 
     union {
         struct IO_sizes sizes;
-        unsigned char raw[sizeof(struct IO_sizes)];
+        unsigned char raw[sizeof(struct IO_sizes) > 2*sizeof(void *)? sizeof(struct IO_sizes): 2*sizeof(void *)];
     } data;
     enum IO_Type type;
 
