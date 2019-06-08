@@ -1,4 +1,5 @@
 #include "tee.h"
+#include <string.h>
 
 /* io_tempdata() guarantees that we'll be able to store at least two pointers, so casting tempdata to this struct is always safe */
 struct TeeInitializationParams {

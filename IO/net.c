@@ -1,14 +1,17 @@
 #include "net.h"
 #include <string.h>
+#include <limits.h>
 
 #if LINUX_OS
 #define INVALID_SOCKET (-1)
+#define SOCKET_ERROR (-1)
 #define SOCKET int
 
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <unistd.h>
 #elif WINDOWS_OS
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -130,7 +133,12 @@ void *net_open(void *userdata, IO io) {
             if (params->err)
                 *params->err = "Could not connect to host";
 
-            closesocket(sock);
+            if (sock != INVALID_SOCKET)
+#if WINDOWS_OS
+                closesocket(sock);
+#elif LINUX_OS
+                close(sock);
+#endif
             sock = INVALID_SOCKET;
             continue;
         }
@@ -142,7 +150,15 @@ void *net_open(void *userdata, IO io) {
         return (void *) sock;
 
 cleanup:
+#if WINDOWS_OS
+    if (sock != INVALID_SOCKET)
+        closesocket(sock);
     WSACleanup();
+#elif LINUX_OS
+    if (sock != INVALID_SOCKET)
+        close(sock);
+#endif
+
     return NULL;
 }
 

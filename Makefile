@@ -2,7 +2,8 @@ appname := seatainer
 path := $(PATH)
 
 CC = gcc
-CFLAGS = -Wall -std=c99 -maes -msse4.1 -msha
+CFLAGS = -Wall -std=c99 # -maes -msse4.1 -msha
+DEFINES = -D_POSIX_C_SOURCE=200809L
 
 SRCFILES = ccdbllst.c \
            ccstring.c \
@@ -16,12 +17,12 @@ SRCFILES = ccdbllst.c \
            IO/md5.c \
            IO/sha1.c \
            IO/net.c \
+           IO/tee.c \
            io.c \
            dir.c \
            main.c \
            utility.c \
-           ccpair.c \
-           cctuple.c
+           ccpair.c
 
 HEADERFILES = ccpair.h \
               ccdbllst.h \
@@ -35,12 +36,12 @@ HEADERFILES = ccpair.h \
               IO/md5.h \
               IO/sha1.h \
               IO/net.h \
+              IO/tee.h \
               io.h \
               cclnklst.h \
               dir.h \
               platforms.h \
-              utility.h \
-              cctuple.h
+              utility.h
 
 OBJS = $(subst .c,.o,$(SRCFILES))
 LDLIBS = -lm
