@@ -464,6 +464,23 @@ int main()
         {"Some really long string - with some special ranges like [ and ]", "*[^ ] really*]*"}
     };
 
+    Url url = url_from_percent_encoded("http://[2001:db8::7]/c=GB?objectClass?one");
+
+    if (url_get_scheme(url)) printf("scheme: %s\n", url_get_scheme(url));
+    if (url_get_authority(url)) printf("authority: %s\n", url_get_authority(url));
+    if (url_get_username(url)) printf("username: %s\n", url_get_username(url));
+    if (url_get_password(url)) printf("password: %s\n", url_get_password(url));
+    if (url_get_host(url)) printf("host: %s\n", url_get_host(url));
+    if (url_get_port(url)) printf("port: %s\n", url_get_port(url));
+    if (url_get_path(url)) printf("path: %s\n", url_get_path(url));
+    if (url_get_query(url)) printf("query: %s\n", url_get_query(url));
+    if (url_get_fragment(url)) printf("fragment: %s\n", url_get_fragment(url));
+    if (url_get_path_and_query_and_fragment(url)) printf("fullpath: %s\n", url_get_path_and_query_and_fragment(url));
+
+    url_destroy(url);
+
+    return 0;
+
     const char *err;
     const char *host = "jw.org";
     IO net = io_open_tcp_socket(host, 80, NetAddressAny, "rwb", &err);

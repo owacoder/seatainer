@@ -2,6 +2,228 @@
 #include <string.h>
 #include <limits.h>
 
+struct UrlStruct {
+    /** Contains the scheme of the URL */
+    char *scheme;
+
+    /** Contains the username of the URL. Will be `NULL` if no username is specified. */
+    char *username;
+
+    /** Contains the password of the URL. Will be `NULL` if no password is specified. If the ':' is present, but no password, this field will be the empty string. */
+    char *password;
+
+    /** Contains the host name of the URL. Will be `NULL` if no host is specified. */
+    char *host;
+
+    /** Contains the port of the URL, as a string. Will be `NULL` if no port is specified. */
+    char *port;
+
+    /** Contains the path of the URL, percent-encoded. Will never be `NULL` but may be empty */
+    char *path;
+
+    /** Contains the first character of the path. This is so the path can be reconstructed if the first character must be used as a NUL-terminator for `host` or `port` */
+    char path_first_char;
+
+    /** Contains the query of the URL, percent-encoded. Will be `NULL` if no query is specified */
+    char *query;
+
+    /** Contains the fragment of the URL, percent-encoded. Will be `NULL` if no query is specified */
+    char *fragment;
+
+    /** Contains the entire URL, percent-encoded. However, this buffer is pointed to by all the other URL sections (with the exception of `url`), and so will have NUL characters embedded in it. */
+    char *url_buffer;
+
+    /** Contains the entire URL, percent-encoded. */
+    char *url;
+};
+
+void url_destroy(Url url) {
+    free(url->url_buffer);
+    free(url->url);
+    free(url);
+}
+
+Url url_from_percent_encoded(const char *url) {
+    Url result = calloc(1, sizeof(*result));
+    if (result == NULL)
+        return NULL;
+
+    if ((result->url_buffer = strdup(url)) == NULL ||
+        (result->url = strdup(url)) == NULL)
+        goto cleanup;
+
+    char *pos, *string = result->url_buffer;
+
+    /* Get scheme */
+    pos = strchr(string, ':');
+    if (pos == NULL || string == pos)
+        goto cleanup;
+
+    result->scheme = string;
+    *pos = 0;
+
+    string = pos + 1;
+
+    if (string[0] == '/' && string[1] == '/') {
+        /* Get userinfo, host and port if available */
+        string += 2;
+
+        char *slash = strchr(string, '/');
+        char *at = strchr(string, '@');
+
+        if (at != NULL && (slash == NULL || at < slash)) {
+            char *colon = strchr(string, ':');
+            result->username = string;
+
+            /* Password exists */
+            if (colon != NULL && (at == NULL || colon < at)) {
+                *colon = 0;
+                result->password = string = colon + 1;
+            } else
+                result->password = NULL;
+
+            *at = 0;
+            string = at + 1;
+        } else
+            result->username = NULL;
+
+        result->host = string;
+        if (*result->host == '[') {
+            for (; *string && *string != ']'; ++string);
+        }
+
+        char *colon = strchr(string, ':');
+
+        if (colon != NULL && (slash == NULL || colon < slash)) {
+            *colon = 0;
+            result->port = string = colon + 1;
+        } else
+            result->port = NULL;
+
+        string = slash? slash: string + strlen(string);
+    } else {
+        result->username = result->password = NULL;
+        result->host = NULL;
+        result->port = NULL;
+    }
+
+    result->path_first_char = *string;
+    result->path = string;
+    pos = strchr(string, '?');
+
+    /* Query exists */
+    if (pos != NULL) {
+        /* Get query */
+        *pos = 0;
+        result->query = string = pos + 1;
+    } else
+        result->query = NULL;
+
+    pos = strchr(string, '#');
+    /* Fragment exists */
+    if (pos != NULL) {
+        *pos = 0;
+        result->fragment = pos + 1;
+    } else
+        result->fragment = NULL;
+
+    return result;
+
+cleanup:
+    url_destroy(result);
+    return NULL;
+}
+
+const char *url_get_scheme(Url url) {
+    return url->scheme;
+}
+
+const char *url_get_authority(Url url) {
+    if (!url->host)
+        return NULL;
+
+    if (url->password)
+        url->password[-1] = ':';
+
+    if (url->username)
+        url->host[-1] = '@';
+
+    if (url->port)
+        url->port[-1] = ':';
+
+    url->path[0] = 0;
+
+    return url->username? url->username: url->host;
+}
+
+const char *url_get_username(Url url) {
+    if (url->password)
+        url->password[-1] = 0;
+    else if (url->host)
+        url->host[-1] = 0;
+
+    return url->username;
+}
+
+const char *url_get_password(Url url) {
+    url->host[-1] = 0;
+
+    return url->password;
+}
+
+const char *url_get_host(Url url) {
+    if (url->port)
+        url->port[-1] = 0;
+    else
+        url->path[0] = 0; /* In case the host directly precedes the path */
+
+    return url->host;
+}
+
+const char *url_get_port(Url url) {
+    url->path[0] = 0; /* In case the port directly precedes the path */
+    return url->port;
+}
+
+const char *url_get_path(Url url) {
+    if (url->query)
+        url->query[-1] = 0;
+    else if (url->fragment)
+        url->fragment[-1] = 0;
+
+    url->path[0] = url->path_first_char;
+    return url->path;
+}
+
+const char *url_get_query(Url url) {
+    if (url->fragment)
+        url->fragment[-1] = 0;
+
+    return url->query;
+}
+
+const char *url_get_fragment(Url url) {
+    return url->fragment;
+}
+
+const char *url_get_path_and_query_and_fragment(Url url) {
+    if (url->fragment)
+        url->fragment[-1] = '#';
+
+    if (url->query)
+        url->query[-1] = '?';
+
+    url->path[0] = url->path_first_char;
+
+    return url->path;
+}
+
+/**********************************************************
+ *                                                        *
+ *   BEGIN SOCKET LAYER                                   *
+ *                                                        *
+ **********************************************************/
+
 #if LINUX_OS
 #define INVALID_SOCKET (-1)
 #define SOCKET_ERROR (-1)
