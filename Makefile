@@ -3,7 +3,7 @@ path := $(PATH)
 
 CC = gcc
 CFLAGS = -Wall -std=c99 # -maes -msse4.1 -msha
-DEFINES = -D_POSIX_C_SOURCE=200809L
+DEFINES = -D_POSIX_C_SOURCE=200809L -DCC_INCLUDE_NETWORK
 
 SRCFILES = ccdbllst.c \
            ccstring.c \

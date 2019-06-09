@@ -1,4 +1,5 @@
 #include "net.h"
+#include "../utility.h"
 #include <string.h>
 #include <limits.h>
 
@@ -41,6 +42,21 @@ void url_destroy(Url url) {
     free(url->url_buffer);
     free(url->url);
     free(url);
+}
+
+char *url_percent_encoded_from_utf8(const char *url) {
+
+}
+
+Url url_from_utf8(const char *url) {
+    char *percent_encoded = url_percent_encoded_from_utf8(url);
+    if (percent_encoded == NULL)
+        return NULL;
+
+    Url result = url_from_percent_encoded(percent_encoded);
+    free(percent_encoded);
+
+    return result;
 }
 
 Url url_from_percent_encoded(const char *url) {
@@ -100,6 +116,7 @@ Url url_from_percent_encoded(const char *url) {
         } else
             result->port = NULL;
 
+        strlower(result->host);
         string = slash? slash: string + strlen(string);
     } else {
         result->username = result->password = NULL;
@@ -127,6 +144,9 @@ Url url_from_percent_encoded(const char *url) {
     } else
         result->fragment = NULL;
 
+    /* Lowercase the scheme */
+    strlower(result->scheme);
+
     return result;
 
 cleanup:
@@ -135,6 +155,12 @@ cleanup:
 }
 
 const char *url_get_scheme(Url url) {
+    if (url->username)
+        url->username[-3] = 0;
+    else if (url->host)
+        url->host[-3] = 0;
+    else
+        url->path[-1] = 0;
     return url->scheme;
 }
 
@@ -157,16 +183,21 @@ const char *url_get_authority(Url url) {
 }
 
 const char *url_get_username(Url url) {
-    if (url->password)
+    if (!url->username)
+        return NULL;
+    else if (url->password)
         url->password[-1] = 0;
-    else if (url->host)
+    else
         url->host[-1] = 0;
 
     return url->username;
 }
 
 const char *url_get_password(Url url) {
-    url->host[-1] = 0;
+    if (!url->password)
+        return NULL;
+    else
+        url->host[-1] = 0;
 
     return url->password;
 }
@@ -181,7 +212,7 @@ const char *url_get_host(Url url) {
 }
 
 const char *url_get_port(Url url) {
-    url->path[0] = 0; /* In case the port directly precedes the path */
+    url->path[0] = 0;
     return url->port;
 }
 
@@ -218,12 +249,39 @@ const char *url_get_path_and_query_and_fragment(Url url) {
     return url->path;
 }
 
+const char *url_get_percent_encoded(Url url) {
+    if (url->username) {
+        url->username[-3] = ':';
+        if (url->password)
+            url->password[-1] = ':';
+        url->host[-1] = '@';
+    }
+    else if (url->host)
+        url->host[-3] = ':';
+    else
+        url->path[-1] = ':';
+
+    if (url->port)
+        url->port[-1] = ':';
+
+    url->path[0] = url->path_first_char;
+
+    if (url->query)
+        url->query[-1] = '?';
+
+    if (url->fragment)
+        url->fragment[-1] = '#';
+
+    return url->scheme;
+}
+
 /**********************************************************
  *                                                        *
  *   BEGIN SOCKET LAYER                                   *
  *                                                        *
  **********************************************************/
 
+#ifdef CC_INCLUDE_NETWORK
 #if LINUX_OS
 #define INVALID_SOCKET (-1)
 #define SOCKET_ERROR (-1)
@@ -235,9 +293,6 @@ const char *url_get_path_and_query_and_fragment(Url url) {
 #include <netdb.h>
 #include <unistd.h>
 #elif WINDOWS_OS
-#include <winsock2.h>
-#include <ws2tcpip.h>
-
 #if MSVC_COMPILER
 #pragma comment(lib, "Ws2_32.lib")
 #endif
@@ -456,3 +511,5 @@ int io_make_http_request(IO io, const char *method, const char *url, IO data) {
 
     return io_error(io);
 }
+
+#endif /* CC_INCLUDE_NETWORK */

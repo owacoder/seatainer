@@ -464,7 +464,7 @@ int main()
         {"Some really long string - with some special ranges like [ and ]", "*[^ ] really*]*"}
     };
 
-    Url url = url_from_percent_encoded("http://[2001:db8::7]/c=GB?objectClass?one");
+    Url url = url_from_percent_encoded("htTP://[2001:db8::7]:9655/c=GB?objectClass?one");
 
     if (url_get_scheme(url)) printf("scheme: %s\n", url_get_scheme(url));
     if (url_get_authority(url)) printf("authority: %s\n", url_get_authority(url));
@@ -476,6 +476,7 @@ int main()
     if (url_get_query(url)) printf("query: %s\n", url_get_query(url));
     if (url_get_fragment(url)) printf("fragment: %s\n", url_get_fragment(url));
     if (url_get_path_and_query_and_fragment(url)) printf("fullpath: %s\n", url_get_path_and_query_and_fragment(url));
+    printf("url: %s\n", url_get_percent_encoded(url));
 
     url_destroy(url);
 

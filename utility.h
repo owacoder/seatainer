@@ -50,6 +50,20 @@ int memswap(void *p, void *q, size_t size);
 
 int memxor(void *dst, void *src, size_t size);
 
+/** @brief Lowercases the string.
+ *
+ * @param str The string to lowercase.
+ * @return Returns @p str.
+ */
+char *strlower(char *str);
+
+/** @brief Uppercases the string.
+ *
+ * @param str The string to uppercase.
+ * @return Returns @p str.
+ */
+char *strupper(char *str);
+
 /* Performs a Pearson hash on the specified data, with a pseudo-random shuffle of hash bytes */
 unsigned pearson_hash(const char *data, size_t size);
 

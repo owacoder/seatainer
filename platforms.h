@@ -39,6 +39,10 @@
 
 #if defined(__WIN32) || defined(__WIN64) || defined(WIN32) || defined(WIN64)
 #define WINDOWS_OS 1
+#ifdef CC_INCLUDE_NETWORK
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#endif
 #include <windows.h>
 #else
 #define WINDOWS_OS 0

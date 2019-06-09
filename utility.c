@@ -274,6 +274,24 @@ int memxor(void *dst, void *src, size_t size) {
     return 0;
 }
 
+char *strlower(char *str) {
+    char *ptr = str;
+
+    for (; *ptr; ++ptr)
+        *ptr = tolower(*ptr & UCHAR_MAX);
+
+    return str;
+}
+
+char *strupper(char *str) {
+    char *ptr = str;
+
+    for (; *ptr; ++ptr)
+        *ptr = toupper(*ptr & UCHAR_MAX);
+
+    return str;
+}
+
 /* Adapted from https://en.wikipedia.org/wiki/Modular_exponentiation#Right-to-left_binary_method */
 static uint64_t exp_mod(uint64_t base, uint64_t exp, uint64_t mod) {
     uint64_t result = 1;
