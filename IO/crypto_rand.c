@@ -59,7 +59,22 @@ static size_t crypto_rand_read(void *ptr, size_t size, size_t count, void *userd
 
     struct CryptoRand *cryptoRand = userdata;
 
-    return cryptoRand->RtlGenRandom(ptr, size*count)? size*count: SIZE_MAX;
+    if (cryptoRand->RtlGenRandom(ptr, size*count))
+        return size*count;
+
+#if WINDOWS_OS
+    io_set_error(io, ERROR_READ_FAULT);
+#else
+    io_set_error(io, EIO);
+#endif
+    return SIZE_MAX;
+}
+
+static const char *crypto_rand_what(void *userdata, IO io) {
+    UNUSED(userdata)
+    UNUSED(io)
+
+    return "crypto_rand";
 }
 
 static const struct InputOutputDeviceCallbacks crypto_rand_callbacks = {
@@ -71,7 +86,8 @@ static const struct InputOutputDeviceCallbacks crypto_rand_callbacks = {
     .tell = NULL,
     .tell64 = NULL,
     .seek = NULL,
-    .seek64 = NULL
+    .seek64 = NULL,
+    .what = crypto_rand_what
 };
 
 IO io_open_crypto_rand() {

@@ -330,7 +330,7 @@ static int sha1_close(void *userdata, IO io) {
         u32cpy_be(&state[12], sha1->state[3]);
         u32cpy_be(&state[16], sha1->state[4]);
 
-        result = io_write(state, 4, 5, sha1->io) != 5? -1: 0;
+        result = io_write(state, 4, 5, sha1->io) != 5? io_error(sha1->io): 0;
     }
 
     free(userdata);
@@ -354,8 +354,10 @@ static size_t sha1_read(void *ptr, size_t size, size_t count, void *userdata, IO
             sha1->buffer_size = io_read(sha1->buffer, 1, 64, sha1->io);
             if (sha1->buffer_size == 64)
                 sha1->calculate(sha1);
-            else if (io_error(sha1->io))
+            else if (io_error(sha1->io)) {
+                io_set_error(io, io_error(sha1->io));
                 return SIZE_MAX;
+            }
 
             sha1->message_len += 8 * sha1->buffer_size;
         } while (sha1->buffer_size == 64);
@@ -434,6 +436,13 @@ static int sha1_seek(void *userdata, long offset, int origin, IO io) {
     }
 }
 
+static const char *sha1_what(void *userdata, IO io) {
+    UNUSED(userdata)
+    UNUSED(io)
+
+    return "sha1";
+}
+
 static const struct InputOutputDeviceCallbacks sha1_callbacks = {
     .read = sha1_read,
     .write = sha1_write,
@@ -443,7 +452,8 @@ static const struct InputOutputDeviceCallbacks sha1_callbacks = {
     .tell = NULL,
     .tell64 = NULL,
     .seek = sha1_seek,
-    .seek64 = NULL
+    .seek64 = NULL,
+    .what = sha1_what
 };
 
 IO io_open_sha1(IO io, const char *mode) {

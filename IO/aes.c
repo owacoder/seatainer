@@ -652,8 +652,10 @@ static size_t aes_write(const void *ptr, size_t size, size_t count, void *userda
 
             aes->pos = 0;
 
-            if (io_write(aes->buffer, 16, 1, aes->io) != 1)
+            if (io_write(aes->buffer, 16, 1, aes->io) != 1) {
+                io_set_error(io, io_error(aes->io));
                 return (size * count - max) / size;
+            }
             ++blocks;
         }
     }
@@ -670,8 +672,10 @@ static size_t aes_read(void *ptr, size_t size, size_t count, void *userdata, IO 
 
     while (max) {
         if (aes->pos == 0) {
-            if (io_read(aes->state, 1, 16, aes->io) != 16)
+            if (io_read(aes->state, 1, 16, aes->io) != 16) {
+                io_set_error(io, io_error(aes->io));
                 return io_error(aes->io)? SIZE_MAX: (size * count - max) / size;
+            }
 
             aes->cb(aes);
 
@@ -708,6 +712,13 @@ static int aes_seek64(void *userdata, long long int offset, int origin, IO io) {
     return 0;
 }
 
+static const char *aes_what(void *userdata, IO io) {
+    UNUSED(userdata)
+    UNUSED(io)
+
+    return "aes";
+}
+
 static const struct InputOutputDeviceCallbacks aes_callbacks = {
     .read = aes_read,
     .write = aes_write,
@@ -717,7 +728,8 @@ static const struct InputOutputDeviceCallbacks aes_callbacks = {
     .tell = NULL,
     .tell64 = NULL,
     .seek = NULL,
-    .seek64 = NULL
+    .seek64 = NULL,
+    .what = aes_what
 };
 
 /** @brief Opens an AES encryption device.

@@ -48,6 +48,7 @@ static size_t hex_decode_read(void *ptr, size_t size, size_t count, void *userda
         }
     }
 
+    io_set_error(io, io_error((IO) userdata));
     return io_error((IO) userdata)? SIZE_MAX: (cptr - (unsigned char *) ptr) / size;
 }
 
@@ -72,6 +73,7 @@ static size_t hex_encode_read(void *ptr, size_t size, size_t count, void *userda
         }
     }
 
+    io_set_error(io, io_error((IO) userdata));
     return (cptr - (unsigned char *) ptr) / size;
 }
 
@@ -96,6 +98,7 @@ static size_t hex_decode_write(const void *ptr, size_t size, size_t count, void 
         }
     }
 
+    io_set_error(io, io_error((IO) userdata));
     return (cptr - (unsigned char *) ptr) / (size);
 }
 
@@ -112,6 +115,7 @@ static size_t hex_encode_write(const void *ptr, size_t size, size_t count, void 
             break;
     }
 
+    io_set_error(io, io_error((IO) userdata));
     return (cptr - (unsigned char *) ptr) / size;
 }
 
@@ -202,6 +206,20 @@ static long long hex_decode_tell64(void *userdata, IO io) {
     return value > 0? value / 2 + (*io_tempdata(io) < 16): value;
 }
 
+static const char *hex_encode_what(void *userdata, IO io) {
+    UNUSED(userdata)
+    UNUSED(io)
+
+    return "hex_encode";
+}
+
+static const char *hex_decode_what(void *userdata, IO io) {
+    UNUSED(userdata)
+    UNUSED(io)
+
+    return "hex_decode";
+}
+
 static const struct InputOutputDeviceCallbacks hex_encode_callbacks = {
     .read = hex_encode_read,
     .write = hex_encode_write,
@@ -211,7 +229,8 @@ static const struct InputOutputDeviceCallbacks hex_encode_callbacks = {
     .tell = hex_encode_tell,
     .tell64 = hex_encode_tell64,
     .seek = hex_encode_seek,
-    .seek64 = hex_encode_seek64
+    .seek64 = hex_encode_seek64,
+    .what = hex_encode_what
 };
 
 static const struct InputOutputDeviceCallbacks hex_decode_callbacks = {
@@ -223,7 +242,8 @@ static const struct InputOutputDeviceCallbacks hex_decode_callbacks = {
     .tell = hex_decode_tell,
     .tell64 = hex_decode_tell64,
     .seek = hex_decode_seek,
-    .seek64 = hex_decode_seek64
+    .seek64 = hex_decode_seek64,
+    .what = hex_decode_what
 };
 
 IO io_open_hex_encode(IO io, const char *mode) {

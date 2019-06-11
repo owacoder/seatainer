@@ -185,7 +185,8 @@ const char *url_get_authority(Url url) {
 const char *url_get_username(Url url) {
     if (!url->username)
         return NULL;
-    else if (url->password)
+
+    if (url->password)
         url->password[-1] = 0;
     else
         url->host[-1] = 0;
@@ -196,10 +197,22 @@ const char *url_get_username(Url url) {
 const char *url_get_password(Url url) {
     if (!url->password)
         return NULL;
-    else
-        url->host[-1] = 0;
+
+    url->host[-1] = 0;
 
     return url->password;
+}
+
+const char *url_get_host_and_port(Url url) {
+    if (!url->host)
+        return NULL;
+
+    if (url->port)
+        url->port[-1] = ':';
+
+    url->path[0] = 0;
+
+    return url->host;
 }
 
 const char *url_get_host(Url url) {
@@ -214,6 +227,38 @@ const char *url_get_host(Url url) {
 const char *url_get_port(Url url) {
     url->path[0] = 0;
     return url->port;
+}
+
+static unsigned short url_port_from_scheme(Url url) {
+    struct {
+        const char *scheme;
+        unsigned short port;
+    } mapping[] = {
+        {.scheme = "http", .port = 80}
+    };
+
+    const char *scheme = url_get_scheme(url);
+    for (size_t i = 0; i < sizeof(mapping)/sizeof(*mapping); ++i) {
+        if (!strcmp(scheme, mapping[i].scheme)) {
+            return mapping[i].port;
+        }
+    }
+
+    return 0;
+}
+
+unsigned short url_get_port_number(Url url) {
+    unsigned short port = 0;
+    const char *portStr = url->port;
+
+    if (portStr)
+        for (; *portStr && isdigit(*portStr); ++portStr) {
+            port = (port * 10) + (*portStr - '0');
+        }
+    else
+        return url_port_from_scheme(url);
+
+    return port;
 }
 
 const char *url_get_path(Url url) {
@@ -298,12 +343,13 @@ const char *url_get_percent_encoded(Url url) {
 #endif
 #endif
 
+/* TODO: allow non-blocking connect to allow custom timeout for connecting */
 struct SocketInitializationParams {
     const char *host;
     unsigned short port;
     int socketMode;
     enum NetAddressType type;
-    const char **err;
+    int *err;
 };
 
 size_t net_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {
@@ -316,8 +362,14 @@ size_t net_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {
         int transfer = max > INT_MAX? INT_MAX: max;
 
         transfer = recv((SOCKET) userdata, cptr, transfer, 0);
-        if (transfer == SOCKET_ERROR)
+        if (transfer == SOCKET_ERROR) {
+#if WINDOWS_OS
+            io_set_error(io, WSAGetLastError()); /* TODO: map WSA errors to errno values? */
+#else
+            io_set_error(io, errno);
+#endif
             return SIZE_MAX;
+        }
         else if (transfer == 0)
             return (size*count - max) / size;
 
@@ -339,8 +391,14 @@ size_t net_write(const void *ptr, size_t size, size_t count, void *userdata, IO 
 
         /* TODO: no protection against sending UDP packets that are too large */
         transfer = send((SOCKET) userdata, cptr, transfer, 0);
-        if (transfer == SOCKET_ERROR)
+        if (transfer == SOCKET_ERROR) {
+#if WINDOWS_OS
+            io_set_error(io, WSAGetLastError()); /* TODO: map WSA errors to errno values? */
+#else
+            io_set_error(io, errno);
+#endif
             return (size*count - max) / size;
+        }
 
         cptr += transfer;
         max -= transfer;
@@ -353,12 +411,15 @@ void *net_open(void *userdata, IO io) {
     UNUSED(io)
     struct SocketInitializationParams *params = userdata;
 
+    if (params->err)
+        *params->err = 0;
+
 #if WINDOWS_OS
     WSADATA wsaData;
 
     if (WSAStartup(MAKEWORD(2, 0), &wsaData)) {
         if (params->err)
-            *params->err = "Windows Sockets failed to initialize";
+            *params->err = WSAGetLastError();
         return NULL;
     }
 #endif
@@ -375,6 +436,8 @@ void *net_open(void *userdata, IO io) {
     hints.ai_socktype = params->socketMode;
     hints.ai_protocol = params->socketMode == SOCK_STREAM? IPPROTO_TCP: IPPROTO_UDP;
 
+    *io_tempdata(io) = params->socketMode != SOCK_STREAM;
+
     /* Convert port number to NUL-terminated string */
     char portStr[sizeof(unsigned short) * CHAR_BIT];
     char *ptr = portStr + sizeof(portStr) - 1;
@@ -389,7 +452,11 @@ void *net_open(void *userdata, IO io) {
     /* Obtain address information */
     if (getaddrinfo(params->host, ptr, &hints, &result)) {
         if (params->err)
-            *params->err = "Failed to get address information for host";
+#if WINDOWS_OS
+            *params->err = WSAGetLastError();
+#else
+            *params->err = errno;
+#endif
         goto cleanup;
     }
 
@@ -401,14 +468,22 @@ void *net_open(void *userdata, IO io) {
         sock = socket(curAddr->ai_family, curAddr->ai_socktype, curAddr->ai_protocol);
         if (sock == INVALID_SOCKET) {
             if (params->err)
-                *params->err = "Could not create socket";
+#if WINDOWS_OS
+                *params->err = WSAGetLastError();
+#else
+                *params->err = errno;
+#endif
             continue;
         }
 
         /* Then attempt to connect */
         if (connect(sock, curAddr->ai_addr, curAddr->ai_addrlen)) {
             if (params->err)
-                *params->err = "Could not connect to host";
+#if WINDOWS_OS
+                *params->err = WSAGetLastError();
+#else
+                *params->err = errno;
+#endif
 
             if (sock != INVALID_SOCKET)
 #if WINDOWS_OS
@@ -453,6 +528,17 @@ int net_close(void *userdata, IO io) {
     return result;
 }
 
+/* First byte of tempdata is 0 if TCP, 1 if UDP */
+static const char *net_what(void *userdata, IO io) {
+    UNUSED(userdata)
+
+    switch (*io_tempdata(io)) {
+        default: return "unknown_socket";
+        case 0: return "tcp_socket";
+        case 1: return "udp_socket";
+    }
+}
+
 static const struct InputOutputDeviceCallbacks net_callbacks = {
     .read = net_read,
     .write = net_write,
@@ -462,10 +548,11 @@ static const struct InputOutputDeviceCallbacks net_callbacks = {
     .tell = NULL,
     .tell64 = NULL,
     .seek = NULL,
-    .seek64 = NULL
+    .seek64 = NULL,
+    .what = net_what
 };
 
-IO io_open_tcp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, const char **err) {
+IO io_open_tcp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err) {
     struct SocketInitializationParams params =
     {
         .host = host,
@@ -478,7 +565,7 @@ IO io_open_tcp_socket(const char *host, unsigned short port, enum NetAddressType
     return io_open_custom(&net_callbacks, &params, mode);
 }
 
-IO io_open_udp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, const char **err) {
+IO io_open_udp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err) {
     struct SocketInitializationParams params =
     {
         .host = host,
@@ -491,25 +578,45 @@ IO io_open_udp_socket(const char *host, unsigned short port, enum NetAddressType
     return io_open_custom(&net_callbacks, &params, mode);
 }
 
+#include "tee.h"
+
 /* TODO: doesn't currently allow the body to be a sequential device, it must support seeking. This should be fixed later with a HTTP/1.1 chunked request */
-int io_make_http_request(IO io, const char *method, const char *url, IO data) {
-    io_printf(io, "%s %s HTTP/1.0\r\n", method, url);
-    io_printf(io, "Host: %s\r\n", method, url);
-    long long size = io_size64(data);
+int io_make_http_request(IO io, const char *method, Url url, IO data) {
+    io_printf(io, "%s %s HTTP/1.0\r\n", method,
+              url_get_path_and_query_and_fragment(url)[0] == 0? url_get_path_and_query_and_fragment(url): "/");
+    io_printf(io, "Host: %s\r\n", url_get_host_and_port(url));
 
-    if (data && size > 0) {
-        io_printf(io, "Content-Length: %llu\r\n", size);
+    if (data) {
+        long long size = io_size64(data);
 
-        io_copy(data, io);
+        if (size > 0) {
+            io_printf(io, "Content-Length: %llu\r\n", size);
 
-        io_puts("\r\n", io);
+            io_copy(data, io);
 
-        return io_error(data) || io_error(io);
+            io_puts("\r\n", io);
+
+            return io_error(data) || io_error(io);
+        }
     }
 
     io_puts("\r\n", io);
+    io_seek(io, 0, SEEK_CUR); /* Allow reading directly after calling this function */
 
     return io_error(io);
+}
+
+IO io_http_get(Url url, int *err) {
+    IO http = io_open_tcp_socket(url_get_host(url), url_get_port_number(url), NetAddressAny, "rwb", err);
+    if (http == NULL)
+        return NULL;
+
+    if (io_make_http_request(http, "GET", url, NULL)) {
+        io_close(http);
+        return NULL;
+    }
+
+    return http;
 }
 
 #endif /* CC_INCLUDE_NETWORK */

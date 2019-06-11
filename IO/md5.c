@@ -145,7 +145,7 @@ static int md5_close(void *userdata, IO io) {
         u32cpy_le(&state[8], md5->state[2]);
         u32cpy_le(&state[12], md5->state[3]);
 
-        result = io_write(state, 4, 4, md5->io) != 4? -1: 0;
+        result = io_write(state, 4, 4, md5->io) != 4? io_error(md5->io): 0;
     }
 
     free(userdata);
@@ -169,8 +169,10 @@ static size_t md5_read(void *ptr, size_t size, size_t count, void *userdata, IO 
             md5->buffer_size = io_read(md5->buffer, 1, 64, md5->io);
             if (md5->buffer_size == 64)
                 calculate_md5(md5);
-            else if (io_error(md5->io))
+            else if (io_error(md5->io)) {
+                io_set_error(io, io_error(md5->io));
                 return SIZE_MAX;
+            }
 
             md5->message_len += 8 * md5->buffer_size;
         } while (md5->buffer_size == 64);
@@ -248,6 +250,13 @@ static int md5_seek(void *userdata, long offset, int origin, IO io) {
     }
 }
 
+static const char *md5_what(void *userdata, IO io) {
+    UNUSED(userdata)
+    UNUSED(io)
+
+    return "md5";
+}
+
 static const struct InputOutputDeviceCallbacks md5_callbacks = {
     .read = md5_read,
     .write = md5_write,
@@ -257,7 +266,8 @@ static const struct InputOutputDeviceCallbacks md5_callbacks = {
     .tell = NULL,
     .tell64 = NULL,
     .seek = md5_seek,
-    .seek64 = NULL
+    .seek64 = NULL,
+    .what = md5_what
 };
 
 IO io_open_md5(IO io, const char *mode) {

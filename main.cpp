@@ -464,7 +464,22 @@ int main()
         {"Some really long string - with some special ranges like [ and ]", "*[^ ] really*]*"}
     };
 
-    Url url = url_from_percent_encoded("htTP://[2001:db8::7]:9655/c=GB?objectClass?one");
+    Url url = url_from_percent_encoded("http://www.google.com:80/teapot");
+    int httperr;
+    httperr = io_copy_and_close(io_http_get(url, NULL), io_open_file(stdout));
+    if (httperr) {
+        char *err = io_error_description_alloc(httperr);
+        if (!err)
+            printf("Error: %d\n", httperr);
+        else
+            printf("Error: %s\n", err);
+        free(err);
+    }
+    url_destroy(url);
+
+    return 0;
+
+    url = url_from_percent_encoded("htTP://[2001:db8::7]:9655/c=GB?objectClass?one");
 
     if (url_get_scheme(url)) printf("scheme: %s\n", url_get_scheme(url));
     if (url_get_authority(url)) printf("authority: %s\n", url_get_authority(url));
@@ -482,7 +497,7 @@ int main()
 
     return 0;
 
-    const char *err;
+    int err;
     const char *host = "jw.org";
     IO net = io_open_tcp_socket(host, 80, NetAddressAny, "rwb", &err);
     IO stdio = io_open_file(stdout);
@@ -496,7 +511,7 @@ int main()
     io_puts("Waiting for response...\n", stdio);
 
     if (net == NULL)
-        io_puts(err, stdio);
+        io_printf(stdio, "Error: %d\n", err);
     else if (io_copy(net, stdio) != 0)
         io_puts("Error while copying\n", stdio);
 

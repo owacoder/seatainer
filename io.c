@@ -103,6 +103,13 @@ struct InputOutputDevice {
 
     unsigned long flags;
 
+    /** Stores the last platform-specific error code that occured while reading or writing */
+    int error;
+
+    /** Stores the read timeout assigned to this IO device. Read timeouts are only relevant for sockets, or native file devices on Linux */
+    long long read_timeout;
+    long long write_timeout;
+
     unsigned ungetAvail;
     unsigned char ungetBuf[4];
 };
@@ -170,6 +177,7 @@ static IO io_static_alloc(enum IO_Type type) {
     io->flags = IO_FLAG_IN_USE;
     io->callbacks = NULL;
     io->ungetAvail = 0;
+    io->read_timeout = io->write_timeout = 0;
 
     io_hint_next_open(io_device_open_permanent_hint, 0);
 
@@ -225,6 +233,7 @@ static IO io_alloc(enum IO_Type type) {
     io->flags = IO_FLAG_IN_USE | IO_FLAG_DYNAMIC;
     io->callbacks = NULL;
     io->ungetAvail = 0;
+    io->read_timeout = io->write_timeout = 0;
 
     io_hint_next_open(io_permanent_open_hint(), 0);
 
@@ -406,15 +415,49 @@ size_t io_tempdata_size(IO io) {
 
 int io_error(IO io) {
     switch (io->type) {
-        default: return io->flags & IO_FLAG_ERROR;
+        default: return io->flags & IO_FLAG_ERROR? io->error: 0;
         case IO_File:
-        case IO_OwnFile: return ferror(io->ptr);
+        case IO_OwnFile:
+#if WINDOWS_OS
+            return ferror(io->ptr)? ERROR_GEN_FAILURE: 0;
+#else
+            return ferror(io->ptr)? EIO: 0;
+#endif
+    }
+}
+
+char *io_error_description_alloc(int err) {
+#if WINDOWS_OS
+    LPWSTR str = NULL;
+
+    if (FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPWSTR) &str, 0, NULL)) {
+        LPSTR result = wide_to_utf8_alloc(str);
+        LocalFree(str);
+        return result;
+    }
+
+    return NULL;
+#else
+    return strdup(strerror(err));
+#endif
+}
+
+int io_set_error(IO io, int err) {
+    switch (io->type) {
+        default:
+            if (err)
+                io->flags |= IO_FLAG_ERROR;
+
+            io->error = err;
+            return 0;
+        case IO_File:
+        case IO_OwnFile: return EOF;
     }
 }
 
 int io_eof(IO io) {
     switch (io->type) {
-        default: return io->flags & IO_FLAG_ERROR;
+        default: return io->flags & IO_FLAG_EOF;
         case IO_File:
         case IO_OwnFile: return feof(io->ptr);
     }
@@ -432,12 +475,18 @@ int io_flush(IO io) {
                     return 0;
 
 #if LINUX_OS
-                if (write((size_t) io->ptr, io->data.sizes.ptr2, io->data.sizes.pos) < (ssize_t) io->data.sizes.pos)
+                if (write((size_t) io->ptr, io->data.sizes.ptr2, io->data.sizes.pos) < (ssize_t) io->data.sizes.pos) {
+                    io->flags |= IO_FLAG_ERROR;
+                    io->error = errno;
                     return EOF;
+                }
 #elif WINDOWS_OS
                 DWORD written;
-                if (!WriteFile(io->ptr, io->data.sizes.ptr2, io->data.sizes.pos, &written, NULL) || written != io->data.sizes.pos)
+                if (!WriteFile(io->ptr, io->data.sizes.ptr2, io->data.sizes.pos, &written, NULL) || written != io->data.sizes.pos) {
+                    io->flags |= IO_FLAG_ERROR;
+                    io->error = GetLastError(); /* TODO: map GetLastError() results to errno constants if possible */
                     return EOF;
+                }
 #endif
             } else if ((io->flags & IO_FLAG_HAS_JUST_READ) && io->data.sizes.pos) {
                 if (io_seek64(io, -((long) io->data.sizes.pos), SEEK_CUR) < 0)
@@ -449,8 +498,28 @@ int io_flush(IO io) {
         case IO_Custom:
             if (io->callbacks->flush == NULL)
                 return 0;
-            return io->callbacks->flush(io->ptr, io);
+
+            if (io->callbacks->flush(io->ptr, io) == EOF) {
+                io->flags |= IO_FLAG_ERROR;
+                return EOF;
+            }
+
+            return 0;
     }
+}
+
+int io_copy_and_close(IO in, IO out) {
+    if (!in || !out)
+#if WINDOWS_OS
+        return ERROR_OUTOFMEMORY;
+#else
+        return ENOMEM;
+#endif
+
+    int result = io_copy(in, out);
+    io_close(in);
+    io_close(out);
+    return result;
 }
 
 int io_copy(IO in, IO out) {
@@ -461,11 +530,11 @@ int io_copy(IO in, IO out) {
     while (read == size) {
         if ((read = io_read(data, 1, size, in)) != size) {
             if (io_error(in))
-                return -1;
+                return io_error(in);
         }
 
         if (io_write(data, 1, read, out) != read)
-            return 1;
+            return io_error(out);
     }
 
     return 0;
@@ -533,6 +602,11 @@ int io_getc(IO io) {
     if (!(io->flags & IO_FLAG_READABLE) || (io->flags & IO_FLAG_HAS_JUST_WRITTEN))
     {
         io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+        io->error = ERROR_READ_FAULT;
+#else
+        io->error = EIO;
+#endif
         return EOF;
     }
 
@@ -582,6 +656,11 @@ char *io_gets(char *str, int num, IO io) {
     if (!(io->flags & IO_FLAG_READABLE) || (io->flags & IO_FLAG_HAS_JUST_WRITTEN))
     {
         io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+        io->error = ERROR_READ_FAULT;
+#else
+        io->error = EIO;
+#endif
         return NULL;
     }
 
@@ -1552,6 +1631,11 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
     if (!(io->flags & IO_FLAG_WRITABLE))
     {
         io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+        io->error = ERROR_WRITE_FAULT;
+#else
+        io->error = EIO;
+#endif
         return -1;
     }
 
@@ -1863,7 +1947,14 @@ int io_printf(IO io, const char *fmt, ...) {
 
 int io_putc_internal(int ch, IO io) {
     switch (io->type) {
-        default: io->flags |= IO_FLAG_ERROR; return EOF;
+        default:
+            io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+            io->error = ERROR_WRITE_FAULT;
+#else
+            io->error = EIO;
+#endif
+            return EOF;
         case IO_File:
         case IO_OwnFile: return fputc(ch, io->ptr);
         case IO_NativeFile:
@@ -1881,6 +1972,11 @@ int io_putc_internal(int ch, IO io) {
         case IO_SizedBuffer:
             if (io->data.sizes.pos == io->data.sizes.size) {
                 io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+                io->error = ERROR_DISK_FULL;
+#else
+                io->error = ENOBUFS;
+#endif
                 return EOF;
             }
             ((char *) io->ptr)[io->data.sizes.pos++] = (char) ch;
@@ -1904,6 +2000,11 @@ int io_putc(int ch, IO io) {
     if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & IO_FLAG_HAS_JUST_READ))
     {
         io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+        io->error = ERROR_WRITE_FAULT;
+#else
+        io->error = EIO;
+#endif
         return EOF;
     }
 
@@ -1925,13 +2026,25 @@ int io_puts(const char *str, IO io) {
     if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & IO_FLAG_HAS_JUST_READ))
     {
         io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+        io->error = ERROR_WRITE_FAULT;
+#else
+        io->error = EIO;
+#endif
         return EOF;
     }
 
     io->flags |= IO_FLAG_HAS_JUST_WRITTEN;
 
     switch (io->type) {
-        default: io->flags |= IO_FLAG_ERROR; return EOF;
+        default:
+            io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+            io->error = ERROR_WRITE_FAULT;
+#else
+            io->error = EIO;
+#endif
+            return EOF;
         case IO_File:
         case IO_OwnFile: return fputs(str, io->ptr);
         case IO_NativeFile:
@@ -1955,6 +2068,11 @@ int io_puts(const char *str, IO io) {
             if (avail < len) {
                 len = avail;
                 io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+                io->error = ERROR_DISK_FULL;
+#else
+                io->error = ENOBUFS;
+#endif
                 result = EOF;
             }
 
@@ -1976,6 +2094,7 @@ static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO
 
         if ((amountRead = read((size_t) io->ptr, ptr, amount)) <= 0) {
             io->flags |= amountRead < 0? IO_FLAG_ERROR: IO_FLAG_EOF;
+            io->error = errno;
             return totalRead / size;
         }
 
@@ -1990,6 +2109,7 @@ static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO
 
         if (!ReadFile(io->ptr, ptr, amount, &amountRead, NULL)) {
             io->flags |= IO_FLAG_ERROR;
+            io->error = GetLastError(); /* TODO: map to errno errors instead of Windows errors if possible */
             return totalRead / size;
         } else if (amountRead < amount) {
             io->flags |= IO_FLAG_EOF;
@@ -2012,6 +2132,11 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
     /* Not readable or not switched over to reading yet */
     if (!(io->flags & IO_FLAG_READABLE) || (io->flags & IO_FLAG_HAS_JUST_WRITTEN)) {
         io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+        io->error = ERROR_READ_FAULT;
+#else
+        io->error = EIO;
+#endif
         return 0;
     }
 
@@ -2139,6 +2264,12 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
                 if (read == SIZE_MAX) {
                     read = 0;
                     io->flags |= IO_FLAG_ERROR;
+                    if (io->callbacks->read == NULL)
+#if WINDOWS_OS
+                        io->error = ERROR_READ_FAULT;
+#else
+                        io->error = ENOTSUP;
+#endif
                 } else {
                     io->flags |= IO_FLAG_EOF;
                 }
@@ -2999,6 +3130,7 @@ size_t io_native_unbuffered_write(const void *ptr, size_t size, size_t count, IO
 
         if ((amountWritten = write((size_t) io->ptr, ptr, amount)) < 0) {
             io->flags |= IO_FLAG_ERROR;
+            io->error = errno;
             return totalWritten / size;
         }
 
@@ -3013,6 +3145,7 @@ size_t io_native_unbuffered_write(const void *ptr, size_t size, size_t count, IO
 
         if (!WriteFile(io->ptr, ptr, amount, &amountWritten, NULL) || amountWritten != amount) {
             io->flags |= IO_FLAG_ERROR;
+            io->error = GetLastError(); /* TODO: map to errno errors instead of Windows errors if possible */
             return (totalWritten + amountWritten) / size;
         }
 
@@ -3033,13 +3166,25 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
     if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & IO_FLAG_HAS_JUST_READ))
     {
         io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+        io->error = ERROR_WRITE_FAULT;
+#else
+        io->error = EIO;
+#endif
         return 0;
     }
 
     io->flags |= IO_FLAG_HAS_JUST_WRITTEN;
 
     switch (io->type) {
-        default: io->flags |= IO_FLAG_ERROR; return 0;
+        default:
+            io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+            io->error = ERROR_WRITE_FAULT;
+#else
+            io->error = EIO;
+#endif
+            return 0;
         case IO_File:
         case IO_OwnFile: return fwrite(ptr, size, count, io->ptr);
         case IO_NativeFile:
@@ -3051,6 +3196,11 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
             if (io->flags & IO_FLAG_APPEND) {
                 if (io_seek(io, 0, SEEK_END)) {
                     io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+                    io->error = ERROR_SEEK_ON_DEVICE;
+#else
+                    io->error = ESPIPE;
+#endif
                     return 0;
                 }
             }
@@ -3088,6 +3238,11 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
         {
             if (io->callbacks->write == NULL) {
                 io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+                io->error = ERROR_WRITE_FAULT;
+#else
+                io->error = ENOTSUP;
+#endif
                 return 0;
             }
 
@@ -3105,6 +3260,11 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
             if (avail < max)
             {
                 io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+                io->error = ERROR_DISK_FULL;
+#else
+                io->error = ENOBUFS;
+#endif
 
                 max = avail - avail % size;
             }
@@ -3136,6 +3296,11 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
             /* grow to desired size */
             if (io_grow(io, required_size)) {
                 io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+                io->error = ERROR_OUTOFMEMORY;
+#else
+                io->error = ENOMEM;
+#endif
 
                 max = avail - avail % size;
                 if (grow_with_gap)
@@ -3247,10 +3412,99 @@ IO io_tmpfile(void) {
     return io;
 }
 
+static int io_set_timeout(IO io, int type, long long usecs) {
+    const char *desc = io_description(io);
+
+#if WINDOWS_OS
+    if (!strcmp(desc, "tcp_socket") ||
+        !strcmp(desc, "udp_socket")) {
+        DWORD timeout_ms = usecs / 1000;
+
+        if (usecs && !timeout_ms)
+            timeout_ms = 1;
+        usecs = timeout_ms * 1000LL;
+
+        if (setsockopt((SOCKET) io->ptr, SOL_SOCKET, type, (const char *) &timeout_ms, sizeof(timeout_ms)) == SOCKET_ERROR)
+            return WSAGetLastError();
+
+        if (type == SO_RCVTIMEO)
+            io->read_timeout = usecs;
+        else if (type == SO_SNDTIMEO)
+            io->write_timeout = usecs;
+
+        return 0;
+    }
+
+    return ERROR_INVALID_HANDLE;
+#else
+    if (io->type == IO_NativeFile ||
+        io->type == IO_OwnNativeFile ||
+        !strcmp(desc, "tcp_socket") ||
+        !strcmp(desc, "udp_socket")) {
+        struct timeval timeout_us;
+        timeout_us.tv_sec = 0;
+        timeout_us.tv_usec = usecs;
+
+        if (setsockopt((SOCKET) io->ptr, SOL_SOCKET, type, (const char *) &timeout_us, sizeof(timeout_us)));
+            return errno;
+
+        if (type == SO_RCVTIMEO)
+            io->read_timeout = usecs;
+        else if (type == SO_SNDTIMEO)
+            io->write_timeout = usecs;
+
+        return 0;
+    }
+
+    return EINVAL;
+#endif
+}
+
+int io_set_read_timeout(IO io, long long usecs) {
+    return io_set_timeout(io, SO_RCVTIMEO, usecs);
+}
+
+int io_set_write_timeout(IO io, long long usecs) {
+    return io_set_timeout(io, SO_SNDTIMEO, usecs);
+}
+
+long long io_read_timeout(IO io) {
+    return io->read_timeout;
+}
+
+long long io_write_timeout(IO io) {
+    return io->write_timeout;
+}
+
+const char *io_description(IO io) {
+    switch (io->type) {
+        default: return "unknown";
+        case IO_Empty: return "empty";
+        case IO_File: return "file";
+        case IO_OwnFile: return "owned_file";
+        case IO_NativeFile: return "native_file";
+        case IO_OwnNativeFile: return "owned_native_file";
+        case IO_CString: return "cstring";
+        case IO_SizedBuffer: return "sized_buffer";
+        case IO_MinimalBuffer: return "minimal_buffer";
+        case IO_DynamicBuffer: return "dynamic_buffer";
+        case IO_Custom:
+            if (io->callbacks->what == NULL)
+                return "custom";
+
+            return io->callbacks->what(io_userdata(io), io);
+    }
+}
+
 int io_ungetc(int chr, IO io) {
     if (!(io->flags & IO_FLAG_READABLE))
     {
         io->flags |= IO_FLAG_ERROR;
+#if WINDOWS_OS
+        io->error = ERROR_READ_FAULT;
+#else
+        io->error = EIO;
+#endif
         return EOF;
     }
 

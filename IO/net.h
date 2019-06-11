@@ -38,8 +38,10 @@ const char *url_get_scheme(Url url);
 const char *url_get_authority(Url url);
 const char *url_get_username(Url url);
 const char *url_get_password(Url url);
+const char *url_get_host_and_port(Url url);
 const char *url_get_host(Url url);
 const char *url_get_port(Url url);
+unsigned short url_get_port_number(Url url);
 const char *url_get_path(Url url);
 const char *url_get_query(Url url);
 const char *url_get_fragment(Url url);
@@ -58,8 +60,10 @@ enum NetAddressType {
     NetAddressIPv6
 };
 
-IO io_open_tcp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, const char **err);
-IO io_open_udp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, const char **err);
+IO io_open_tcp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err);
+IO io_open_udp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err);
+
+IO io_http_get(Url url, int *err);
 #endif
 
 #ifdef __cplusplus

@@ -12,6 +12,10 @@
 
 #include "platforms.h"
 
+#if !WINDOWS_OS
+#include <errno.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -117,7 +121,8 @@ typedef int (*IO_SimpleCallback)(void *userdata, IO io);
  *         .tell = NULL,
  *         .tell64 = NULL,
  *         .seek = NULL,
- *         .seek64 = NULL
+ *         .seek64 = NULL,
+ *         .what = NULL,
  *     } custom_callbacks;
  *
  *     ...
@@ -130,14 +135,14 @@ struct InputOutputDeviceCallbacks {
     /** @brief Reads some data from the IO device.
      *
      * Read callbacks function identically to the `fread()` standard C library call, except for the return value.
-     * If a read callback returns `SIZE_MAX`, then a read error occured. Otherwise, if the return value is less than the requested number of objects, EOF is assumed to have been reached.
+     * If a read callback returns `SIZE_MAX`, then a read error occured. The callback must set the `io` parameter's error code with `io_set_error()`. Otherwise, if the return value is less than the requested number of objects, EOF is assumed to have been reached.
      */
     IO_ReadCallback read;
 
     /** @brief Writes some data to the IO device.
      *
      * Read callbacks function identically to the `fwrite()` standard C library call.
-     * If a write callback return value is less than the requested number of objects, a write error occured.
+     * If a write callback return value is less than the requested number of objects, a write error occured. The callback must set the `io` parameter's error code with `io_set_error()`.
      */
     IO_WriteCallback write;
 
@@ -157,13 +162,13 @@ struct InputOutputDeviceCallbacks {
      *
      * @param userdata The userdata stored in @p io.
      * @param io The IO device being closed. Reads from or writes to the device are allowed.
-     * @return Zero on success, non-zero on error.
+     * @return Zero on success, non-zero on error. The callback should return an error code, not just a constant non-zero value.
      */
     IO_SimpleCallback close;
 
     /** @brief Flushes the input buffer or output buffer of the device.
      *
-     * This callback must not call any seek function.
+     * This callback must not call any seek function. The callback must set the `io` parameter's error code with `io_set_error()`.
      *
      * @param userdata The userdata stored in @p io.
      * @param io The IO device being closed. Reads from or writes to the device are allowed.
@@ -176,6 +181,27 @@ struct InputOutputDeviceCallbacks {
 
     int (*seek)(void *userdata, long int offset, int origin, IO io);
     int (*seek64)(void *userdata, long long int offset, int origin, IO io);
+
+    /** @brief Returns a constant (non-allocated) string with a machine-friendly description of the device type
+     *
+     * For example, the native types return the following:
+     *
+     *    - IO_Empty: "empty"
+     *    - IO_File: "file"
+     *    - IO_OwnFile: "owned_file"
+     *    - IO_NativeFile: "native_file"
+     *    - IO_OwnNativeFile: "owned_native_file"
+     *    - IO_CString: "cstring"
+     *    - IO_SizedBuffer: "sized_buffer"
+     *    - IO_MinimalBuffer: "minimal_buffer"
+     *    - IO_DynamicBuffer: "dynamic_buffer"
+     *    - IO_Custom: "custom"
+     *
+     * @param userdata The userdata stored in @p io.
+     * @param io The IO device being closed. Reads from or writes to the device are allowed.
+     * @return A machine-friendly string identifying the type of the IO device.
+     */
+    const char *(*what)(void *userdata, IO io);
 };
 
 /* For Large File Support on Linux, the compile flag -D_FILE_OFFSET_BITS=64 must be used for
@@ -217,7 +243,10 @@ size_t io_underlying_buffer_capacity(IO io);
  */
 unsigned char *io_tempdata(IO io);
 size_t io_tempdata_size(IO io);
+/** @brief Returns what the last error that occured on the device was */
 int io_error(IO io);
+char *io_error_description_alloc(int err);
+int io_set_error(IO io, int err);
 int io_eof(IO io);
 int io_flush(IO io);
 int io_getc(IO io);
@@ -239,14 +268,19 @@ IO io_open_minimal_buffer(const char *mode);
 IO io_open_dynamic_buffer(const char *mode);
 IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdata, const char *mode);
 /* Reads all data from `in` and pushes it to `out`
- * Returns -1 on input error, 0 on success, and 1 on output error
+ * Returns 0 on success, any error that occured on failure. Detection of which stream failed is left up to the caller.
  */
 int io_copy(IO in, IO out);
+int io_copy_and_close(IO in, IO out);
 int io_vprintf(IO io, const char *fmt, va_list args);
 int io_printf(IO io, const char *fmt, ...);
 int io_putc(int ch, IO io);
 int io_puts(const char *str, IO io);
 size_t io_read(void *ptr, size_t size, size_t count, IO io);
+int io_set_read_timeout(IO io, long long usecs);
+int io_set_write_timeout(IO io, long long usecs);
+long long io_read_timeout(IO io);
+long long io_write_timeout(IO io);
 IO io_reopen(const char *filename, const char *mode, IO io);
 int io_vscanf(IO io, const char *fmt, va_list args);
 int io_scanf(IO io, const char *fmt, ...);
@@ -261,6 +295,7 @@ size_t io_write(const void *ptr, size_t size, size_t count, IO io);
 void io_rewind(IO io);
 void io_setbuf(IO io, char *buf);
 int io_setvbuf(IO io, char *buf, int mode, size_t size);
+const char *io_description(IO io);
 IO io_tmpfile(void);
 int io_ungetc(int chr, IO io);
 
