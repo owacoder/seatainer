@@ -60,6 +60,9 @@ enum NetAddressType {
     NetAddressIPv6
 };
 
+void io_net_init();
+void io_net_destroy();
+
 IO io_open_tcp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err);
 IO io_open_udp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err);
 

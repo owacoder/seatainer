@@ -230,7 +230,7 @@ const char *url_get_port(Url url) {
 }
 
 static unsigned short url_port_from_scheme(Url url) {
-    struct {
+    const struct {
         const char *scheme;
         unsigned short port;
     } mapping[] = {
@@ -327,17 +327,7 @@ const char *url_get_percent_encoded(Url url) {
  **********************************************************/
 
 #ifdef CC_INCLUDE_NETWORK
-#if LINUX_OS
-#define INVALID_SOCKET (-1)
-#define SOCKET_ERROR (-1)
-#define SOCKET int
-
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <unistd.h>
-#elif WINDOWS_OS
+#if WINDOWS_OS
 #if MSVC_COMPILER
 #pragma comment(lib, "Ws2_32.lib")
 #endif
@@ -352,7 +342,19 @@ struct SocketInitializationParams {
     int *err;
 };
 
-size_t net_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {
+#include <signal.h>
+
+void io_net_init() {
+#if !WINDOWS_OS
+    signal(SIGPIPE, SIG_IGN);
+#endif
+}
+
+void io_net_destroy() {
+
+}
+
+static size_t net_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {
     UNUSED(io)
 
     char *cptr = ptr;
@@ -380,7 +382,7 @@ size_t net_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {
     return count;
 }
 
-size_t net_write(const void *ptr, size_t size, size_t count, void *userdata, IO io) {
+static size_t net_write(const void *ptr, size_t size, size_t count, void *userdata, IO io) {
     UNUSED(io)
 
     const char *cptr = ptr;
@@ -407,7 +409,7 @@ size_t net_write(const void *ptr, size_t size, size_t count, void *userdata, IO 
     return count;
 }
 
-void *net_open(void *userdata, IO io) {
+static void *net_open(void *userdata, IO io) {
     UNUSED(io)
     struct SocketInitializationParams *params = userdata;
 
@@ -514,7 +516,7 @@ cleanup:
     return NULL;
 }
 
-int net_close(void *userdata, IO io) {
+static int net_close(void *userdata, IO io) {
     UNUSED(io)
 
 #if WINDOWS_OS

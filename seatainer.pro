@@ -4,14 +4,20 @@ CONFIG -= app_bundle
 CONFIG -= qt
 
 QMAKE_CFLAGS += -msse4.1 -msha -maes
+QMAKE_CXXFLAGS += -std=c++11
 
 DEFINES += CC_TYPE_MISMATCH_ABORT \
            CC_NO_MEM_ABORT \
            CC_BAD_PARAM_ABORT \
            CC_NO_SUCH_METHOD_ABORT \
-           CC_IO_STATIC_INSTANCES=20
+           CC_IO_STATIC_INSTANCES=20 \
+           CC_INCLUDE_NETWORK
 
-SOURCES += main.c \
+win32 {
+    LIBS += -lWs2_32
+}
+
+SOURCES += \
     ccdbllst.c \
     cclnklst.c \
     ccvector.c \
@@ -24,7 +30,11 @@ SOURCES += main.c \
     IO/hex.c \
     IO/md5.c \
     IO/sha1.c \
-    IO/aes.c
+    IO/aes.c \
+    IO/net.c \
+    IO/tee.c \
+    dir.c \
+    main.cpp
 
 HEADERS += \
     ccdbllst.h \
@@ -40,7 +50,10 @@ HEADERS += \
     IO/hex.h \
     IO/md5.h \
     IO/sha1.h \
-    IO/aes.h
+    IO/aes.h \
+    IO/net.h \
+    IO/tee.h \
+    dir.h
 
 DISTFILES += \
     README.md

@@ -33,6 +33,18 @@
 
 #if defined(__linux) || defined(__linux__)
 #define LINUX_OS 1
+
+#define INVALID_SOCKET (-1)
+#define SOCKET_ERROR (-1)
+#define SOCKET int
+
+#ifdef CC_INCLUDE_NETWORK
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <unistd.h>
+#endif /* CC_INCLUDE_NETWORK */
 #else
 #define LINUX_OS 0
 #endif
@@ -42,7 +54,7 @@
 #ifdef CC_INCLUDE_NETWORK
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#endif
+#endif /* CC_INCLUDE_NETWORK */
 #include <windows.h>
 #else
 #define WINDOWS_OS 0
