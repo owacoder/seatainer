@@ -64,6 +64,14 @@ char *strlower(char *str);
  */
 char *strupper(char *str);
 
+/** @brief Allocates a string that concatenates all the strings in the array together.
+ *
+ * @param strings An array of strings to concatenate.
+ * @param strings_count The number of entries in @p strings.
+ * @return Returns a newly allocated string containing the entries in @p strings concatenated.
+ */
+char *strcompose(char *strings[], size_t strings_count);
+
 /* Performs a Pearson hash on the specified data, with a pseudo-random shuffle of hash bytes */
 unsigned pearson_hash(const char *data, size_t size);
 

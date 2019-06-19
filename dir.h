@@ -132,6 +132,8 @@ void dir_close(Directory dir);
 DirectoryEntry dirent_open(const char *path);
 /* Same as dirent_open(), but uses ANSI functions on Windows if mode contains "@ncp", for [n]ative [c]ode [p]age */
 DirectoryEntry dirent_open_with_mode(const char *path, const char *mode);
+/* Copies a directory entry so it can be saved easily */
+DirectoryEntry dirent_copy(DirectoryEntry entry);
 /* Returns zero if no error occured while opening the directory, platform-specific non-zero value otherwise (errno for Linux, GetLastError for Windows) */
 int dirent_error(DirectoryEntry entry);
 /* Destroys a directory entry */
