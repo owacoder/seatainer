@@ -32,20 +32,55 @@ struct UrlStruct {
     char *fragment;
 
     /** Contains the entire URL, percent-encoded. However, this buffer is pointed to by all the other URL sections (with the exception of `url`), and so will have NUL characters embedded in it. */
-    char *url_buffer;
-
-    /** Contains the entire URL, percent-encoded. */
-    char *url;
+    char url_buffer[];
 };
 
 void url_destroy(Url url) {
-    free(url->url_buffer);
-    free(url->url);
     free(url);
 }
 
 char *url_percent_encoded_from_utf8(const char *url) {
 
+}
+
+static int url_verify(const char *portion, const char *acceptableChars) {
+    for (; *portion; ++portion) {
+        if (*portion == '%' && strchr(acceptableChars, '%')) {
+            if (portion[1] == '%')
+                ++portion;
+            else if (isxdigit(portion[1]) && isxdigit(portion[2]))
+                portion += 2;
+            else
+                return 0;
+        }
+        else if (!isalnum(*portion) &&
+                !strchr(acceptableChars, *portion))
+            return 0;
+    }
+
+    return 1;
+}
+
+static int url_verify_digits(const char *portion) {
+    for (; *portion; ++portion) {
+        if (!isdigit(*portion))
+            return 0;
+    }
+
+    return 1;
+}
+
+int url_valid(Url url) {
+    return url &&
+            isalpha((unsigned char) *url_get_scheme(url)) && url_verify(url_get_scheme(url), "+.-") &&
+            (!url_get_username(url) || url_verify(url_get_username(url), "%-._~!$&'()*+,;=")) &&
+            (!url_get_password(url) || url_verify(url_get_password(url), "%-._~!$&'()*+,;=:")) &&
+            /* TODO: doesn't currently handle IPv6 addresses */
+            (!url_get_host(url) || url_verify(url_get_host(url), "%-._~!$&'()*+,;=")) &&
+            (!url_get_port(url) || url_verify_digits(url_get_port(url))) &&
+            (!url_get_path(url) || ((url_get_path(url)[0] == '/'? url_get_path(url)[1] != '/': 1) && url_verify(url_get_path(url), "%-._~!$&'()*+,;=:@"))) &&
+            (!url_get_query(url) || url_verify(url_get_query(url), "%-._~!$&'()*+,;=:@/?")) &&
+            (!url_get_fragment(url) || url_verify(url_get_fragment(url), "%-._~!$&'()*+,;=:@/?"));
 }
 
 Url url_from_utf8(const char *url) {
@@ -60,13 +95,11 @@ Url url_from_utf8(const char *url) {
 }
 
 Url url_from_percent_encoded(const char *url) {
-    Url result = calloc(1, sizeof(*result));
+    Url result = calloc(1, sizeof(*result) + strlen(url) + 1);
     if (result == NULL)
         return NULL;
 
-    if ((result->url_buffer = strdup(url)) == NULL ||
-        (result->url = strdup(url)) == NULL)
-        goto cleanup;
+    strcpy(result->url_buffer, url);
 
     char *pos, *string = result->url_buffer;
 

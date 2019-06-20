@@ -766,6 +766,14 @@ cleanup:
     return NULL;
 }
 
+DirectoryEntry dirent_copy(DirectoryEntry entry) {
+#if WINDOWS_OS
+    return dirent_open_with_mode(dirent_fullname(entry), entry->is_wide? "": "@ncp");
+#else
+    return dirent_open(dirent_fullname(entry));
+#endif
+}
+
 void dirent_close(DirectoryEntry entry) {
     if (entry->ownedDir) {
         dir_close(entry->ownedDir);

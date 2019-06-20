@@ -33,12 +33,11 @@
 
 #if defined(__linux) || defined(__linux__)
 #define LINUX_OS 1
-
+#ifdef CC_INCLUDE_NETWORK
 #define INVALID_SOCKET (-1)
 #define SOCKET_ERROR (-1)
 #define SOCKET int
 
-#ifdef CC_INCLUDE_NETWORK
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
