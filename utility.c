@@ -9,6 +9,8 @@
 
 #include <limits.h>
 #include <stdint.h>
+#include <ctype.h>
+#include <stdlib.h>
 
 #if WINDOWS_OS
 #include <windows.h>
@@ -290,6 +292,27 @@ char *strupper(char *str) {
         *ptr = toupper(*ptr & UCHAR_MAX);
 
     return str;
+}
+
+char *strgather(char *strings[], size_t stringsCount) {
+    size_t totalLen = 0;
+    
+    for (size_t i = 0; i < stringsCount; ++i) {
+        totalLen += strlen(strings[i]);
+    }
+    
+    char *result = malloc(totalLen + 1), *ptr = result;
+    if (result == NULL)
+        return NULL;
+        
+    for (size_t i = 0; i < stringsCount; ++i) {
+        size_t len = strlen(strings[i]);
+        memcpy(ptr, strings[i], len);
+        ptr += len;
+    }
+    
+    *ptr = 0;
+    return result;
 }
 
 /* Adapted from https://en.wikipedia.org/wiki/Modular_exponentiation#Right-to-left_binary_method */

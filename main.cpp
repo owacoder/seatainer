@@ -344,7 +344,6 @@ void test_small_dll()
 #include "IO/net.h"
 
 void test_io() {
-    test_aes();
     test_hex();
 
     IO tmp = io_open_dynamic_buffer("wt");

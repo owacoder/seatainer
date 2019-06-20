@@ -21,17 +21,9 @@
 
 #if LINUX_OS
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <fcntl.h>
-
-/* TODO: Odd issue on Raspbian where SSIZE_MAX is not defined? Investigate... */
-#ifndef SSIZE_MAX
-#define SSIZE_MAX ((ssize_t) (((uintmax_t) 1 << (sizeof(ssize_t)*CHAR_BIT-1))-1))
-#endif
-
-int fseeko(FILE *stream, off_t offset, int whence);
-off_t ftello(FILE *stream);
-
 #elif WINDOWS_OS
 #include <windows.h>
 #endif
@@ -200,6 +192,11 @@ static enum IO_OpenHint io_open_hint_for_next_open() {
     return io_device_open_hint;
 }
 #else
+static IO io_static_alloc(enum IO_Type type) {
+    UNUSED(type)
+    return NULL;
+}
+
 void io_hint_next_open(enum IO_OpenHint hint, int permanentHint) {
     UNUSED(hint)
     UNUSED(permanentHint)
@@ -217,13 +214,11 @@ static enum IO_OpenHint io_open_hint_for_next_open() {
 static IO io_alloc(enum IO_Type type) {
     IO io;
 
-#ifdef CC_IO_HAS_STATIC_INSTANCES
     if (io_open_hint_for_next_open() == IO_HintStatic) {
         io = io_static_alloc(type);
         if (io != NULL)
             return io;
     }
-#endif
 
     io = malloc(sizeof(struct InputOutputDevice));
     if (io == NULL)
@@ -3445,7 +3440,7 @@ static int io_set_timeout(IO io, int type, long long usecs) {
         timeout_us.tv_sec = 0;
         timeout_us.tv_usec = usecs;
 
-        if (setsockopt((SOCKET) io->ptr, SOL_SOCKET, type, (const char *) &timeout_us, sizeof(timeout_us)));
+        if (setsockopt((SOCKET) io->ptr, SOL_SOCKET, type, (const char *) &timeout_us, sizeof(timeout_us)))
             return errno;
 
         if (type == SO_RCVTIMEO)
