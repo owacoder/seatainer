@@ -3,6 +3,7 @@ path := $(PATH)
 
 CC = gcc
 CFLAGS = -Wall -std=c99 # -maes -msse4.1 -msha
+CXXFLAGS = -Wall -std=c++11
 DEFINES = -D_POSIX_C_SOURCE=200809L -DCC_INCLUDE_NETWORK
 
 SRCFILES = ccdbllst.c \
@@ -53,6 +54,9 @@ $(appname): $(OBJS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(DEFINES) -o $(subst .c,.o,$<) -c $<
+       
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) $(DEFINES) -o $(subst .cpp,.o,$<) -c $<
 
 .PHONY: clean
 clean:
