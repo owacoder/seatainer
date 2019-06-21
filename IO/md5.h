@@ -35,7 +35,7 @@ class Md5IO : public IODevice {
 
 public:
     Md5IO() : d(NULL) {}
-    Md5IO(IODevice &d, const char *mode = "wb") : d(NULL) {open(d, mode);}
+    Md5IO(IODevice &d, const char *mode = "wb") : d(NULL) {tryOpen(open(d, mode));}
 
     int open(IODevice &dev, const char *mode = "wb") {
         if (isOpen())

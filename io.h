@@ -371,6 +371,10 @@ protected:
 
     IODevice() : references(0), m_io(NULL) {}
 
+    void tryOpen(int err) {
+        if (err)
+            throw std::runtime_error("IODevice error when opening: " + errorDescription(err));
+    }
     virtual void closing() = 0;
 
 public:
@@ -681,6 +685,24 @@ public:
     /* Reads from this device and pushes all the data to `out`, returning true on success, false on either read or write failure
      * The respective error flag on the failing device will be set
      */
+    bool slowCopyTo(IODevice &&out) {return slowCopyTo(out);}
+    bool slowCopyTo(IODevice &out) {
+        if (m_io && out.m_io) {
+            while (1) {
+                int ch = io_getc(m_io);
+                if (ch == EOF)
+                    break;
+
+                if (io_putc(ch, out.m_io) == EOF)
+                    return false;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
     bool copyTo(IODevice &&out) {return copyTo(out);}
     bool copyTo(IODevice &out) {
         return m_io && out.m_io? io_copy(m_io, out.m_io) == 0: false;
@@ -688,6 +710,24 @@ public:
     /* Reads from `in` and pushes all the data to this device, returning true on success, false on either read or write failure
      * The respective error flag on the failing device will be set
      */
+    bool slowCopyFrom(IODevice &&in) {return slowCopyTo(in);}
+    bool slowCopyFrom(IODevice &in) {
+        if (m_io && in.m_io) {
+            while (1) {
+                int ch = io_getc(in.m_io);
+                if (ch == EOF)
+                    break;
+
+                if (io_putc(ch, m_io) == EOF)
+                    return false;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
     bool copyFrom(IODevice &&in) {return copyFrom(in);}
     bool copyFrom(IODevice &in) {
         return m_io && in.m_io? io_copy(in.m_io, m_io) == 0: false;
@@ -753,7 +793,6 @@ protected:
     IO m_io;
 };
 
-/* TODO: constructor RAII should throw exceptions on failure to complete operation */
 class FileIO : public IODevice {
     std::string name;
 
@@ -762,9 +801,9 @@ protected:
 
 public:
     FileIO() {}
-    FileIO(IO_NATIVE_FILE_HANDLE native, const char *mode = "rwb") {open(native, mode);}
-    FileIO(FILE *file) {open(file);}
-    FileIO(const char *filename, const char *mode = "rb", bool native = true) {open(filename, mode, native);}
+    FileIO(IO_NATIVE_FILE_HANDLE native, const char *mode = "rwb") {tryOpen(open(native, mode));}
+    FileIO(FILE *file) {tryOpen(open(file));}
+    FileIO(const char *filename, const char *mode = "rb", bool native = true) {tryOpen(open(filename, mode, native));}
 
     int open(IO_NATIVE_FILE_HANDLE native, const char *mode = "rwb") {
         if (isOpen())
@@ -805,6 +844,7 @@ public:
 };
 
 class StringIO : public IODevice {
+    std::string str;
     enum IO_Type type;
     size_t size;
 
@@ -816,15 +856,16 @@ protected:
 
 public:
     StringIO() : type(IO_Empty), size(0) {}
-    StringIO(const char *cstring, const char *mode = "rb") : type(IO_Empty), size(0) {open(cstring, mode);}
+    StringIO(const char *cstring, const char *mode = "rb") : type(IO_Empty), size(0) {tryOpen(open(cstring, mode));}
     StringIO(const char *buffer, size_t size, const char *mode = "rb") : type(IO_Empty), size(0) {
         if (strchr(mode, '+') || strchr(mode, 'w'))
             throw std::runtime_error("StringIO cannot write to const buffer");
 
-        open(buffer, size, mode);
+        tryOpen(open(buffer, size, mode));
     }
-    StringIO(char *buffer, size_t size, const char *mode = "r+b") : type(IO_Empty), size(0) {open(buffer, size, mode);}
-    StringIO(bool minimal, const char *mode = "wb") : type(IO_Empty), size(0) {open(minimal, mode);}
+    StringIO(char *buffer, size_t size, const char *mode = "r+b") : type(IO_Empty), size(0) {tryOpen(open(buffer, size, mode));}
+    StringIO(std::string str, const char *mode = "rb") : str(str), type(IO_Empty), size(0) {tryOpen(open(this->str.data(), this->str.size(), mode));}
+    StringIO(bool minimal, const char *mode = "wb") : type(IO_Empty), size(0) {tryOpen(open(minimal, mode));}
 
     int open(const char *cstring, const char *mode = "rb") {
         if (isOpen())

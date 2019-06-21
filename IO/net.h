@@ -77,10 +77,7 @@ class NetIO : public IODevice {
 public:
     NetIO() {}
     NetIO(const char *host, unsigned short port, enum NetAddressType type = NetAddressAny, bool tcp = true, const char *mode = "rwb") {
-        if (tcp)
-            openTcp(host, port, type, mode);
-        else
-            openUdp(host, port, type, mode);
+        tryOpen(tcp? openTcp(host, port, type, mode): openUdp(host, port, type, mode));
     }
 
     int openTcp(const char *host, unsigned short port, enum NetAddressType type = NetAddressAny, const char *mode = "rwb") {

@@ -47,7 +47,7 @@ class AESEncryptIO : public IODevice {
 
 public:
     AESEncryptIO() : d(NULL) {}
-    AESEncryptIO(IODevice &d, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode = "rwb") : d(NULL) {open(d, type, cipherMode, key, iv, mode);}
+    AESEncryptIO(IODevice &d, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode = "rwb") : d(NULL) {tryOpen(open(d, type, cipherMode, key, iv, mode));}
 
     int open(IODevice &dev, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode = "rwb") {
         if (isOpen())
@@ -76,7 +76,7 @@ class AESDecryptIO : public IODevice {
 
 public:
     AESDecryptIO() : d(NULL) {}
-    AESDecryptIO(IODevice &d, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode = "rwb") : d(NULL) {open(d, type, cipherMode, key, iv, mode);}
+    AESDecryptIO(IODevice &d, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode = "rwb") : d(NULL) {tryOpen(open(d, type, cipherMode, key, iv, mode));}
 
     int open(IODevice &dev, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode = "rwb") {
         if (isOpen())

@@ -34,7 +34,9 @@ SOURCES += \
     IO/net.c \
     IO/tee.c \
     dir.c \
-    main.cpp
+    main.cpp \
+    IO/padding/bit.c \
+    IO/padding/pkcs7.c
 
 HEADERS += \
     ccdbllst.h \
@@ -53,7 +55,9 @@ HEADERS += \
     IO/aes.h \
     IO/net.h \
     IO/tee.h \
-    dir.h
+    dir.h \
+    IO/padding/bit.h \
+    IO/padding/pkcs7.h
 
 DISTFILES += \
     README.md

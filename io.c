@@ -344,6 +344,9 @@ void io_clearerr(IO io) {
 }
 
 int io_close(IO io) {
+    if (io == NULL)
+        return 0;
+
     int result = io_close_without_destroying(io);
 
     io_destroy(io);

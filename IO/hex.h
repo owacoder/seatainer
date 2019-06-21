@@ -28,7 +28,7 @@ class HexEncodeIO : public IODevice {
 
 public:
     HexEncodeIO() : d(NULL) {}
-    HexEncodeIO(IODevice &d, const char *mode = "rwb") : d(NULL) {open(d, mode);}
+    HexEncodeIO(IODevice &d, const char *mode = "rwb") : d(NULL) {tryOpen(open(d, mode));}
 
     int open(IODevice &dev, const char *mode = "rwb") {
         if (isOpen())
@@ -57,7 +57,7 @@ class HexDecodeIO : public IODevice {
 
 public:
     HexDecodeIO() : d(NULL) {}
-    HexDecodeIO(IODevice &d, const char *mode = "rwb") : d(NULL) {open(d, mode);}
+    HexDecodeIO(IODevice &d, const char *mode = "rwb") : d(NULL) {tryOpen(open(d, mode));}
 
     int open(IODevice &dev, const char *mode = "rwb") {
         if (isOpen())

@@ -1,3 +1,9 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #ifndef TEE_H
 #define TEE_H
 
@@ -26,7 +32,7 @@ class TeeIO : public IODevice {
 
 public:
     TeeIO() : out1(NULL), out2(NULL) {}
-    TeeIO(IODevice &out1, IODevice &out2, const char *mode = "wb") : out1(NULL), out2(NULL) {open(out1, out2, mode);}
+    TeeIO(IODevice &out1, IODevice &out2, const char *mode = "wb") : out1(NULL), out2(NULL) {tryOpen(open(out1, out2, mode));}
 
     int open(IODevice &out1, IODevice &out2, const char *mode = "wb") {
         if (isOpen())

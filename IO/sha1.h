@@ -35,7 +35,7 @@ class Sha1IO : public IODevice {
 
 public:
     Sha1IO() : d(NULL) {}
-    Sha1IO(IODevice &d, const char *mode = "wb") : d(NULL) {open(d, mode);}
+    Sha1IO(IODevice &d, const char *mode = "wb") : d(NULL) {tryOpen(open(d, mode));}
 
     int open(IODevice &dev, const char *mode = "wb") {
         if (isOpen())

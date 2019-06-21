@@ -19,6 +19,8 @@ SRCFILES = ccdbllst.c \
            IO/sha1.c \
            IO/net.c \
            IO/tee.c \
+           IO/padding/bit.c \
+           IO/padding/pkcs7.c \
            io.c \
            dir.c \
            main.c \
@@ -38,6 +40,8 @@ HEADERFILES = ccpair.h \
               IO/sha1.h \
               IO/net.h \
               IO/tee.h \
+              IO/padding/bit.h \
+              IO/padding/pkcs7.h \
               io.h \
               cclnklst.h \
               dir.h \

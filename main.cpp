@@ -343,6 +343,8 @@ void test_small_dll()
 #include "IO/sha1.h"
 #include "IO/net.h"
 #include "IO/tee.h"
+#include "IO/padding/bit.h"
+#include "IO/padding/pkcs7.h"
 
 void test_io() {
     test_hex();
@@ -466,15 +468,20 @@ int main()
 
     unsigned char key[16];
 
-    if (16 != CryptoRandIO().read((char *) key, 16))
+    CryptoRandIO rnd;
+    rnd.open();
+    if (16 != rnd.read((char *) key, 16))
         return 1;
 
     for (size_t i = 0; i < 16; ++i)
         FileIO(stdout).printf("%02hhx", key[i]);
     FileIO(stdout).putLine("");
 
-    StringIO buf((const char *) key, 16);
-    HexEncodeIO(buf).copyTo(FileIO(stdout));
+    StringIO buf((const char *) key, 5);
+    FileIO outf(stdout);
+    HexEncodeIO hexencode(outf);
+    Pkcs7PaddingIO bit(hexencode, 4);
+    buf.slowCopyTo(bit);
 
     return 0;
 

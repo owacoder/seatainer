@@ -26,8 +26,6 @@ class CryptoRandIO : public IODevice {
     void closing() {}
 
 public:
-    CryptoRandIO() {open();}
-
     int open() {
         if (isOpen())
             return AlreadyOpen;
