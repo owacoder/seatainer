@@ -38,6 +38,64 @@ IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, cons
 void test_aes();
 
 #ifdef __cplusplus
+class AESEncryptIO : public IODevice {
+    IODevice *d;
+
+    void closing() {
+        d->decrementRef();
+    }
+
+public:
+    AESEncryptIO() : d(NULL) {}
+    AESEncryptIO(IODevice &d, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode = "rwb") : d(NULL) {open(d, type, cipherMode, key, iv, mode);}
+
+    int open(IODevice &dev, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode = "rwb") {
+        if (isOpen())
+            return AlreadyOpen;
+        else if (!dev.underlyingDevice())
+            return GenericError;
+
+        m_io = io_open_aes_encrypt(dev.underlyingDevice(), type, cipherMode, key, iv, mode);
+
+        if (m_io) {
+            this->d = &dev;
+
+            dev.incrementRef();
+        }
+
+        return m_io? 0: GenericError;
+    }
+};
+
+class AESDecryptIO : public IODevice {
+    IODevice *d;
+
+    void closing() {
+        d->decrementRef();
+    }
+
+public:
+    AESDecryptIO() : d(NULL) {}
+    AESDecryptIO(IODevice &d, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode = "rwb") : d(NULL) {open(d, type, cipherMode, key, iv, mode);}
+
+    int open(IODevice &dev, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode = "rwb") {
+        if (isOpen())
+            return AlreadyOpen;
+        else if (!dev.underlyingDevice())
+            return GenericError;
+
+        m_io = io_open_aes_decrypt(dev.underlyingDevice(), type, cipherMode, key, iv, mode);
+
+        if (m_io) {
+            this->d = &dev;
+
+            dev.incrementRef();
+        }
+
+        return m_io? 0: GenericError;
+    }
+};
+
 }
 #endif
 

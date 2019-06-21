@@ -224,6 +224,15 @@ static size_t md5_write(const void *ptr, size_t size, size_t count, void *userda
     return count;
 }
 
+static long md5_tell(void *userdata, IO io) {
+    if (!io_readable(io))
+        return -1;
+
+    struct Md5 *md5 = userdata;
+
+    return md5->read;
+}
+
 static int md5_seek(void *userdata, long offset, int origin, IO io) {
     if (!io_readable(io))
         return -1;
@@ -263,7 +272,8 @@ static const struct InputOutputDeviceCallbacks md5_callbacks = {
     .open = md5_open,
     .close = md5_close,
     .flush = NULL,
-    .tell = NULL,
+    .stateSwitch = NULL,
+    .tell = md5_tell,
     .tell64 = NULL,
     .seek = md5_seek,
     .seek64 = NULL,

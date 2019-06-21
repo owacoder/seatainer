@@ -97,3 +97,15 @@ Seatainer officially supports C89 and newer.
  - `CC_NO_SUCH_METHOD_ABORT` - Define to make procedures with no valid method to call spit out an error and abort the program.
  - `CC_IO_STATIC_INSTANCES` - Define to a non-negative integer to allow fast allocation of a limited number of IO instances. If this limit is reached, the subsequent devices will be dynamically allocated. If this value is not defined, all allocations will be dynamic.
  - `CC_INCLUDE_NETWORK` - Define to specify that network access through sockets should be built.
+
+### IO devices
+
+A number of IO devices are supported currently:
+
+ - AES - Actually two separate devices (one encryption, one decryption) that support AES encryption of a stream (although the stream must be in 16-byte blocks), and allow various cipher modes, IVs, and all the AES key sizes. Hardware acceleration is used where available.
+ - CryptoRand - A device that reads from the system CSPRNG. The bytes returned from reading this function are available for use as a cryptographically secure random number generator. This device is not seekable.
+ - Hex - Actually two separate devices (one encoding, one decoding) that support Hex encoding of a stream. These devices are seekable.
+ - Md5 - A device that computes the MD5 hash of its input. This device is not seekable, but if opened for reading and writing, a rolling hash may be computed.
+ - Net - Actually two separate devices (one TCP, one UDP) that support network interfacing. `io_net_init()` should be called before using any Net device (just once for the program), and `io_net_deinit()` should be called when no Net devices are needed any longer.
+ - Sha1 - A device that computes the SHA-1 hash of its input. This device is not seekable, but if opened for reading and writing, a rolling hash may be computed. Hardware acceleration is used where available.
+ - Tee - A device that duplicates any data written to it to two outputs. This device is not seekable.

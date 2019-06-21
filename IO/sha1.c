@@ -449,6 +449,7 @@ static const struct InputOutputDeviceCallbacks sha1_callbacks = {
     .open = sha1_open,
     .close = sha1_close,
     .flush = NULL,
+    .stateSwitch = NULL,
     .tell = NULL,
     .tell64 = NULL,
     .seek = sha1_seek,

@@ -342,6 +342,7 @@ void test_small_dll()
 #include "IO/md5.h"
 #include "IO/sha1.h"
 #include "IO/net.h"
+#include "IO/tee.h"
 
 void test_io() {
     test_hex();
@@ -462,6 +463,27 @@ int main()
         {"pattern#", "pattern[0-9#a-z]"},
         {"Some really long string - with some special ranges like [ and ]", "*[^ ] really*]*"}
     };
+
+    unsigned char key[16];
+
+    if (16 != CryptoRandIO().read((char *) key, 16))
+        return 1;
+
+    for (size_t i = 0; i < 16; ++i)
+        FileIO(stdout).printf("%02hhx", key[i]);
+    FileIO(stdout).putLine("");
+
+    StringIO buf((const char *) key, 16);
+    HexEncodeIO(buf).copyTo(FileIO(stdout));
+
+    return 0;
+
+    StringIO io("Some input");
+    StringIO("Some input").copyTo(io);
+
+    FileIO(stdout).printf("%u\n%s\n", 8017, io.data().c_str());
+
+    return 0;
 
     Url url = url_from_percent_encoded("http://www.google.com:80/teapot");
     int httperr;

@@ -171,10 +171,20 @@ struct InputOutputDeviceCallbacks {
      * This callback must not call any seek function. The callback must set the `io` parameter's error code with `io_set_error()`.
      *
      * @param userdata The userdata stored in @p io.
-     * @param io The IO device being closed. Reads from or writes to the device are allowed.
+     * @param io The IO device being flushed. Reads from or writes to the device are allowed.
      * @return Zero on success, non-zero on error.
      */
     IO_SimpleCallback flush;
+
+    /** @brief Notifies the device that a state switch was requested.
+     *
+     * This callback must not call any seek function. The callback must set the `io` parameter's error code with `io_set_error()`.
+     *
+     * @param userdata The userdata stored in @p io.
+     * @param io The IO device being acted on. Reads from or writes to the device are allowed.
+     * @return Zero on success, non-zero on error.
+     */
+    IO_SimpleCallback stateSwitch;
 
     long int (*tell)(void *userdata, IO io);
     long long int (*tell64)(void *userdata, IO io);
@@ -219,6 +229,8 @@ void io_clearerr(IO io);
 int io_close(IO io);
 int io_readable(IO io);
 int io_writable(IO io);
+int io_just_read(IO io);
+int io_just_wrote(IO io);
 int io_binary(IO io);
 int io_text(IO io);
 
@@ -255,11 +267,15 @@ char *io_gets(char *str, int num, IO io);
 IO io_open(const char *filename, const char *mode);
 /* If `mode` contains "@ncp" on Windows, the [n]ative [c]ode [p]age is used, instead of UTF-8 */
 IO io_open_native(const char *filename, const char *mode);
-#if LINUX_OS
-IO io_open_native_file(int descriptor, const char *mode);
-#elif WINDOWS_OS
-IO io_open_native_file(HANDLE descriptor, const char *mode);
+#if WINDOWS_OS
+#define IO_NATIVE_FILE_HANDLE HANDLE
+#define IO_INVALID_FILE_HANDLE INVALID_HANDLE_VALUE
+#else
+#define CC_NATIVE_FILE_HANDLE int
+#define CC_INVALID_FILE_HANDLE (-1)
 #endif
+
+IO io_open_native_file(IO_NATIVE_FILE_HANDLE descriptor, const char *mode);
 IO io_open_file(FILE *file);
 IO io_open_empty(void); /* No input is read (i.e. the first read returns EOF) and all writes fail to this device */
 IO io_open_cstring(const char *str, const char *mode);
@@ -295,6 +311,7 @@ size_t io_write(const void *ptr, size_t size, size_t count, IO io);
 void io_rewind(IO io);
 void io_setbuf(IO io, char *buf);
 int io_setvbuf(IO io, char *buf, int mode, size_t size);
+enum IO_Type io_type(IO io);
 const char *io_description(IO io);
 IO io_tmpfile(void);
 int io_ungetc(int chr, IO io);
@@ -304,75 +321,144 @@ int io_ungetc(int chr, IO io);
 
 #include <stdexcept>
 #include <string>
+#include <memory>
 
 typedef IO_Pos IOPosition;
 
+#define IO_READABLE IOMode("r")
+#define IO_WRITABLE IOMode("w")
+#define IO_APPEND IOMode("a")
+#define IO_UPDATE IOMode("+")
+#define IO_EXCLUSIVE IOMode("x")
+#define IO_TEXT IOMode("t")
+#define IO_BINARY IOMode("b")
+#define IO_DISABLE_ACCELERATION IOMode("<")
+#define IO_GRAB_OWNERSHIP IOMode("g")
+#define IO_NATIVE_CODEPAGE IOMode("@ncp")
+
+struct IOMode {
+    IOMode(const std::string &mode) : mode(mode) {}
+    IOMode(const char *mode) : mode(mode) {}
+
+    IOMode operator+(const IOMode &other) const {return *this | other;}
+    IOMode operator|(const IOMode &other) const {
+        return mode + other.mode;
+    }
+
+    operator const char *() const {
+        return mode.c_str();
+    }
+
+    std::string mode;
+};
+
 class IODevice {
     IODevice(const IODevice &) {}
+    size_t references; /* How many other IODevice objects rely on this object being valid */
 
-    IODevice(IO io) : m_io(io) {if (!m_io) throw std::bad_alloc();}
+protected:
+#if WINDOWS_OS
+    static const int AlreadyOpen = ERROR_ALREADY_INITIALIZED;
+    static const int CannotClose = ERROR_ACCESS_DENIED;
+    static const int GenericError = ERROR_DEVICE_NOT_AVAILABLE;
+    static const int NoMemory = ERROR_OUTOFMEMORY;
+#else
+    static const int AlreadyOpen = EPERM;
+    static const int CannotClose = EPERM;
+    static const int GenericError = EIO;
+    static const int NoMemory = ENOMEM;
+#endif
+
+    IODevice() : references(0), m_io(NULL) {}
+
+    virtual void closing() = 0;
 
 public:
-    enum ErrorType {
-        NoError,
-        InputError,
-        OutputError
-    };
-
-    IODevice(IODevice &&other) : m_io(std::move(other.m_io)) {
-        other.m_io = NULL;
-    }
-    IODevice() : m_io(io_open_empty()) {if (!m_io) throw std::bad_alloc();}
-    IODevice(const char *cstring) : m_io(io_open_cstring(cstring, "r")) {if (!m_io) throw std::bad_alloc();}
-    IODevice(char *buffer, size_t size, const char *mode) : m_io(io_open_buffer(buffer, size, mode)) {if (!m_io) throw std::bad_alloc();}
-    IODevice(const char *filename, const char *mode) : m_io(io_open_native(filename, mode)) {if (!m_io) throw std::bad_alloc();}
-    IODevice(FILE *file) : m_io(io_open_file(file)) {if (!m_io) throw std::bad_alloc();}
-
+    IODevice(IO device) : references(0), m_io(device) {}
     virtual ~IODevice() {if (m_io) io_close(m_io);}
 
-    static IODevice makeEmptyDevice() {return {};}
-    static IODevice makeStringReader(const char *cstring) {return IODevice(cstring);}
-    static IODevice makeStringReader(const char *cstring, size_t size) {return IODevice((char *) cstring, size, "r");}
-    static IODevice makeStringReader(const std::string &str) {return makeStringReader(str.data(), str.size());}
-    static IODevice makeStringWriter(const char *mode = "w") {return IODevice(io_open_dynamic_buffer(mode));}
-    static IODevice makeStringWriter(char *buffer, size_t size, const char *mode = "w") {return IODevice(buffer, size, mode);}
-    static IODevice makeSizedBufferDevice(char *buffer, size_t size, const char *mode) {return IODevice(buffer, size, mode);}
-    static IODevice makeFileReader(const char *filename) {return makeFileDevice(filename, "r");}
-    static IODevice makeFileDevice(const char *filename, const char *mode) {return IODevice(filename, mode);}
-    static IODevice makeFileDevice(FILE *file) {return IODevice(file);}
+    /* References prevent this device from closing using close() (but it will still be destroyed with the destructor) */
+    void incrementRef() {++references;}
+    void decrementRef() {if (references) --references;}
 
     /* Clears EOF and Error flags */
-    void clearError() {io_clearerr(m_io);}
+    void clearError() {if (m_io) io_clearerr(m_io);}
 
-    /* Closes the device and opens a new empty device */
-    bool close() {
+    /* Returns the underlying IO device */
+    IO underlyingDevice() const {return m_io;}
+
+    bool isOpen() const {return m_io;}
+
+    /* Closes the device and returns any error
+     * The device cannot be closed if another reference is held to this object
+     */
+    int close() {
+        if (references || !isOpen())
+            return CannotClose;
+
+        closing();
+
         int result = io_close(m_io);
+        m_io = NULL;
 
-        m_io = io_open_empty();
-        if (!m_io)
-            throw std::bad_alloc();
-
-        return result == 0;
+        return result;
     }
 
     /* Returns true if the device is readable */
-    bool isReadable() const {return io_readable(m_io);}
+    bool isReadable() const {return m_io? io_readable(m_io): false;}
     /* Returns true if the device is writable */
-    bool isWritable() const {return io_writable(m_io);}
+    bool isWritable() const {return m_io? io_writable(m_io): false;}
+    /* Returns true if the device is in read mode */
+    bool isInReadMode() const {return m_io? io_just_read(m_io): false;}
+    /* Returns true if the device is in write mode */
+    bool isInWriteMode() const {return m_io? io_just_wrote(m_io): false;}
 
     /* Returns true if the error flag is set (this flag is sticky until cleared) */
-    bool error() const {return io_error(m_io);}
+    int error() const {return m_io? io_error(m_io):
+#if WINDOWS_OS
+                                    ERROR_INVALID_HANDLE
+#else
+                                    ENODEV
+#endif
+                                    ;}
+
+    /* Returns human-readable description of what went wrong */
+    static std::string errorDescription(int error) {
+        char *desc = io_error_description_alloc(error);
+        std::string result;
+
+        if (desc == NULL)
+            return {};
+
+        try {
+            result = desc;
+        } catch (...) {
+            free(desc);
+            throw;
+        }
+        free(desc);
+
+        return result;
+    }
+
+    /* Returns human-readable description of what went wrong */
+    std::string errorDescription() const {
+        return errorDescription(error());
+    }
+
     /* Returns true if the end of the file was reached */
-    bool eof() const {return io_eof(m_io);}
+    bool eof() const {return m_io? io_eof(m_io): true;}
 
     /* Attempts to flush the device and returns true on success, false on failure
      * For devices that have an input buffer, the buffer is cleared
      */
-    bool flush() {return io_flush(m_io) == 0;}
+    bool flush() {return m_io? io_flush(m_io) == 0: false;}
+
+    bool switchReadWrite() {return seek(0, SEEK_CUR) == 0;}
 
     /* Gets a character and returns true on success, false on failure. Check eof() or error() to determine cause of failure */
     bool getChar(char &chr) {
-        int ch = io_getc(m_io);
+        int ch = m_io? io_getc(m_io): EOF;
 
         if (ch == EOF)
             return false;
@@ -382,14 +468,14 @@ public:
     }
     /* Gets a character and returns it on success, or EOF on failure. Check eof() or error() to determine cause of failure */
     int getChar() {
-        return io_getc(m_io);
+        return m_io? io_getc(m_io): EOF;
     }
 
     /* Attempts to read `max` characters into `buffer`, without NUL-terminating. Returns the number of characters read.
      * Check eof() or error() to determine cause of failure
      */
     size_t read(char *buffer, size_t max) {
-        return io_read(buffer, 1, max, m_io);
+        return m_io? io_read(buffer, 1, max, m_io): 0;
     }
     /* Reads until EOF or newline, whichever comes first */
     /* NUL-terminates the buffer, so max must be greater than 0. Returns the number of characters read, including the newline
@@ -398,6 +484,9 @@ public:
      */
     size_t readLine(char *buffer, size_t max) {
         char *newBuffer = buffer, ch;
+
+        if (max == 0)
+            throw std::runtime_error("Invalid size passed to readLine");
 
         for (--max; max && getChar(ch); --max) {
             *newBuffer++ = ch;
@@ -452,13 +541,18 @@ public:
         return result;
     }
     /* Reads all the input and returns it in a std::string
-     * Check eof() or error() to determine cause of failure
+     * Check error() to determine cause of failure
      */
     bool readAll(std::string &result) {
-        char ch;
+        char buf[256];
+        size_t size;
         result.clear();
-        while (getChar(ch))
-            result.push_back(ch);
+
+        do {
+            size = read(buf, 256);
+            result.append(buf, size);
+        } while (size == 256);
+
         return !error();
     }
     std::string readAll() {
@@ -471,15 +565,15 @@ public:
 
     /* Writes a character and returns true on success, false on failure */
     bool putChar(char chr) {
-        return io_putc((unsigned char) chr, m_io) != EOF;
+        return m_io? io_putc((unsigned char) chr, m_io) != EOF: false;
     }
     /* Writes a NUL-terminated string and returns true on success, false on failure */
     bool putString(const char *str) {
-        return io_puts(str, m_io) == 0;
+        return m_io? io_puts(str, m_io) == 0: false;
     }
     /* Writes a string and returns true on success, false on failure */
     bool putString(const char *str, size_t len) {
-        return io_write(str, 1, len, m_io) == len;
+        return m_io? io_write(str, 1, len, m_io) == len: false;
     }
     /* Writes a string and returns true on success, false on failure */
     bool putString(const std::string &str) {
@@ -587,26 +681,28 @@ public:
     /* Reads from this device and pushes all the data to `out`, returning true on success, false on either read or write failure
      * The respective error flag on the failing device will be set
      */
+    bool copyTo(IODevice &&out) {return copyTo(out);}
     bool copyTo(IODevice &out) {
-        return io_copy(m_io, out.m_io) == 0;
+        return m_io && out.m_io? io_copy(m_io, out.m_io) == 0: false;
     }
     /* Reads from `in` and pushes all the data to this device, returning true on success, false on either read or write failure
      * The respective error flag on the failing device will be set
      */
+    bool copyFrom(IODevice &&in) {return copyFrom(in);}
     bool copyFrom(IODevice &in) {
-        return io_copy(in.m_io, m_io) == 0;
+        return m_io && in.m_io? io_copy(in.m_io, m_io) == 0: false;
     }
 
     bool getPosition(IOPosition &position) const {
-        return io_getpos(m_io, &position) == 0;
+        return m_io? io_getpos(m_io, &position) == 0: false;
     }
     bool setPosition(IOPosition position) {
-        return io_setpos(m_io, &position) == 0;
+        return m_io? io_setpos(m_io, &position) == 0: false;
     }
 
     /* printf functions return -1 if a writing error occured, or the number of characters written otherwise */
     int vprintf(const char *fmt, va_list args) {
-        int res = io_vprintf(m_io, fmt, args);
+        int res = m_io? io_vprintf(m_io, fmt, args): -1;
 
         if (res == -2)
             throw std::runtime_error("invalid format provided to IOObject::printf()");
@@ -628,36 +724,182 @@ public:
     }
 
     bool tell(long long &offset) const {
-        long long res = io_tell64(m_io);
+        long long res = m_io? io_tell64(m_io): -1;
         if (res < 0)
             return false;
 
         offset = res;
         return true;
     }
-    long long tell() const {return io_tell64(m_io);}
+    long long tell() const {return m_io? io_tell64(m_io): -1;}
 
     bool seek(long long offset, int origin) {
-        return io_seek64(m_io, offset, origin) == 0;
+        return m_io? io_seek64(m_io, offset, origin) == 0: -1;
     }
 
-    static IODevice tmpfile() {
-        return IODevice(io_tmpfile());
-    }
-
-    void rewind() {io_rewind(m_io);}
+    void rewind() {if (m_io) io_rewind(m_io);}
 
     /* Returns a character back to the input stream, as the next character to return
      * Returns true if the character was put back, false otherwise (the buffer may be full)
      * At least 1 level of ungetChar is supported()
      */
     bool ungetChar(char chr) {
-        return io_ungetc((unsigned char) chr, m_io) != EOF;
+        return m_io? io_ungetc((unsigned char) chr, m_io) != EOF: false;
     }
 
+    operator bool() const {return !error() && !eof();}
+
 protected:
-    IO m_io; /* The invariant `m_io != NULL` holds everywhere in this class */
+    IO m_io;
 };
+
+/* TODO: constructor RAII should throw exceptions on failure to complete operation */
+class FileIO : public IODevice {
+    std::string name;
+
+protected:
+    void closing() {}
+
+public:
+    FileIO() {}
+    FileIO(IO_NATIVE_FILE_HANDLE native, const char *mode = "rwb") {open(native, mode);}
+    FileIO(FILE *file) {open(file);}
+    FileIO(const char *filename, const char *mode = "rb", bool native = true) {open(filename, mode, native);}
+
+    int open(IO_NATIVE_FILE_HANDLE native, const char *mode = "rwb") {
+        if (isOpen())
+            return AlreadyOpen;
+
+        m_io = io_open_native_file(native, mode);
+
+        return m_io? 0: GenericError;
+    }
+    int open(FILE *file) {
+        if (isOpen())
+            return AlreadyOpen;
+
+        m_io = io_open_file(file);
+
+        return m_io? 0: GenericError;
+    }
+    int open(const char *filename, const char *mode = "rb", bool native = true) {
+        if (isOpen())
+            return AlreadyOpen;
+
+        m_io = native? io_open(filename, mode): io_open_native(filename, mode);
+
+        return m_io? 0: GenericError;
+    }
+
+    std::string filename() const {return name;}
+
+    IO_NATIVE_FILE_HANDLE handle() const {
+        if (m_io && (io_type(m_io) == IO_NativeFile || io_type(m_io) == IO_OwnNativeFile))
+            return reinterpret_cast<IO_NATIVE_FILE_HANDLE>(io_userdata(m_io));
+
+        return IO_INVALID_FILE_HANDLE;
+    }
+
+    void grab() {if (m_io) io_grab_file(m_io);}
+    void ungrab() {if (m_io) io_ungrab_file(m_io);}
+};
+
+class StringIO : public IODevice {
+    enum IO_Type type;
+    size_t size;
+
+protected:
+    void closing() {
+        char *ptr = m_io? io_underlying_buffer(m_io): NULL;
+        free(ptr);
+    }
+
+public:
+    StringIO() : type(IO_Empty), size(0) {}
+    StringIO(const char *cstring, const char *mode = "rb") : type(IO_Empty), size(0) {open(cstring, mode);}
+    StringIO(const char *buffer, size_t size, const char *mode = "rb") : type(IO_Empty), size(0) {
+        if (strchr(mode, '+') || strchr(mode, 'w'))
+            throw std::runtime_error("StringIO cannot write to const buffer");
+
+        open(buffer, size, mode);
+    }
+    StringIO(char *buffer, size_t size, const char *mode = "r+b") : type(IO_Empty), size(0) {open(buffer, size, mode);}
+    StringIO(bool minimal, const char *mode = "wb") : type(IO_Empty), size(0) {open(minimal, mode);}
+
+    int open(const char *cstring, const char *mode = "rb") {
+        if (isOpen())
+            return AlreadyOpen;
+
+        m_io = io_open_cstring(cstring, mode);
+        size = strlen(cstring);
+        type = IO_CString;
+
+        return m_io? 0: GenericError;
+    }
+    int open(const char *buffer, size_t size, const char *mode = "rb") {
+        if (isOpen())
+            return AlreadyOpen;
+
+        if (strchr(mode, '+') || strchr(mode, 'w'))
+            throw std::runtime_error("StringIO cannot write to const buffer");
+
+        m_io = io_open_buffer(const_cast<char *>(buffer), size, mode);
+        this->size = size;
+        type = IO_SizedBuffer;
+
+        return m_io? 0: GenericError;
+    }
+    int open(char *buffer, size_t size, const char *mode = "r+b") {
+        if (isOpen())
+            return AlreadyOpen;
+
+        m_io = io_open_buffer(const_cast<char *>(buffer), size, mode);
+        this->size = size;
+        type = IO_SizedBuffer;
+
+        return m_io? 0: GenericError;
+    }
+    int open(bool minimal, const char *mode = "wb") {
+        if (isOpen())
+            return AlreadyOpen;
+
+        m_io = minimal? io_open_minimal_buffer(mode): io_open_dynamic_buffer(mode);
+        type = minimal? IO_MinimalBuffer: IO_DynamicBuffer;
+
+        return m_io? 0: GenericError;
+    }
+
+    const char *rawData() {
+        switch (type) {
+            case IO_CString:
+            case IO_SizedBuffer: return m_io? static_cast<const char *>(io_userdata(m_io)): "";
+            case IO_MinimalBuffer:
+            case IO_DynamicBuffer: return m_io? io_underlying_buffer(m_io): "";
+            default: return "";
+        }
+    }
+    size_t length() {
+        switch (type) {
+            case IO_CString: return strlen(rawData());
+            case IO_SizedBuffer: return size;
+            case IO_MinimalBuffer:
+            case IO_DynamicBuffer: return m_io? io_underlying_buffer_size(m_io): 0;
+            default: return 0;
+        }
+    }
+    size_t capacity() {
+        switch (type) {
+            case IO_MinimalBuffer:
+            case IO_DynamicBuffer: return m_io? io_underlying_buffer_capacity(m_io): 0;
+            default: return length();
+        }
+    }
+
+    std::string data() {
+        return {rawData(), length()};
+    }
+};
+
 #endif
 
 #endif // IO_H

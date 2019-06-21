@@ -70,6 +70,40 @@ IO io_http_get(Url url, int *err);
 #endif
 
 #ifdef __cplusplus
+#ifdef CC_INCLUDE_NETWORK
+class NetIO : public IODevice {
+    void closing() {}
+
+public:
+    NetIO() {}
+    NetIO(const char *host, unsigned short port, enum NetAddressType type = NetAddressAny, bool tcp = true, const char *mode = "rwb") {
+        if (tcp)
+            openTcp(host, port, type, mode);
+        else
+            openUdp(host, port, type, mode);
+    }
+
+    int openTcp(const char *host, unsigned short port, enum NetAddressType type = NetAddressAny, const char *mode = "rwb") {
+        if (isOpen())
+            return AlreadyOpen;
+
+        int err;
+        m_io = io_open_tcp_socket(host, port, type, mode, &err);
+
+        return m_io? 0: err;
+    }
+    int openUdp(const char *host, unsigned short port, enum NetAddressType type = NetAddressAny, const char *mode = "rwb") {
+        if (isOpen())
+            return AlreadyOpen;
+
+        int err;
+        m_io = io_open_udp_socket(host, port, type, mode, &err);
+
+        return m_io? 0: err;
+    }
+};
+#endif
+
 }
 #endif
 

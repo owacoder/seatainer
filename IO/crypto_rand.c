@@ -83,6 +83,7 @@ static const struct InputOutputDeviceCallbacks crypto_rand_callbacks = {
     .open = crypto_rand_open,
     .close = crypto_rand_close,
     .flush = NULL,
+    .stateSwitch = NULL,
     .tell = NULL,
     .tell64 = NULL,
     .seek = NULL,

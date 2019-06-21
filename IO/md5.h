@@ -26,6 +26,35 @@ extern "C" {
 IO io_open_md5(IO io, const char *mode);
 
 #ifdef __cplusplus
+class Md5IO : public IODevice {
+    IODevice *d;
+
+    void closing() {
+        d->decrementRef();
+    }
+
+public:
+    Md5IO() : d(NULL) {}
+    Md5IO(IODevice &d, const char *mode = "wb") : d(NULL) {open(d, mode);}
+
+    int open(IODevice &dev, const char *mode = "wb") {
+        if (isOpen())
+            return AlreadyOpen;
+        else if (!dev.underlyingDevice())
+            return GenericError;
+
+        m_io = io_open_md5(dev.underlyingDevice(), mode);
+
+        if (m_io) {
+            this->d = &dev;
+
+            dev.incrementRef();
+        }
+
+        return m_io? 0: GenericError;
+    }
+};
+
 }
 #endif
 

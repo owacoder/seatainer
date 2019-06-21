@@ -9,125 +9,9 @@
 #include <limits.h>
 #include <stdlib.h>
 
-static unsigned char test_aes_plaintext[] = {
-    0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96,
-    0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a,
-    0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03, 0xac, 0x9c,
-    0x9e, 0xb7, 0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51,
-    0x30, 0xc8, 0x1c, 0x46, 0xa3, 0x5c, 0xe4, 0x11,
-    0xe5, 0xfb, 0xc1, 0x19, 0x1a, 0x0a, 0x52, 0xef,
-    0xf6, 0x9f, 0x24, 0x45, 0xdf, 0x4f, 0x9b, 0x17,
-    0xad, 0x2b, 0x41, 0x7b, 0xe6, 0x6c, 0x37, 0x10
-};
-
-static unsigned char test_aes_ciphertext128[] = {
-    0x3a, 0xd7, 0x7b, 0xb4, 0x0d, 0x7a, 0x36, 0x60,
-    0xa8, 0x9e, 0xca, 0xf3, 0x24, 0x66, 0xef, 0x97,
-    0xf5, 0xd3, 0xd5, 0x85, 0x03, 0xb9, 0x69, 0x9d,
-    0xe7, 0x85, 0x89, 0x5a, 0x96, 0xfd, 0xba, 0xaf,
-    0x43, 0xb1, 0xcd, 0x7f, 0x59, 0x8e, 0xce, 0x23,
-    0x88, 0x1b, 0x00, 0xe3, 0xed, 0x03, 0x06, 0x88,
-    0x7b, 0x0c, 0x78, 0x5e, 0x27, 0xe8, 0xad, 0x3f,
-    0x82, 0x23, 0x20, 0x71, 0x04, 0x72, 0x5d, 0xd4
-};
-
-static unsigned char test_aes_ciphertext192[] = {
-    0xbd, 0x33, 0x4f, 0x1d, 0x6e, 0x45, 0xf2, 0x5f,
-    0xf7, 0x12, 0xa2, 0x14, 0x57, 0x1f, 0xa5, 0xcc,
-    0x97, 0x41, 0x04, 0x84, 0x6d, 0x0a, 0xd3, 0xad,
-    0x77, 0x34, 0xec, 0xb3, 0xec, 0xee, 0x4e, 0xef,
-    0xef, 0x7a, 0xfd, 0x22, 0x70, 0xe2, 0xe6, 0x0a,
-    0xdc, 0xe0, 0xba, 0x2f, 0xac, 0xe6, 0x44, 0x4e,
-    0x9a, 0x4b, 0x41, 0xba, 0x73, 0x8d, 0x6c, 0x72,
-    0xfb, 0x16, 0x69, 0x16, 0x03, 0xc1, 0x8e, 0x0e
-};
-
-static unsigned char test_aes_ecb_key128[] = {
-    0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
-    0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
-};
-
-static unsigned char test_aes_ecb_key192[] = {
-    0x8e, 0x73, 0xb0, 0xf7, 0xda, 0x0e, 0x64, 0x52,
-    0xc8, 0x10, 0xf3, 0x2b, 0x80, 0x90, 0x79, 0xe5,
-    0x62, 0xf8, 0xea, 0xd2, 0x52, 0x2c, 0x6b, 0x7b
-};
-
 #if defined(__SSE2__)
 #define AES_COMPILE_SUPPORTS_X86_INTRINSICS
 #endif
-
-#include "hex.h"
-#include "crypto_rand.h"
-
-void test_aes() {
-    unsigned char iv[16];
-
-    IO rand = io_open_crypto_rand();
-    io_read(iv, 1, 16, rand);
-    io_close(rand);
-
-    enum AES_Mode mode = AES_OFB;
-    IO input = io_open_cstring("Hello World!    This is a text!!SomeMoreTextForU", "r");
-    IO ciphertext = io_open_aes_encrypt(input, AES_192, mode, test_aes_ecb_key192, iv, "rb");
-    IO pciphertext = io_open_aes_encrypt(input, AES_192, mode, test_aes_ecb_key192, iv, "rb<");
-    IO aes = io_open_aes_decrypt(ciphertext, AES_192, mode, test_aes_ecb_key192, iv, "rb");
-    IO paes = io_open_aes_decrypt(pciphertext, AES_192, mode, test_aes_ecb_key192, iv, "rb<");
-
-    while (1) {
-        int ch;
-        if ((ch = io_getc(aes)) == EOF) {
-            if (io_error(aes))
-                puts("Error encountered while reading AES");
-            else
-                puts("End of stream reached");
-            break;
-        }
-
-        putc(ch, stdout);
-    }
-
-    puts("");
-    io_rewind(input);
-
-    while (1) {
-        int ch;
-        if ((ch = io_getc(paes)) == EOF) {
-            if (io_error(paes))
-                puts("Error encountered while reading AES");
-            else
-                puts("End of stream reached");
-            break;
-        }
-
-        putc(ch, stdout);
-    }
-
-    io_close(aes);
-    io_close(pciphertext);
-    io_close(ciphertext);
-    io_close(input);
-
-    IO plaintext = io_open_file(stdout);
-    IO hex = io_open_hex_encode(plaintext, "wb");
-    aes = io_open_aes_encrypt(hex, AES_192, AES_ECB, test_aes_ecb_key192, NULL, "wb");
-
-    printf("Encrypted: ");
-    io_putc(test_aes_plaintext[0], aes);
-    io_write(test_aes_plaintext + 1, 3, 1, aes);
-    io_write(test_aes_plaintext + 4, 12, 1, aes);
-    printf("\nEncrypted: ");
-    io_write(test_aes_plaintext + 16, 16, 1, aes);
-    printf("\nEncrypted: ");
-    io_write(test_aes_plaintext + 32, 16, 1, aes);
-    printf("\nEncrypted: ");
-    io_write(test_aes_plaintext + 48, 16, 1, aes);
-    puts("");
-
-    io_close(aes);
-    io_close(hex);
-    io_close(plaintext);
-}
 
 /** @brief Stores all the information needed for encoding or decoding (but not both) one 16-byte block of AES
  *
@@ -168,6 +52,9 @@ struct AES_ctx {
 
     /** Specifies the block-cipher mode of operation, one of `AES_ECB`, `AES_CBC`, `AES_PCBC`, `AES_CFB`, `AES_OFB`, or `AES_CTR` */
     enum AES_Mode mode;
+
+    /** Specifies whether this context points to an encryptor (0) or decryptor (1) */
+    unsigned char isDecryptor;
 
     /** Specifies the number of iterations required for the current key size (the number of rounds is stored instead of key size) */
     unsigned char rounds;
@@ -695,6 +582,14 @@ static size_t aes_read(void *ptr, size_t size, size_t count, void *userdata, IO 
     return count;
 }
 
+static int aes_flush(void *userdata, IO io) {
+    UNUSED(io)
+
+    struct AES_ctx *aes = userdata;
+
+    return io_flush(aes->io);
+}
+
 static int aes_close(void *userdata, IO io) {
     UNUSED(io)
 
@@ -704,19 +599,133 @@ static int aes_close(void *userdata, IO io) {
     return 0;
 }
 
+static int aes_state_switch(void *userdata, IO io) {
+    UNUSED(io)
+
+    struct AES_ctx *aes = userdata;
+
+    return aes->pos = 0;
+}
+
 static int aes_seek64(void *userdata, long long int offset, int origin, IO io) {
     UNUSED(io)
 
     struct AES_ctx *aes = userdata;
 
+    /* Translate all origins to SEEK_SET for ease of computation */
+    switch (origin) {
+        case SEEK_END: {
+            long long underlyingSize = io_size64(aes->io);
+            if (underlyingSize < 0)
+                return -1;
+
+            offset += underlyingSize;
+            break;
+        }
+        case SEEK_CUR: {
+            long long current = io_tell64(io);
+            if (current < 0)
+                return -1;
+
+            offset += current;
+            break;
+        }
+    }
+
+    /* If opened as a readable-only device, seeks to any location are permitted, and permitted modes are ECB, CTR, CBC, and CFB.
+     * If opened as a readable-writable device, only 16-byte aligned seeks are permitted, and permitted modes are ECB, CTR, CBC, and CFB.
+     * If opened as writable-only, only 16-byte aligned seeks and only ECB and CTR modes are allowed.
+     *
+     * However, if using CBC or CFB modes with a writable device, it is necessary to be extra careful about where to seek.
+     * Both modes allow seeking anywhere in the output, but if there is more existing output than what is written afterward,
+     * the data will be corrupted.
+     *
+     *         +-----------------------------------+
+     *         | DATA BLOCK                        |
+     *         +-----------------------------------+
+     *
+     *         +------------+----------------------+
+     *         | DATA BLOCK | < SEEK LOCATION      |
+     *         +------------+----------------------+
+     *
+     *         +------------+--------------------+-+
+     *         | DATA BLOCK | END OF OVERWRITE > | < NOW GARBAGE
+     *         +------------+--------------------+-+
+     *
+     * The already existing block(s) after the end of overwriting will now be garbage. To prevent:
+     *
+     *    - Write more output than already exists in the output device, or
+     *    - Write the same data that already existed in the output device at the current location, or
+     *    - Use a mode that doesn't have this issue, like ECB or CTR modes
+     */
+
+    if (io_writable(io) && offset % 16 != 0)
+        return -1;
+
+    if (!io_readable(io) && (aes->mode == AES_CBC || aes->mode == AES_CFB))
+        return -1;
+
+    long long blockAddr = offset - offset % 16;
+
+    if (io_seek64(aes->io, blockAddr, SEEK_SET) < 0)
+        return -1;
+
+    switch (aes->mode) {
+        default: break;
+        case AES_CBC:
+        case AES_CFB:
+            if (blockAddr == 0) /* Use IV for first block */ {
+                memcpy(aes->previous, aes->iv, 16);
+            } else {
+                char buf[16];
+
+                /* The previous seek on the underlying device ensures the requested block exists.
+                 * If it does, and the following previous-block seek succeeds, the following read should never fail. */
+                if (io_seek64(aes->io, blockAddr - 16, SEEK_SET) < 0 ||
+                    io_read(buf, 1, 16, aes->io) != 16)
+                    return -1;
+
+                memcpy(aes->previous, buf, 16);
+            }
+            break;
+    }
+
+    aes->pos = 0;
+    offset %= 16;
+    if (offset) {
+        char dummy[16];
+        if (io_read(dummy, 1, offset, io) != offset)
+            return -1;
+    }
+
     return 0;
+}
+
+static long aes_tell(void *userdata, IO io) {
+    UNUSED(io)
+
+    struct AES_ctx *aes = userdata;
+
+    long result = io_tell(aes->io);
+    return result < 0? result: io_just_read(io)? result - aes->pos: result + aes->pos;
+}
+
+static long long aes_tell64(void *userdata, IO io) {
+    UNUSED(io)
+
+    struct AES_ctx *aes = userdata;
+
+    long long result = io_tell64(aes->io);
+    return result < 0? result: io_just_read(io)? result - aes->pos: result + aes->pos;
 }
 
 static const char *aes_what(void *userdata, IO io) {
     UNUSED(userdata)
     UNUSED(io)
 
-    return "aes";
+    struct AES_ctx *aes = userdata;
+
+    return aes->isDecryptor? "aes_decode": "aes_encode";
 }
 
 static const struct InputOutputDeviceCallbacks aes_callbacks = {
@@ -724,11 +733,12 @@ static const struct InputOutputDeviceCallbacks aes_callbacks = {
     .write = aes_write,
     .open = NULL,
     .close = aes_close,
-    .flush = NULL,
-    .tell = NULL,
-    .tell64 = NULL,
+    .flush = aes_flush,
+    .stateSwitch = aes_state_switch,
+    .tell = aes_tell,
+    .tell64 = aes_tell64,
     .seek = NULL,
-    .seek64 = NULL,
+    .seek64 = aes_seek64,
     .what = aes_what
 };
 
@@ -738,8 +748,8 @@ static const struct InputOutputDeviceCallbacks aes_callbacks = {
  *
  *  The @p mode specifier changes how data flows in the filter:
  *
- *    - Open as "r" only: encrypts data read from @p io and obtains the plaintext when read from the filter
- *    - Open as "w" only: encrypts the ciphertext written to the filter and pushes the plaintext to @p io
+ *    - Open as "r" only: encrypts the plaintext read from @p io and obtains the ciphertext when read from the filter
+ *    - Open as "w" only: encrypts the plaintext written to the filter and pushes the ciphertext to @p io
  *    - Open as "rw": Both modes allowed
  *
  *  Hardware acceleration is supported on x86 devices, and is detected at runtime. To refuse access to acceleration, include a '<' in @p mode.
@@ -771,6 +781,7 @@ IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, cons
     ctx->io = io;
     ctx->cb = AESEncode;
     ctx->mode = cipherMode;
+    ctx->isDecryptor = 0;
 
     switch (type) {
         case AES_128: ctx->rounds = 10; memcpy(ctx->expandedKey, key, 16); break;
@@ -784,7 +795,6 @@ IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, cons
 #if X86_CPU | AMD64_CPU
     /* Detect AES extensions support */
     uint32_t cpuid[4];
-    /* TODO: hardware acceleration can be prevented by adding '<' in the open mode; this should be taken out later */
     if (strchr(mode, '<') == NULL && 0 == x86_cpuid(1, 0, cpuid) && TESTBIT(cpuid[2], 25))
         ctx->cb = AESEncode_x86;
 #endif
@@ -799,7 +809,7 @@ IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, cons
  *
  *  The @p mode specifier changes how data flows in the filter:
  *
- *    - Open as "r" only: decrypts data read from @p io and obtains the plaintext when read from the filter
+ *    - Open as "r" only: decrypts the ciphertext read from @p io and obtains the plaintext when read from the filter
  *    - Open as "w" only: decrypts the ciphertext written to the filter and pushes the plaintext to @p io
  *    - Open as "rw": Both modes allowed
  *
@@ -832,6 +842,7 @@ IO io_open_aes_decrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, cons
     ctx->io = io;
     ctx->cb = AESDecode;
     ctx->mode = cipherMode;
+    ctx->isDecryptor = 1;
 
     switch (type) {
         case AES_128: ctx->rounds = 10; memcpy(ctx->expandedKey, key, 16); break;

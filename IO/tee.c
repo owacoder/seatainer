@@ -61,6 +61,7 @@ static const struct InputOutputDeviceCallbacks tee_callbacks = {
     .read = NULL,
     .write = tee_write,
     .flush = tee_flush,
+    .stateSwitch = NULL,
     .seek = NULL,
     .seek64 = NULL,
     .tell = NULL,

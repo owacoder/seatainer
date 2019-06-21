@@ -26,6 +26,35 @@ extern "C" {
 IO io_open_sha1(IO io, const char *mode);
 
 #ifdef __cplusplus
+class Sha1IO : public IODevice {
+    IODevice *d;
+
+    void closing() {
+        d->decrementRef();
+    }
+
+public:
+    Sha1IO() : d(NULL) {}
+    Sha1IO(IODevice &d, const char *mode = "wb") : d(NULL) {open(d, mode);}
+
+    int open(IODevice &dev, const char *mode = "wb") {
+        if (isOpen())
+            return AlreadyOpen;
+        else if (!dev.underlyingDevice())
+            return GenericError;
+
+        m_io = io_open_sha1(dev.underlyingDevice(), mode);
+
+        if (m_io) {
+            this->d = &dev;
+
+            dev.incrementRef();
+        }
+
+        return m_io? 0: GenericError;
+    }
+};
+
 }
 #endif
 

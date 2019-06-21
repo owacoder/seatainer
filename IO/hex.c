@@ -34,8 +34,14 @@ static size_t hex_decode_read(void *ptr, size_t size, size_t count, void *userda
             break;
 
         char *sptr = strchr(alpha, tolower(ch));
-        if (sptr == NULL)
+        if (sptr == NULL) {
+#if WINDOWS_OS
+            io_set_error(io, ERROR_INVALID_DATA);
+#else
+            io_set_error(io, EBADMSG);
+#endif
             return SIZE_MAX;
+        }
 
         ch = sptr - alpha;
 
@@ -125,71 +131,66 @@ static int hex_flush(void *userdata, IO io) {
     return io_flush((IO) userdata);
 }
 
-/* TODO: seeks aren't currently working */
-static int hex_encode_seek(void *userdata, long int offset, int origin, IO io) {
+static int hex_encode_seek64(void *userdata, long long int offset, int origin, IO io) {
+    /* Translate all origins to SEEK_SET for ease of computation */
     switch (origin) {
-        case SEEK_SET:
-            if (io_seek((IO) userdata, offset / 2, origin) != 0)
+        case SEEK_END: {
+            long long underlyingSize = io_size64((IO) userdata) * 2;
+            if (underlyingSize < 0)
                 return -1;
 
-            *io_tempdata(io) = 16;
-
-            if (offset & 1) /* Odd offset means read one character */
-                if (io_getc(io) == EOF)
-                    return -1;
+            offset += underlyingSize;
             break;
+        }
         case SEEK_CUR: {
-            long seek = offset - (*io_tempdata(io) < 16);
-
-            if (io_seek((IO) userdata, seek / 2, origin) != 0)
+            long long current = io_tell64(io);
+            if (current < 0)
                 return -1;
 
-            *io_tempdata(io) = 16;
-
-            if (seek & 1) /* Odd offset means read one character */
-                if (io_getc(io) == EOF)
-                    return -1;
-
+            offset += current;
             break;
         }
     }
 
+    if (io_seek64((IO) userdata, offset / 2, SEEK_SET) != 0)
+        return -1;
+
+    *io_tempdata(io) = 16;
+
+    if (offset & 1) /* Odd offset means read one character */
+        if (io_getc(io) == EOF)
+            return -1;
+
     return 0;
 }
 
-static int hex_encode_seek64(void *userdata, long long int offset, int origin, IO io) {
-    UNUSED(io)
-
-#if 0
-    int result = io_seek64((IO) userdata, offset, origin);
-    if (result == 0)
-        hex->nibble = 16;
-    return result;
-#endif
-
-    return -1;
-}
-
-static int hex_decode_seek(void *userdata, long int offset, int origin, IO io) {
-    return -1;
-}
-
 static int hex_decode_seek64(void *userdata, long long int offset, int origin, IO io) {
-    return -1;
-}
+    /* Translate all origins to SEEK_SET for ease of computation */
+    switch (origin) {
+        case SEEK_END: {
+            long long underlyingSize = io_size64((IO) userdata) / 2;
+            if (underlyingSize < 0)
+                return -1;
 
-static long hex_encode_tell(void *userdata, IO io) {
-    UNUSED(io)
+            offset += underlyingSize;
+            break;
+        }
+        case SEEK_CUR: {
+            long long current = io_tell64(io);
+            if (current < 0)
+                return -1;
 
-    long value = io_tell((IO) userdata);
-    return value > 0? value * 2 - (*io_tempdata(io) < 16): value;
-}
+            offset += current;
+            break;
+        }
+    }
 
-static long hex_decode_tell(void *userdata, IO io) {
-    UNUSED(io)
+    if (io_seek64((IO) userdata, offset * 2, SEEK_SET) != 0)
+        return -1;
 
-    long value = io_tell((IO) userdata);
-    return value > 0? value / 2 + (*io_tempdata(io) < 16): value;
+    *io_tempdata(io) = 16;
+
+    return 0;
 }
 
 static long long hex_encode_tell64(void *userdata, IO io) {
@@ -226,9 +227,10 @@ static const struct InputOutputDeviceCallbacks hex_encode_callbacks = {
     .open = hex_open,
     .close = NULL,
     .flush = hex_flush,
-    .tell = hex_encode_tell,
+    .stateSwitch = NULL,
+    .tell = NULL,
     .tell64 = hex_encode_tell64,
-    .seek = hex_encode_seek,
+    .seek = NULL,
     .seek64 = hex_encode_seek64,
     .what = hex_encode_what
 };
@@ -239,9 +241,10 @@ static const struct InputOutputDeviceCallbacks hex_decode_callbacks = {
     .open = hex_open,
     .close = NULL,
     .flush = hex_flush,
-    .tell = hex_decode_tell,
+    .stateSwitch = NULL,
+    .tell = NULL,
     .tell64 = hex_decode_tell64,
-    .seek = hex_decode_seek,
+    .seek = NULL,
     .seek64 = hex_decode_seek64,
     .what = hex_decode_what
 };

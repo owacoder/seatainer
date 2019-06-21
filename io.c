@@ -283,7 +283,6 @@ static int io_grow(IO io, size_t size) {
     return 0;
 }
 
-/* TODO: slate for removal? */
 static int io_current_char(IO io) {
     switch (io->type) {
         default: return EOF;
@@ -358,6 +357,14 @@ int io_readable(IO io) {
 
 int io_writable(IO io) {
     return io->flags & IO_FLAG_WRITABLE;
+}
+
+int io_just_read(IO io) {
+    return io->flags & IO_FLAG_HAS_JUST_READ;
+}
+
+int io_just_wrote(IO io) {
+    return io->flags & IO_FLAG_HAS_JUST_WRITTEN;
 }
 
 int io_binary(IO io) {
@@ -479,7 +486,7 @@ int io_flush(IO io) {
                 DWORD written;
                 if (!WriteFile(io->ptr, io->data.sizes.ptr2, io->data.sizes.pos, &written, NULL) || written != io->data.sizes.pos) {
                     io->flags |= IO_FLAG_ERROR;
-                    io->error = GetLastError(); /* TODO: map GetLastError() results to errno constants if possible */
+                    io->error = GetLastError();
                     return EOF;
                 }
 #endif
@@ -494,7 +501,7 @@ int io_flush(IO io) {
             if (io->callbacks->flush == NULL)
                 return 0;
 
-            if (io->callbacks->flush(io->ptr, io) == EOF) {
+            if (io->callbacks->flush(io->ptr, io) != 0) {
                 io->flags |= IO_FLAG_ERROR;
                 return EOF;
             }
@@ -547,7 +554,7 @@ int io_getc_internal(IO io) {
         case IO_NativeFile:
         case IO_OwnNativeFile:
         {
-            char buf;
+            unsigned char buf;
 
             if (io_read_internal(&buf, 1, 1, io) != 1)
                 return EOF;
@@ -556,7 +563,7 @@ int io_getc_internal(IO io) {
         }
         case IO_CString:
         {
-            char ch = ((const char *) io->ptr)[io->data.sizes.pos];
+            unsigned char ch = ((const char *) io->ptr)[io->data.sizes.pos];
 
             if (ch == 0) {
                 io->flags |= IO_FLAG_EOF;
@@ -565,7 +572,7 @@ int io_getc_internal(IO io) {
 
             io->data.sizes.pos++;
 
-            return (unsigned char) ch;
+            return ch;
         }
         case IO_SizedBuffer:
         case IO_MinimalBuffer:
@@ -576,7 +583,7 @@ int io_getc_internal(IO io) {
                 return EOF;
             }
 
-            return ((const char *) io->ptr)[io->data.sizes.pos++];
+            return ((const unsigned char *) io->ptr)[io->data.sizes.pos++];
         }
         case IO_Custom:
         {
@@ -817,15 +824,14 @@ IO io_open_native(const char *filename, const char *mode) {
     if (flags & IO_FLAG_WRITABLE)
         desiredAccess |= GENERIC_WRITE;
 
-    if ((flags & IO_FLAG_READABLE) && (flags & IO_FLAG_WRITABLE))
-        createFlag = (flags & IO_FLAG_UPDATE)? OPEN_ALWAYS: CREATE_ALWAYS;
+    if (flags & IO_FLAG_FAIL_IF_EXISTS)
+        createFlag = CREATE_NEW;
+    else if ((flags & IO_FLAG_READABLE) && (flags & IO_FLAG_WRITABLE))
+        createFlag = (flags & (IO_FLAG_UPDATE | IO_FLAG_APPEND))? OPEN_ALWAYS: CREATE_ALWAYS;
     else if (flags & IO_FLAG_READABLE)
         createFlag = OPEN_EXISTING;
     else if (flags & IO_FLAG_WRITABLE)
         createFlag = CREATE_ALWAYS;
-
-    if (flags & IO_FLAG_FAIL_IF_EXISTS)
-        createFlag = CREATE_NEW;
 
     HANDLE file;
 
@@ -2104,7 +2110,7 @@ static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO
 
         if (!ReadFile(io->ptr, ptr, amount, &amountRead, NULL)) {
             io->flags |= IO_FLAG_ERROR;
-            io->error = GetLastError(); /* TODO: map to errno errors instead of Windows errors if possible */
+            io->error = GetLastError();
             return totalRead / size;
         } else if (amountRead < amount) {
             io->flags |= IO_FLAG_EOF;
@@ -2330,7 +2336,6 @@ IO io_reopen(const char *filename, const char *mode, IO io) {
     }
 }
 
-/* TODO: scanf */
 int io_vscanf(IO io, const char *fmt, va_list args) {
     int items = 0;
     size_t bytes = 0;
@@ -2609,13 +2614,24 @@ int io_scanf(IO io, const char *fmt, ...) {
     return result;
 }
 
-int io_seek(IO io, long int offset, int origin) {
-    if (offset == 0 && origin == SEEK_CUR) {
-        if (io_flush(io))
+static int io_state_switch(IO io) {
+    if (io->type == IO_Custom && io->callbacks->stateSwitch != NULL) {
+        if (io->callbacks->stateSwitch(io->ptr, io))
             return -1;
-        io->flags &= ~(IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
-        return 0;
     }
+
+    if (io_flush(io))
+        return -1;
+
+    io->flags &= ~(IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
+    return 0;
+}
+
+int io_seek(IO io, long int offset, int origin) {
+    if (offset == 0 && origin == SEEK_CUR)
+        return io_state_switch(io);
+
+    io->ungetAvail = 0;
 
     switch (io->type) {
         default: break;
@@ -2739,7 +2755,6 @@ int io_seek(IO io, long int offset, int origin) {
     }
 
     io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
-    io->ungetAvail = 0;
 
     return 0;
 }
@@ -2837,6 +2852,9 @@ static int io_seek64_internal(IO io, long long int offset, int origin)
 
 #if WINDOWS_OS
 int io_seek64(IO io, long long int offset, int origin) {
+    if (offset == 0 && origin == SEEK_CUR)
+        return io_state_switch(io);
+
     switch (io->type) {
         default: return io_seek64_internal(io, offset, origin);
         case IO_File:
@@ -2869,12 +2887,8 @@ int io_seek64(IO io, long long int offset, int origin) {
 }
 #elif LINUX_OS
 int io_seek64(IO io, long long int offset, int origin) {
-    if (offset == 0 && origin == SEEK_CUR) {
-        if (io_flush(io))
-            return -1;
-        io->flags &= ~(IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
-        return 0;
-    }
+    if (offset == 0 && origin == SEEK_CUR)
+        return io_state_switch(io);
 
     switch (io->type) {
         default: return io_seek64_internal(io, offset, origin);
@@ -2899,12 +2913,8 @@ int io_seek64(IO io, long long int offset, int origin) {
 }
 #else
 int io_seek64(IO io, long long offset, int origin) {
-    if (offset == 0 && origin == SEEK_CUR) {
-        if (io_flush(io))
-            return -1;
-        io->flags &= ~(IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
-        return 0;
-    }
+    if (offset == 0 && origin == SEEK_CUR)
+        return io_state_switch(io);
 
     switch (io->type) {
         default: return io_seek64_internal(io, offset, origin);
@@ -3140,7 +3150,7 @@ size_t io_native_unbuffered_write(const void *ptr, size_t size, size_t count, IO
 
         if (!WriteFile(io->ptr, ptr, amount, &amountWritten, NULL) || amountWritten != amount) {
             io->flags |= IO_FLAG_ERROR;
-            io->error = GetLastError(); /* TODO: map to errno errors instead of Windows errors if possible */
+            io->error = GetLastError();
             return (totalWritten + amountWritten) / size;
         }
 
@@ -3469,6 +3479,10 @@ long long io_read_timeout(IO io) {
 
 long long io_write_timeout(IO io) {
     return io->write_timeout;
+}
+
+enum IO_Type io_type(IO io) {
+    return io->type;
 }
 
 const char *io_description(IO io) {

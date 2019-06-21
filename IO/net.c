@@ -580,6 +580,7 @@ static const struct InputOutputDeviceCallbacks net_callbacks = {
     .open = net_open,
     .close = net_close,
     .flush = NULL,
+    .stateSwitch = NULL,
     .tell = NULL,
     .tell64 = NULL,
     .seek = NULL,
