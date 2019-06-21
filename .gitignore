@@ -1,0 +1,5 @@
+*.o
+*.obj
+*.html
+doc/*
+seatainer*
