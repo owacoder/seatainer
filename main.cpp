@@ -484,11 +484,11 @@ int main()
     buf.slowCopyTo(bit);
     bit.close();
 
-    StringIO pkcs7str("Stringg\2\2");
-    Pkcs7PaddingDecodeIO decode(pkcs7str, 300);
+    StringIO pkcs7str("Str\3\3\1");
+    Pkcs7PaddingDecodeIO decode(pkcs7str, 3);
     HexEncodeIO hexencode2(decode);
     puts("");
-    hexencode2.slowCopyTo(FileIO(stdout));
+    hexencode2.copyTo(FileIO(stdout));
 
     puts(hexencode2.errorDescription().c_str());
 

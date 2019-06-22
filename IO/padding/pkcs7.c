@@ -151,7 +151,7 @@ size_t pkcs7_padding_decode_read(void *ptr, size_t size, size_t count, void *use
     return (size*count - max) / size;
 
 cleanup:
-    io_set_error(io, IO_EILSEQ);
+    io_set_error(io, IO_EREAD);
     return SIZE_MAX;
 }
 

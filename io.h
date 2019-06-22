@@ -390,8 +390,8 @@ IO io_open_native(const char *filename, const char *mode);
 #define IO_NATIVE_FILE_HANDLE HANDLE
 #define IO_INVALID_FILE_HANDLE INVALID_HANDLE_VALUE
 #else
-#define CC_NATIVE_FILE_HANDLE int
-#define CC_INVALID_FILE_HANDLE (-1)
+#define IO_NATIVE_FILE_HANDLE int
+#define IO_INVALID_FILE_HANDLE (-1)
 #endif
 
 IO io_open_native_file(IO_NATIVE_FILE_HANDLE descriptor, const char *mode);
@@ -440,6 +440,7 @@ int io_ungetc(int chr, IO io);
 
 #include <stdexcept>
 #include <string>
+#include <cstring>
 #include <memory>
 
 typedef IO_Pos IOPosition;
@@ -953,7 +954,7 @@ public:
 
     IO_NATIVE_FILE_HANDLE handle() const {
         if (m_io && (io_type(m_io) == IO_NativeFile || io_type(m_io) == IO_OwnNativeFile))
-            return reinterpret_cast<IO_NATIVE_FILE_HANDLE>(io_userdata(m_io));
+            return (IO_NATIVE_FILE_HANDLE) (uintmax_t) io_userdata(m_io);
 
         return IO_INVALID_FILE_HANDLE;
     }
