@@ -604,7 +604,7 @@ int io_getc_internal(IO io) {
 }
 
 int io_getc(IO io) {
-    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & IO_FLAG_HAS_JUST_WRITTEN))
+    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_EOF | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
 #if WINDOWS_OS
@@ -658,7 +658,7 @@ char *io_gets(char *str, int num, IO io) {
     char *oldstr = str;
     int oldnum = num;
 
-    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & IO_FLAG_HAS_JUST_WRITTEN))
+    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_EOF | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
 #if WINDOWS_OS
@@ -2001,7 +2001,7 @@ int io_putc_internal(int ch, IO io) {
 }
 
 int io_putc(int ch, IO io) {
-    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & IO_FLAG_HAS_JUST_READ))
+    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_EOF | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
 #if WINDOWS_OS
@@ -2027,7 +2027,7 @@ int io_putc(int ch, IO io) {
 }
 
 int io_puts(const char *str, IO io) {
-    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & IO_FLAG_HAS_JUST_READ))
+    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_EOF | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
 #if WINDOWS_OS
@@ -2134,7 +2134,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
         return 0;
 
     /* Not readable or not switched over to reading yet */
-    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & IO_FLAG_HAS_JUST_WRITTEN)) {
+    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_EOF | IO_FLAG_ERROR))) {
         io->flags |= IO_FLAG_ERROR;
 #if WINDOWS_OS
         io->error = ERROR_READ_FAULT;
@@ -3171,7 +3171,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
         return 0;
 
     /* Not writable or not switched over to writing yet */
-    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & IO_FLAG_HAS_JUST_READ))
+    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_EOF | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
 #if WINDOWS_OS
