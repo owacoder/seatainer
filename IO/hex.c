@@ -35,11 +35,7 @@ static size_t hex_decode_read(void *ptr, size_t size, size_t count, void *userda
 
         char *sptr = strchr(alpha, tolower(ch));
         if (sptr == NULL) {
-#if WINDOWS_OS
-            io_set_error(io, ERROR_INVALID_DATA);
-#else
-            io_set_error(io, EBADMSG);
-#endif
+            io_set_error(io, IO_EBADMSG);
             return SIZE_MAX;
         }
 

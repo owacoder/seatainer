@@ -423,11 +423,7 @@ int io_error(IO io) {
         default: return io->flags & IO_FLAG_ERROR? io->error: 0;
         case IO_File:
         case IO_OwnFile:
-#if WINDOWS_OS
-            return ferror(io->ptr)? ERROR_GEN_FAILURE: 0;
-#else
-            return ferror(io->ptr)? EIO: 0;
-#endif
+            return ferror(io->ptr)? IO_EIO: 0;
     }
 }
 
@@ -515,11 +511,7 @@ int io_flush(IO io) {
 
 int io_copy_and_close(IO in, IO out) {
     if (!in || !out)
-#if WINDOWS_OS
-        return ERROR_OUTOFMEMORY;
-#else
-        return ENOMEM;
-#endif
+        return IO_ENOMEM;
 
     int result = io_copy(in, out);
     io_close(in);
@@ -594,7 +586,8 @@ int io_getc_internal(IO io) {
 
             if (io->callbacks->read == NULL ||
                     io->callbacks->read(&chr, 1, 1, io->ptr, io) != 1) {
-                io->flags |= IO_FLAG_EOF;
+                if (!io_error(io))
+                    io->flags |= IO_FLAG_EOF;
                 return EOF;
             }
 
@@ -604,18 +597,17 @@ int io_getc_internal(IO io) {
 }
 
 int io_getc(IO io) {
-    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_EOF | IO_FLAG_ERROR)))
+    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-        io->error = ERROR_READ_FAULT;
-#else
-        io->error = EIO;
-#endif
+        io->error = IO_EREAD;
         return EOF;
     }
 
     io->flags |= IO_FLAG_HAS_JUST_READ;
+
+    if (io->flags & IO_FLAG_EOF)
+        return EOF;
 
     int ch = io_getc_internal(io), ch2;
     if (!(io->flags & IO_FLAG_BINARY) && (ch == '\r' || ch == '\n')) {
@@ -658,18 +650,17 @@ char *io_gets(char *str, int num, IO io) {
     char *oldstr = str;
     int oldnum = num;
 
-    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_EOF | IO_FLAG_ERROR)))
+    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-        io->error = ERROR_READ_FAULT;
-#else
-        io->error = EIO;
-#endif
+        io->error = IO_EREAD;
         return NULL;
     }
 
     io->flags |= IO_FLAG_HAS_JUST_READ;
+
+    if (io->flags & IO_FLAG_EOF)
+        return NULL;
 
     switch (io->type) {
         default: io->flags |= IO_FLAG_EOF; return NULL;
@@ -1635,11 +1626,7 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
     if (!(io->flags & IO_FLAG_WRITABLE))
     {
         io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-        io->error = ERROR_WRITE_FAULT;
-#else
-        io->error = EIO;
-#endif
+        io->error = IO_EWRITE;
         return -1;
     }
 
@@ -1953,11 +1940,7 @@ int io_putc_internal(int ch, IO io) {
     switch (io->type) {
         default:
             io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-            io->error = ERROR_WRITE_FAULT;
-#else
-            io->error = EIO;
-#endif
+            io->error = IO_EWRITE;
             return EOF;
         case IO_File:
         case IO_OwnFile: return fputc(ch, io->ptr);
@@ -1976,11 +1959,7 @@ int io_putc_internal(int ch, IO io) {
         case IO_SizedBuffer:
             if (io->data.sizes.pos == io->data.sizes.size) {
                 io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-                io->error = ERROR_DISK_FULL;
-#else
-                io->error = ENOBUFS;
-#endif
+                io->error = IO_ENOBUFS;
                 return EOF;
             }
             ((char *) io->ptr)[io->data.sizes.pos++] = (char) ch;
@@ -2001,14 +1980,10 @@ int io_putc_internal(int ch, IO io) {
 }
 
 int io_putc(int ch, IO io) {
-    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_EOF | IO_FLAG_ERROR)))
+    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-        io->error = ERROR_WRITE_FAULT;
-#else
-        io->error = EIO;
-#endif
+        io->error = IO_EWRITE;
         return EOF;
     }
 
@@ -2027,14 +2002,10 @@ int io_putc(int ch, IO io) {
 }
 
 int io_puts(const char *str, IO io) {
-    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_EOF | IO_FLAG_ERROR)))
+    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-        io->error = ERROR_WRITE_FAULT;
-#else
-        io->error = EIO;
-#endif
+        io->error = IO_EWRITE;
         return EOF;
     }
 
@@ -2043,11 +2014,7 @@ int io_puts(const char *str, IO io) {
     switch (io->type) {
         default:
             io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-            io->error = ERROR_WRITE_FAULT;
-#else
-            io->error = EIO;
-#endif
+            io->error = IO_EWRITE;
             return EOF;
         case IO_File:
         case IO_OwnFile: return fputs(str, io->ptr);
@@ -2072,11 +2039,7 @@ int io_puts(const char *str, IO io) {
             if (avail < len) {
                 len = avail;
                 io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-                io->error = ERROR_DISK_FULL;
-#else
-                io->error = ENOBUFS;
-#endif
+                io->error = IO_ENOBUFS;
                 result = EOF;
             }
 
@@ -2134,17 +2097,16 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
         return 0;
 
     /* Not readable or not switched over to reading yet */
-    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_EOF | IO_FLAG_ERROR))) {
+    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_ERROR))) {
         io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-        io->error = ERROR_READ_FAULT;
-#else
-        io->error = EIO;
-#endif
+        io->error = IO_EREAD;
         return 0;
     }
 
     io->flags |= IO_FLAG_HAS_JUST_READ;
+
+    if (io->flags & IO_FLAG_EOF)
+        return 0;
 
     switch (io->type) {
         default: io->flags |= IO_FLAG_EOF; return 0;
@@ -2269,11 +2231,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
                     read = 0;
                     io->flags |= IO_FLAG_ERROR;
                     if (io->callbacks->read == NULL)
-#if WINDOWS_OS
-                        io->error = ERROR_READ_FAULT;
-#else
-                        io->error = ENOTSUP;
-#endif
+                        io->error = IO_ENOTSUP;
                 } else {
                     io->flags |= IO_FLAG_EOF;
                 }
@@ -3171,14 +3129,10 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
         return 0;
 
     /* Not writable or not switched over to writing yet */
-    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_EOF | IO_FLAG_ERROR)))
+    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-        io->error = ERROR_WRITE_FAULT;
-#else
-        io->error = EIO;
-#endif
+        io->error = IO_EWRITE;
         return 0;
     }
 
@@ -3187,11 +3141,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
     switch (io->type) {
         default:
             io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-            io->error = ERROR_WRITE_FAULT;
-#else
-            io->error = EIO;
-#endif
+            io->error = IO_EWRITE;
             return 0;
         case IO_File:
         case IO_OwnFile: return fwrite(ptr, size, count, io->ptr);
@@ -3204,11 +3154,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
             if (io->flags & IO_FLAG_APPEND) {
                 if (io_seek(io, 0, SEEK_END)) {
                     io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-                    io->error = ERROR_SEEK_ON_DEVICE;
-#else
-                    io->error = ESPIPE;
-#endif
+                    io->error = IO_ESPIPE;
                     return 0;
                 }
             }
@@ -3246,11 +3192,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
         {
             if (io->callbacks->write == NULL) {
                 io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-                io->error = ERROR_WRITE_FAULT;
-#else
-                io->error = ENOTSUP;
-#endif
+                io->error = IO_ENOTSUP;
                 return 0;
             }
 
@@ -3268,11 +3210,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
             if (avail < max)
             {
                 io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-                io->error = ERROR_DISK_FULL;
-#else
-                io->error = ENOBUFS;
-#endif
+                io->error = IO_ENOBUFS;
 
                 max = avail - avail % size;
             }
@@ -3304,11 +3242,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
             /* grow to desired size */
             if (io_grow(io, required_size)) {
                 io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-                io->error = ERROR_OUTOFMEMORY;
-#else
-                io->error = ENOMEM;
-#endif
+                io->error = IO_ENOMEM;
 
                 max = avail - avail % size;
                 if (grow_with_gap)
@@ -3512,11 +3446,7 @@ int io_ungetc(int chr, IO io) {
     if (!(io->flags & IO_FLAG_READABLE))
     {
         io->flags |= IO_FLAG_ERROR;
-#if WINDOWS_OS
-        io->error = ERROR_READ_FAULT;
-#else
-        io->error = EIO;
-#endif
+        io->error = IO_EREAD;
         return EOF;
     }
 

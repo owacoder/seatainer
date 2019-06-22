@@ -659,10 +659,16 @@ static int aes_seek64(void *userdata, long long int offset, int origin, IO io) {
      *    - Use a mode that doesn't have this issue, like ECB or CTR modes
      */
 
+    /* Ensure writable device seeks are on an aligned boundary */
     if (io_writable(io) && offset % 16 != 0)
         return -1;
 
+    /* Ensure non-readable device is not CBC or CFB */
     if (!io_readable(io) && (aes->mode == AES_CBC || aes->mode == AES_CFB))
+        return -1;
+
+    /* Ensure OFB or PCBC seeks are only to offset 0 */
+    if ((aes->mode == AES_OFB || aes->mode == AES_PCBC) && offset != 0)
         return -1;
 
     long long blockAddr = offset - offset % 16;
@@ -673,7 +679,9 @@ static int aes_seek64(void *userdata, long long int offset, int origin, IO io) {
     switch (aes->mode) {
         default: break;
         case AES_CBC:
+        case AES_PCBC:
         case AES_CFB:
+        case AES_OFB:
             if (blockAddr == 0) /* Use IV for first block */ {
                 memcpy(aes->previous, aes->iv, 16);
             } else {

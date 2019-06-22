@@ -399,7 +399,7 @@ static size_t net_read(void *ptr, size_t size, size_t count, void *userdata, IO 
         transfer = recv((SOCKET) userdata, cptr, transfer, 0);
         if (transfer == SOCKET_ERROR) {
 #if WINDOWS_OS
-            io_set_error(io, WSAGetLastError()); /* TODO: map WSA errors to errno values? */
+            io_set_error(io, WSAGetLastError());
 #else
             io_set_error(io, errno);
 #endif
@@ -428,7 +428,7 @@ static size_t net_write(const void *ptr, size_t size, size_t count, void *userda
         transfer = send((SOCKET) userdata, cptr, transfer, 0);
         if (transfer == SOCKET_ERROR) {
 #if WINDOWS_OS
-            io_set_error(io, WSAGetLastError()); /* TODO: map WSA errors to errno values? */
+            io_set_error(io, WSAGetLastError());
 #else
             io_set_error(io, errno);
 #endif

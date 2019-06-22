@@ -480,8 +480,17 @@ int main()
     StringIO buf((const char *) key, 5);
     FileIO outf(stdout);
     HexEncodeIO hexencode(outf);
-    Pkcs7PaddingIO bit(hexencode, 4);
+    Pkcs7PaddingEncodeIO bit(hexencode, 4);
     buf.slowCopyTo(bit);
+    bit.close();
+
+    StringIO pkcs7str("Stringg\2\2");
+    Pkcs7PaddingDecodeIO decode(pkcs7str, 300);
+    HexEncodeIO hexencode2(decode);
+    puts("");
+    hexencode2.slowCopyTo(FileIO(stdout));
+
+    puts(hexencode2.errorDescription().c_str());
 
     return 0;
 
