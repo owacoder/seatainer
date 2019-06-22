@@ -48,8 +48,10 @@ size_t bit_padding_encode_read(void *ptr, size_t size, size_t count, void *userd
     size_t max = size*count;
     size_t read = io_read(ptr, 1, max, padding->io);
 
+    padding->written += read;
+
     if (read == max) /* Read everything */
-        padding->written += read;
+        ;
     else if (io_eof(padding->io)) { /* Ran out of data while reading */
         unsigned char *cptr = ptr;
 
