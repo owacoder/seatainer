@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "platforms.h"
+
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #define C11
 
@@ -64,51 +66,6 @@
                            HLinkedList: cc_ll_insert_after((container), (iterator), (data), (constructor)), \
                            HDoublyLinkedList: cc_dll_insert_after((container), (iterator), (data), (constructor))))
 
-#endif
-
-/* C89/C99/C11 keywords */
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
-#define C99
-#define INLINE inline
-#define RESTRICT restrict
-#define INLINE_DEFINITION(x) x
-#endif
-
-#define C89
-#ifndef INLINE
-#define INLINE
-#endif
-#ifndef RESTRICT
-#define RESTRICT
-#endif
-#ifndef INLINE_DEFINITION
-#define INLINE_DEFINITION(x) ;
-#endif
-
-/* Memory management */
-#ifndef MALLOC
-#define MALLOC(count,objsize) malloc((count)*(objsize))
-#endif
-
-#ifndef REALLOC
-#define REALLOC(ptr,count,objsize) realloc((ptr), (count)*(objsize))
-#endif
-
-#ifndef CALLOC
-#define CALLOC(count,objsize) calloc((count),(objsize))
-#endif
-
-#ifndef FREE
-#define FREE(ptr) free((ptr))
-#endif
-
-/* Min/Max */
-#ifndef MAX
-#define MAX(x, y) ((x) < (y)? (y): (x))
-#endif
-
-#ifndef MIN
-#define MIN(x, y) ((x) < (y)? (x): (y))
 #endif
 
 /* Swap */

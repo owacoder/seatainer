@@ -37,7 +37,7 @@ int bit_padding_encode_close(void *userdata, IO io) {
             }
     }
 
-    free(userdata);
+    FREE(userdata);
 
     return err;
 }
@@ -126,13 +126,13 @@ static const struct InputOutputDeviceCallbacks bit_padding_encode_callbacks = {
 };
 
 IO io_open_bit_padding_encode(IO io, size_t block_size, const char *mode) {
-    struct BitPadding *padding = calloc(1, sizeof(*padding));
+    struct BitPadding *padding = CALLOC(1, sizeof(*padding));
     if (padding == NULL)
         return NULL;
 
     IO result = io_open_custom(&bit_padding_encode_callbacks, padding, mode);
     if (result == NULL) {
-        free(padding);
+        FREE(padding);
         return NULL;
     }
 

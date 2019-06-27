@@ -83,7 +83,7 @@ static void cc_ll_set_size(HLinkedList list, size_t size)
 
 HLinkedList cc_ll_init(ContainerElementType type, HContainerElementMetaData externalMeta)
 {
-    HLinkedList result = MALLOC(cc_ll_sizeof(), 1);
+    HLinkedList result = MALLOC(cc_ll_sizeof());
 
     if (!result || CC_OK != cc_ll_init_at(result, cc_ll_sizeof(), type, externalMeta))
     {
@@ -185,7 +185,7 @@ int cc_ll_insert_after(HLinkedList list, unsigned flags, Iterator after, HConstE
     int element_was_constructed = 0;
 
     /* In C99, we can initialize with a flexible array member */
-    HLinkedListNode ptr = MALLOC(sizeof(*ptr) + cc_el_metadata_type_size(list->metadata), 1);
+    HLinkedListNode ptr = MALLOC(sizeof(*ptr) + cc_el_metadata_type_size(list->metadata));
     if (!ptr)
         CC_NO_MEM_HANDLER("out of memory");
 
@@ -207,7 +207,7 @@ int cc_ll_insert_after(HLinkedList list, unsigned flags, Iterator after, HConstE
     }
 #else
     /* TODO: not implemented yet */
-    HLinkedListNode ptr = MALLOC(sizeof(*ptr), 1);
+    HLinkedListNode ptr = MALLOC(sizeof(*ptr));
     if (!ptr)
         CC_NO_MEM_HANDLER("out of memory");
 

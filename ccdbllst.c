@@ -109,7 +109,7 @@ size_t cc_dll_max_capacity()
 
 HDoublyLinkedList cc_dll_init(ContainerElementType type)
 {
-    HDoublyLinkedList result = MALLOC(cc_dll_sizeof(), 1);
+    HDoublyLinkedList result = MALLOC(cc_dll_sizeof());
 
     if (!result || CC_OK != cc_dll_init_at(result, cc_dll_sizeof(), type))
     {
@@ -209,7 +209,7 @@ int cc_dll_insert_after(HDoublyLinkedList list, unsigned flags, Iterator after, 
     int element_was_constructed = 0;
 
     /* In C99, we can initialize with a flexible array member */
-    HDoublyLinkedListNode ptr = MALLOC(sizeof(*ptr) + cc_el_metadata_type_size(list->metadata), 1);
+    HDoublyLinkedListNode ptr = MALLOC(sizeof(*ptr) + cc_el_metadata_type_size(list->metadata));
     if (!ptr)
         CC_NO_MEM_HANDLER("out of memory");
 
@@ -231,7 +231,7 @@ int cc_dll_insert_after(HDoublyLinkedList list, unsigned flags, Iterator after, 
     }
 #else
     /* TODO: not implemented yet */
-    HDoublyLinkedListNode ptr = MALLOC(sizeof(*ptr), 1);
+    HDoublyLinkedListNode ptr = MALLOC(sizeof(*ptr));
     if (!ptr)
         CC_NO_MEM_HANDLER("out of memory");
 

@@ -118,7 +118,7 @@ static void end_md5(struct Md5 *md5) {
 static void *md5_open(void *userdata, IO io) {
     UNUSED(io)
 
-    struct Md5 *result = calloc(1, sizeof(struct Md5));
+    struct Md5 *result = CALLOC(1, sizeof(struct Md5));
     if (result == NULL)
         return NULL;
 
@@ -148,7 +148,7 @@ static int md5_close(void *userdata, IO io) {
         result = io_write(state, 4, 4, md5->io) != 4? io_error(md5->io): 0;
     }
 
-    free(userdata);
+    FREE(userdata);
     return result;
 }
 

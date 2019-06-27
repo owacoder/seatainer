@@ -902,7 +902,7 @@ int cc_el_init_at(void *buf, size_t buffer_size, ContainerElementType type, HCon
 
 HElementData cc_el_init(ContainerElementType type, HContainerElementMetaData metadata, ElementDataCallback construct, int *err)
 {
-    HElementData result = MALLOC(cc_el_sizeof(), 1);
+    HElementData result = MALLOC(cc_el_sizeof());
     if (!result)
         return NULL;
 
@@ -1501,7 +1501,7 @@ size_t cc_el_metadata_sizeof()
 
 HContainerElementMetaData cc_el_make_metadata(ContainerElementType type)
 {
-    HContainerElementMetaData result = MALLOC(sizeof(*result), 1);
+    HContainerElementMetaData result = MALLOC(sizeof(*result));
 
     if (!result || CC_OK != cc_el_make_metadata_at(result, cc_el_metadata_sizeof(), type))
         return NULL;

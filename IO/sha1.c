@@ -291,7 +291,7 @@ static void end_sha1(struct Sha1 *sha1) {
 static void *sha1_open(void *userdata, IO io) {
     UNUSED(io)
 
-    struct Sha1 *result = calloc(1, sizeof(struct Sha1));
+    struct Sha1 *result = CALLOC(1, sizeof(struct Sha1));
     if (result == NULL)
         return NULL;
 
@@ -333,7 +333,7 @@ static int sha1_close(void *userdata, IO io) {
         result = io_write(state, 4, 5, sha1->io) != 5? io_error(sha1->io): 0;
     }
 
-    free(userdata);
+    FREE(userdata);
     return result;
 }
 

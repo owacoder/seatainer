@@ -557,10 +557,10 @@ public:
         try {
             result = desc;
         } catch (...) {
-            free(desc);
+            FREE(desc);
             throw;
         }
-        free(desc);
+        FREE(desc);
 
         return result;
     }
@@ -971,7 +971,7 @@ class StringIO : public IODevice {
 protected:
     void closing() {
         char *ptr = m_io? io_underlying_buffer(m_io): NULL;
-        free(ptr);
+        FREE(ptr);
     }
 
 public:

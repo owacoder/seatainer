@@ -58,7 +58,7 @@ struct HashTable {
 static void *create_block_pair(HHashTable table, HConstElementData key, HConstElementData value, unsigned flags)
 {
     int fully_initialized = 0;
-    void *ptr = MALLOC(MAX(cc_el_metadata_type_size(table->key_meta), cc_el_metadata_type_size(table->value_meta)), 2);
+    void *ptr = MALLOC(MAX(cc_el_metadata_type_size(table->key_meta), cc_el_metadata_type_size(table->value_meta)) * 2);
 
     if (!ptr)
         return NULL;

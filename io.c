@@ -220,7 +220,7 @@ static IO io_alloc(enum IO_Type type) {
             return io;
     }
 
-    io = malloc(sizeof(struct InputOutputDevice));
+    io = MALLOC(sizeof(struct InputOutputDevice));
     if (io == NULL)
         return NULL;
 
@@ -237,12 +237,12 @@ static IO io_alloc(enum IO_Type type) {
 
 static void io_destroy(IO io) {
     if (io->flags & IO_FLAG_OWNS_BUFFER) {
-        free(io->data.sizes.ptr2);
+        FREE(io->data.sizes.ptr2);
         io->flags &= ~IO_FLAG_OWNS_BUFFER;
     }
 
     if (io->flags & IO_FLAG_DYNAMIC)
-        free(io);
+        FREE(io);
     else
         io->flags = 0;
 }
@@ -267,7 +267,7 @@ static int io_grow(IO io, size_t size) {
 
     char *new_data = NULL;
     while (1) {
-        new_data = realloc(io->ptr, growth);
+        new_data = REALLOC(io->ptr, growth);
 
         if (new_data != NULL) /* Success! */
             break;
@@ -439,7 +439,14 @@ char *io_error_description_alloc(int err) {
 
     return NULL;
 #else
-    return strdup(strerror(err));
+    char *error_string = strerror(err);
+    size_t error_string_len = strlen(error_string);
+
+    char *new_string = MALLOC(error_string_len + 1);
+    if (new_string != NULL)
+        memcpy(new_string, error_string, error_string_len + 1);
+
+    return new_string;
 #endif
 }
 
@@ -852,7 +859,7 @@ IO io_open_native(const char *filename, const char *mode) {
                            FILE_ATTRIBUTE_NORMAL,
                            NULL);
 
-        free(wide);
+        FREE(wide);
     }
 
     if (file == INVALID_HANDLE_VALUE) {
@@ -1299,7 +1306,7 @@ static void io_printf_f_long(long double value, unsigned flags, unsigned prec, u
     double oldval = value;
 
     if (complete_len > sizeof(state->internalBuffer)) {
-        mbuf = state->buffer = malloc(complete_len);
+        mbuf = state->buffer = MALLOC(complete_len);
         if (mbuf == NULL) {
             state->flags |= PRINTF_STATE_ERROR;
             return;
@@ -1349,7 +1356,7 @@ static void io_printf_f(double value, unsigned flags, unsigned prec, unsigned le
     double oldval = value;
 
     if (complete_len > sizeof(state->internalBuffer)) {
-        mbuf = state->buffer = malloc(complete_len);
+        mbuf = state->buffer = MALLOC(complete_len);
         if (mbuf == NULL) {
             state->flags |= PRINTF_STATE_ERROR;
             return;
@@ -1904,7 +1911,7 @@ done_with_flags:
                             CLEANUP(-1);
 
                     if (state.flags & PRINTF_STATE_FREE_BUFFER)
-                        free(state.buffer);
+                        FREE(state.buffer);
                 } else if (io_putc(*fmt, io) == EOF)
                     return -1;
                 else
@@ -1918,7 +1925,7 @@ done_with_flags:
 
 cleanup:
     if (state.flags & PRINTF_STATE_FREE_BUFFER)
-        free(state.buffer);
+        FREE(state.buffer);
 
     va_end(args_copy.args);
 
@@ -3317,7 +3324,7 @@ int io_setvbuf(IO io, char *buf, int mode, size_t size) {
         case IO_NativeFile:
         case IO_OwnNativeFile:
             if (io->flags & IO_FLAG_OWNS_BUFFER) {
-                free(io->data.sizes.ptr2);
+                FREE(io->data.sizes.ptr2);
                 io->flags &= ~IO_FLAG_OWNS_BUFFER;
             }
 
@@ -3326,7 +3333,7 @@ int io_setvbuf(IO io, char *buf, int mode, size_t size) {
                 io->data.sizes.size = io->data.sizes.pos = 0;
             } else if (buf == NULL) {
                 io->data.sizes.size = io->data.sizes.pos = 0;
-                if ((io->data.sizes.ptr2 = malloc(size)) == NULL)
+                if ((io->data.sizes.ptr2 = MALLOC(size)) == NULL)
                     return -1;
                 io->data.sizes.size = size;
                 io->flags |= IO_FLAG_OWNS_BUFFER;
@@ -3387,7 +3394,7 @@ static int io_set_timeout(IO io, int type, long long usecs) {
         timeout_us.tv_sec = 0;
         timeout_us.tv_usec = usecs;
 
-        if (setsockopt((SOCKET) io->ptr, SOL_SOCKET, type, (const char *) &timeout_us, sizeof(timeout_us)))
+        if (setsockopt((SOCKET) (uintptr_t) io->ptr, SOL_SOCKET, type, (const char *) &timeout_us, sizeof(timeout_us)))
             return errno;
 
         if (type == SO_RCVTIMEO)

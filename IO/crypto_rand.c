@@ -21,19 +21,19 @@ static void *crypto_rand_open(void *userdata, IO io) {
     UNUSED(userdata)
     UNUSED(io)
 
-    struct CryptoRand *result = calloc(1, sizeof(struct CryptoRand));
+    struct CryptoRand *result = CALLOC(1, sizeof(struct CryptoRand));
     if (result == NULL)
         return result;
 
     result->library = LoadLibraryA("advapi32");
     if (result->library == NULL) {
-        free(result);
+        FREE(result);
         return NULL;
     }
 
     result->RtlGenRandom = (RtlGenRandomType) GetProcAddress(result->library, "SystemFunction036");
     if (result->RtlGenRandom == NULL) {
-        free(result);
+        FREE(result);
         return NULL;
     }
 
@@ -46,7 +46,7 @@ static int crypto_rand_close(void *userdata, IO io) {
     struct CryptoRand *cryptoRand = userdata;
 
     FreeLibrary(cryptoRand->library);
-    free(cryptoRand);
+    FREE(cryptoRand);
 
     return 0;
 }

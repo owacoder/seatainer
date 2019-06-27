@@ -153,7 +153,7 @@ const char *path_str(Path path) {
 }
 
 Path path_construct_ref(char *pathBuffer) {
-    Path result = malloc(sizeof(*result));
+    Path result = MALLOC(sizeof(*result));
     if (!result)
         return NULL;
 
@@ -168,7 +168,7 @@ Path path_construct_gather(const char *args[], size_t segments) {
     for (size_t i = 0; i < segments; ++i)
         totalLen += strlen(args[i]);
 
-    Path result = malloc(sizeof(*result) + totalLen + 1);
+    Path result = MALLOC(sizeof(*result) + totalLen + 1);
     if (!result)
         return NULL;
     result->external = NULL;
@@ -197,7 +197,7 @@ Path path_construct(const char *path, const char *name) {
     size_t nameLen = name? strlen(name): 0;
     int add_separator = pathLen && !path_check_separator(path[pathLen-1]);
 
-    Path result = malloc(sizeof(*result) + pathLen + add_separator + nameLen + 1);
+    Path result = MALLOC(sizeof(*result) + pathLen + add_separator + nameLen + 1);
     if (!result)
         return NULL;
 
@@ -226,7 +226,7 @@ Path path_copy(Path path, const char *name) {
 }
 
 void path_destroy(Path path) {
-    free(path);
+    FREE(path);
 }
 
 char *path_up_cstr(char *pathStr) {
@@ -522,7 +522,7 @@ Directory dir_open_with_mode(const char *dir, const char *mode) {
     UNUSED(mode)
 
     size_t len = strlen(dir);
-    Directory result = calloc(1, sizeof(*result) + len + 258);
+    Directory result = CALLOC(1, sizeof(*result) + len + 258);
     if (result == NULL)
         return NULL;
 
@@ -568,7 +568,7 @@ Directory dir_open_with_mode(const char *dir, const char *mode) {
         name[len++] = '\\';
     name[len] = 0;
 
-    Directory result = calloc(1, sizeof(*result));
+    Directory result = CALLOC(1, sizeof(*result));
     if (result == NULL)
         return NULL;
 
@@ -590,13 +590,13 @@ Directory dir_open_with_mode(const char *dir, const char *mode) {
     } else {
         LPWSTR wide = utf8_to_wide_alloc(name);
         if (!wide) {
-            free(result);
+            FREE(result);
             return NULL;
         }
 
         result->findFirstHandle = FindFirstFileW(wide, &result->findData.fdata.wdata);
 
-        free(wide);
+        FREE(wide);
 
         result->findData.is_wide = result->lastFoundData.is_wide = 1;
     }
@@ -674,7 +674,7 @@ void dir_close(Directory dir) {
         FindClose(dir->findFirstHandle);
 #endif
 
-    free(dir);
+    FREE(dir);
 }
 
 DirectoryEntry dirent_open(const char *path) {
@@ -685,20 +685,20 @@ DirectoryEntry dirent_open_with_mode(const char *path, const char *mode) {
     UNUSED(mode)
 
     size_t pathLen = strlen(path);
-    DirectoryEntry entry = calloc(1, sizeof(*entry));
+    DirectoryEntry entry = CALLOC(1, sizeof(*entry));
     Directory dir = NULL;
     if (!entry)
         return NULL;
 
 #if LINUX_OS
-    dir = calloc(1, sizeof(*dir) + pathLen + 1);
+    dir = CALLOC(1, sizeof(*dir) + pathLen + 1);
     if (!dir)
         goto cleanup;
 #else
     if (pathLen > MAX_PATH)
         goto cleanup;
 
-    dir = calloc(1, sizeof(*dir));
+    dir = CALLOC(1, sizeof(*dir));
     if (!dir)
         goto cleanup;
 #endif
@@ -730,16 +730,16 @@ DirectoryEntry dirent_open_with_mode(const char *path, const char *mode) {
 
         LPWSTR wideName = utf8_to_wide_alloc(name);
         if (!wideName || wcslen(wideName) > MAX_PATH - 1) {
-            free(wide);
-            free(wideName);
+            FREE(wide);
+            FREE(wideName);
             goto cleanup;
         }
 
         wcscpy(entry->fdata.wdata.cFileName, wideName);
         dir->findFirstHandle = FindFirstFileW(wide, &entry->fdata.wdata);
 
-        free(wide);
-        free(wideName);
+        FREE(wide);
+        FREE(wideName);
 
         entry->is_wide = 1;
     }
@@ -761,8 +761,8 @@ DirectoryEntry dirent_open_with_mode(const char *path, const char *mode) {
     return entry;
 
 cleanup:
-    free(entry);
-    free(dir);
+    FREE(entry);
+    FREE(dir);
     return NULL;
 }
 
@@ -777,7 +777,7 @@ DirectoryEntry dirent_copy(DirectoryEntry entry) {
 void dirent_close(DirectoryEntry entry) {
     if (entry->ownedDir) {
         dir_close(entry->ownedDir);
-        free(entry);
+        FREE(entry);
     }
 }
 
@@ -806,7 +806,7 @@ int dirent_refresh(DirectoryEntry entry) {
 
             entry->ownedDir->findFirstHandle = FindFirstFileW(wide, &entry->fdata.wdata);
 
-            free(wide);
+            FREE(wide);
         }
 
         if (entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)

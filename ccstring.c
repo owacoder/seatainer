@@ -118,7 +118,7 @@ HString cc_s_grow(HString str, size_t size)
 
     /* Allocate storage */
     char *old_data = cc_s_is_tight(str)? NULL: str->d.helper.data;
-    char *new_data = REALLOC(old_data, new_size, 1);
+    char *new_data = REALLOC(old_data, new_size);
     if (new_data == NULL)
         return NULL; /* Leave `str` unchanged on failure to allocate */
 

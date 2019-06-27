@@ -56,7 +56,7 @@ size_t cc_v_max_capacity()
 
 HVector cc_v_init(ContainerElementType type)
 {
-    HVector result = MALLOC(cc_v_sizeof(), 1);
+    HVector result = MALLOC(cc_v_sizeof());
 
     if (!result || CC_OK != cc_v_init_at(result, cc_v_sizeof(), type))
     {
@@ -102,7 +102,7 @@ HVector cc_v_grow(HVector list, size_t size)
     size_t new_size = MAX(size, list->capacity + (list->capacity >> 1));
     new_size = MAX(8, new_size);
 
-    char *new_data = REALLOC(list->data, new_size, cc_el_metadata_type_size(list->metadata));
+    char *new_data = REALLOC(list->data, new_size * cc_el_metadata_type_size(list->metadata));
     if (new_data == NULL)
         return NULL; /* Leave `list` unchanged on failure to allocate */
 

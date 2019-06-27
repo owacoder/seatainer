@@ -1,7 +1,9 @@
 #include "net.h"
 #include "../utility.h"
+
 #include <string.h>
 #include <limits.h>
+#include <ctype.h>
 
 struct UrlStruct {
     /** Contains the scheme of the URL */
@@ -36,7 +38,7 @@ struct UrlStruct {
 };
 
 void url_destroy(Url url) {
-    free(url);
+    FREE(url);
 }
 
 char *url_percent_encoded_from_utf8(const char *url) {
@@ -89,13 +91,13 @@ Url url_from_utf8(const char *url) {
         return NULL;
 
     Url result = url_from_percent_encoded(percent_encoded);
-    free(percent_encoded);
+    FREE(percent_encoded);
 
     return result;
 }
 
 Url url_from_percent_encoded(const char *url) {
-    Url result = calloc(1, sizeof(*result) + strlen(url) + 1);
+    Url result = CALLOC(1, sizeof(*result) + strlen(url) + 1);
     if (result == NULL)
         return NULL;
 
@@ -396,7 +398,7 @@ static size_t net_read(void *ptr, size_t size, size_t count, void *userdata, IO 
     do {
         int transfer = max > INT_MAX? INT_MAX: max;
 
-        transfer = recv((SOCKET) userdata, cptr, transfer, 0);
+        transfer = recv((SOCKET) (uintptr_t) userdata, cptr, transfer, 0);
         if (transfer == SOCKET_ERROR) {
 #if WINDOWS_OS
             io_set_error(io, WSAGetLastError());
@@ -425,7 +427,7 @@ static size_t net_write(const void *ptr, size_t size, size_t count, void *userda
         int transfer = max > INT_MAX? INT_MAX: max;
 
         /* TODO: no protection against sending UDP packets that are too large */
-        transfer = send((SOCKET) userdata, cptr, transfer, 0);
+        transfer = send((SOCKET) (uintptr_t) userdata, cptr, transfer, 0);
         if (transfer == SOCKET_ERROR) {
 #if WINDOWS_OS
             io_set_error(io, WSAGetLastError());
@@ -534,7 +536,7 @@ static void *net_open(void *userdata, IO io) {
     freeaddrinfo(result);
 
     if (sock != INVALID_SOCKET)
-        return (void *) sock;
+        return (void *) (uintptr_t) sock;
 
 cleanup:
 #if WINDOWS_OS
@@ -557,7 +559,7 @@ static int net_close(void *userdata, IO io) {
 
     WSACleanup();
 #elif LINUX_OS
-    int result = close((SOCKET) userdata);
+    int result = close((SOCKET) (uintptr_t) userdata);
 #endif
 
     return result;

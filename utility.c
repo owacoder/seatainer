@@ -301,7 +301,7 @@ char *strgather(char *strings[], size_t stringsCount) {
         totalLen += strlen(strings[i]);
     }
     
-    char *result = malloc(totalLen + 1), *ptr = result;
+    char *result = MALLOC(totalLen + 1), *ptr = result;
     if (result == NULL)
         return NULL;
         
@@ -683,7 +683,7 @@ int str_is_codepage_safe(LPCSTR utf8) {
 LPWSTR utf8_to_wide_alloc(LPCSTR utf8) {
     int chars = MultiByteToWideChar(CP_UTF8, MB_PRECOMPOSED, utf8, -1, NULL, 0);
 
-    LPWSTR result = malloc(sizeof(*result) * chars);
+    LPWSTR result = MALLOC(sizeof(*result) * chars);
     if (!result)
         return NULL;
 
@@ -695,7 +695,7 @@ LPWSTR utf8_to_wide_alloc(LPCSTR utf8) {
 LPSTR wide_to_utf8_alloc(LPCWSTR wide) {
     int bytes = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
 
-    LPSTR result = malloc(bytes);
+    LPSTR result = MALLOC(bytes);
     if (!result)
         return NULL;
 

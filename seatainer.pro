@@ -10,8 +10,8 @@ DEFINES += CC_TYPE_MISMATCH_ABORT \
            CC_NO_MEM_ABORT \
            CC_BAD_PARAM_ABORT \
            CC_NO_SUCH_METHOD_ABORT \
-           CC_IO_STATIC_INSTANCES=20 \
-           CC_INCLUDE_NETWORK
+           CC_INCLUDE_NETWORK \
+           PLATFORMS_CONFIG
 
 win32 {
     LIBS += -lWs2_32
@@ -36,7 +36,8 @@ SOURCES += \
     dir.c \
     main.cpp \
     IO/padding/bit.c \
-    IO/padding/pkcs7.c
+    IO/padding/pkcs7.c \
+    tinymalloc.c
 
 HEADERS += \
     ccdbllst.h \
@@ -57,7 +58,9 @@ HEADERS += \
     IO/tee.h \
     dir.h \
     IO/padding/bit.h \
-    IO/padding/pkcs7.h
+    IO/padding/pkcs7.h \
+    tinymalloc.h \
+    platforms_config.h
 
 DISTFILES += \
     README.md

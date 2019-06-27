@@ -41,7 +41,7 @@ int pkcs7_padding_encode_close(void *userdata, IO io) {
             }
     }
 
-    free(userdata);
+    FREE(userdata);
 
     return err;
 }
@@ -49,7 +49,7 @@ int pkcs7_padding_encode_close(void *userdata, IO io) {
 int pkcs7_padding_decode_close(void *userdata, IO io) {
     UNUSED(io)
 
-    free(userdata);
+    FREE(userdata);
 
     return 0;
 }
@@ -230,13 +230,13 @@ IO io_open_pkcs7_padding_encode(IO io, size_t block_size, const char *mode) {
     if (block_size > 255)
         return NULL;
 
-    struct Pkcs7Padding *padding = calloc(1, sizeof(*padding));
+    struct Pkcs7Padding *padding = CALLOC(1, sizeof(*padding));
     if (padding == NULL)
         return NULL;
 
     IO result = io_open_custom(&pkcs7_padding_encode_callbacks, padding, mode);
     if (result == NULL) {
-        free(padding);
+        FREE(padding);
         return NULL;
     }
 
@@ -251,13 +251,13 @@ IO io_open_pkcs7_padding_decode(IO io, size_t block_size, const char *mode) {
     if (block_size > 255)
         return NULL;
 
-    struct Pkcs7PaddingDecode *padding = calloc(1, sizeof(*padding));
+    struct Pkcs7PaddingDecode *padding = CALLOC(1, sizeof(*padding));
     if (padding == NULL)
         return NULL;
 
     IO result = io_open_custom(&pkcs7_padding_decode_callbacks, padding, mode);
     if (result == NULL) {
-        free(padding);
+        FREE(padding);
         return NULL;
     }
 

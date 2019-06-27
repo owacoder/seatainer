@@ -595,7 +595,7 @@ static int aes_close(void *userdata, IO io) {
 
     memset(userdata, 0, sizeof(struct AES_ctx));
 
-    free(userdata);
+    FREE(userdata);
     return 0;
 }
 
@@ -702,7 +702,7 @@ static int aes_seek64(void *userdata, long long int offset, int origin, IO io) {
     offset %= 16;
     if (offset) {
         char dummy[16];
-        if (io_read(dummy, 1, offset, io) != offset)
+        if (io_read(dummy, 1, (size_t) offset, io) != (size_t) offset)
             return -1;
     }
 
@@ -771,13 +771,13 @@ static const struct InputOutputDeviceCallbacks aes_callbacks = {
  *  @return A new IO device filter that encrypts AES data, or `NULL` if a failure occured.
  */
 IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode) {
-    struct AES_ctx *ctx = calloc(1, sizeof(struct AES_ctx));
+    struct AES_ctx *ctx = CALLOC(1, sizeof(struct AES_ctx));
     if (ctx == NULL)
         return NULL;
 
     IO result = io_open_custom(&aes_callbacks, ctx, mode);
     if (result == NULL) {
-        free(ctx);
+        FREE(ctx);
         return NULL;
     }
 
@@ -832,13 +832,13 @@ IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, cons
  *  @return A new IO device filter that decrypts AES data, or `NULL` if a failure occured.
  */
 IO io_open_aes_decrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode) {
-    struct AES_ctx *ctx = calloc(1, sizeof(struct AES_ctx));
+    struct AES_ctx *ctx = CALLOC(1, sizeof(struct AES_ctx));
     if (ctx == NULL)
         return NULL;
 
     IO result = io_open_custom(&aes_callbacks, ctx, mode);
     if (result == NULL) {
-        free(ctx);
+        FREE(ctx);
         return NULL;
     }
 

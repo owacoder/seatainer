@@ -510,7 +510,7 @@ int main()
             printf("Error: %d\n", httperr);
         else
             printf("Error: %s\n", err);
-        free(err);
+        FREE(err);
     }
     url_destroy(url);
 

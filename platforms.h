@@ -7,6 +7,55 @@
 #ifndef PLATFORMS_H
 #define PLATFORMS_H
 
+/* C89/C99/C11 keywords */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+#define C99
+#define INLINE inline
+#define RESTRICT restrict
+#define INLINE_DEFINITION(x) x
+#endif
+
+#define C89
+#ifndef INLINE
+#define INLINE
+#endif
+#ifndef RESTRICT
+#define RESTRICT
+#endif
+#ifndef INLINE_DEFINITION
+#define INLINE_DEFINITION(x) ;
+#endif
+
+#ifdef PLATFORMS_CONFIG
+#include <platforms_config.h>
+#endif
+
+/* Memory management */
+#ifndef MALLOC
+#define MALLOC malloc
+#endif
+
+#ifndef REALLOC
+#define REALLOC realloc
+#endif
+
+#ifndef CALLOC
+#define CALLOC calloc
+#endif
+
+#ifndef FREE
+#define FREE free
+#endif
+
+/* Min/Max */
+#ifndef MAX
+#define MAX(x, y) ((x) < (y)? (y): (x))
+#endif
+
+#ifndef MIN
+#define MIN(x, y) ((x) < (y)? (x): (y))
+#endif
+
 #ifdef __clang__
 #define CLANG_COMPILER 1
 #else
