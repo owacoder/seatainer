@@ -337,6 +337,10 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
 
 void io_clearerr(IO io) {
     switch (io->type) {
+        case IO_Custom:
+            if (io->callbacks->clearerr != NULL)
+                io->callbacks->clearerr(io->ptr, io);
+            /* fallthrough */
         default: io->flags &= ~(IO_FLAG_ERROR | IO_FLAG_EOF); break;
         case IO_File:
         case IO_OwnFile: clearerr(io->ptr); break;
@@ -352,6 +356,20 @@ int io_close(IO io) {
     io_destroy(io);
 
     return result;
+}
+
+int io_vclose(int count, ...) {
+    va_list args;
+    va_start(args, count);
+    int err = 0;
+
+    while (count-- > 0) {
+        IO io = va_arg(args, IO);
+        err |= io_close(io) != 0;
+    }
+
+    va_end(args);
+    return err? EOF: 0;
 }
 
 int io_readable(IO io) {
@@ -2100,8 +2118,15 @@ static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO
 }
 
 static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
-    if (size == 0 || count == 0)
+    const size_t total = safe_multiply(size, count);
+
+    if (total == 0) {
+        if (size && count) {
+            io->flags |= IO_FLAG_ERROR;
+            io->error = IO_EINVAL;
+        }
         return 0;
+    }
 
     /* Not readable or not switched over to reading yet */
     if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_ERROR))) {
@@ -2122,7 +2147,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
         case IO_NativeFile:
         case IO_OwnNativeFile:
         {
-            size_t max = size*count;
+            size_t max = total;
             unsigned char *cptr = ptr;
 
             if (io->data.sizes.ptr2 == NULL) /* No buffering */
@@ -2166,7 +2191,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
         {
             unsigned char *cptr = ptr;
             size_t blocks = 0;
-            size_t i = io->ungetAvail, max = size*count;
+            size_t i = io->ungetAvail, max = total;
             size_t start_pos = io->data.sizes.pos;
 
             /* search for 0 character in C-string */
@@ -2198,7 +2223,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
         case IO_DynamicBuffer:
         {
             unsigned char *cptr = ptr;
-            size_t max = size*count, blocks = 0;
+            size_t max = total, blocks = 0;
             size_t avail = io->data.sizes.size - io->data.sizes.pos;
 
             if (io->data.sizes.pos > io->data.sizes.size)
@@ -2226,7 +2251,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
         case IO_Custom:
         {
             unsigned char *cptr = ptr;
-            size_t max = size*count, blocks = 0, read = 0;
+            size_t max = total, blocks = 0, read = 0;
 
             /* copy the blocks */
             for (; max && io->ungetAvail; --max, ++blocks)
@@ -2255,7 +2280,17 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
     if (io->flags & IO_FLAG_BINARY)
         return io_read_internal(ptr, size, count, io);
 
-    size_t max = size*count;
+    const size_t total = safe_multiply(size, count);
+
+    if (total == 0) {
+        if (size && count) {
+            io->flags |= IO_FLAG_ERROR;
+            io->error = IO_EINVAL;
+        }
+        return 0;
+    }
+
+    size_t max = total;
     unsigned char *cptr = ptr;
     for (; max; --max) {
         int ch = io_getc(io);
@@ -2264,7 +2299,7 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
         *cptr++ = ch;
     }
 
-    return (size*count - max) / size;
+    return (total - max) / size;
 }
 
 IO io_reopen(const char *filename, const char *mode, IO io) {
@@ -3132,8 +3167,15 @@ size_t io_native_unbuffered_write(const void *ptr, size_t size, size_t count, IO
 }
 
 static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO io) {
-    if (size == 0 || count == 0)
+    const size_t total = safe_multiply(size, count);
+
+    if (total == 0) {
+        if (size && count) {
+            io->flags |= IO_FLAG_ERROR;
+            io->error = IO_EINVAL;
+        }
         return 0;
+    }
 
     /* Not writable or not switched over to writing yet */
     if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_ERROR)))
@@ -3271,14 +3313,24 @@ size_t io_write(const void *ptr, size_t size, size_t count, IO io) {
     if (io->flags & IO_FLAG_BINARY)
         return io_write_internal(ptr, size, count, io);
 
-    size_t max = size*count;
+    const size_t total = safe_multiply(size, count);
+
+    if (total == 0) {
+        if (size && count) {
+            io->flags |= IO_FLAG_ERROR;
+            io->error = IO_EINVAL;
+        }
+        return 0;
+    }
+
+    size_t max = total;
     const unsigned char *cptr = ptr;
     for (; max; --max) {
         if (io_putc(*cptr++, io) == EOF)
             break;
     }
 
-    return (size*count - max) / size;
+    return (total - max) / size;
 }
 
 void io_rewind(IO io) {

@@ -343,6 +343,7 @@ void test_small_dll()
 #include "IO/sha1.h"
 #include "IO/net.h"
 #include "IO/tee.h"
+#include "IO/zlib_io.h"
 #include "IO/padding/bit.h"
 #include "IO/padding/pkcs7.h"
 
@@ -465,6 +466,18 @@ int main()
         {"pattern#", "pattern[0-9#a-z]"},
         {"Some really long string - with some special ranges like [ and ]", "*[^ ] really*]*"}
     };
+
+    IO file = io_open("/shared/Test_Data/gzip.txt", "rb");
+    IO defl = io_open_zlib_deflate_easy(file, ZlibDeflate, "rb");
+    IO zlib = io_open_zlib_inflate_easy(defl, ZlibOnlyInflate, "rb");
+    IO zout = io_open_file(stdout);
+
+    if (io_copy(zlib, zout))
+        printf("%s\n", io_error_description_alloc(io_error(zlib)));
+
+    io_vclose(4, zout, zlib, defl, file);
+
+    return 0;
 
     unsigned char key[16];
 

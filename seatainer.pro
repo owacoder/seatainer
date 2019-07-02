@@ -17,6 +17,10 @@ win32 {
     LIBS += -lWs2_32
 }
 
+unix: !win32 {
+    LIBS += -lz
+}
+
 SOURCES += \
     ccdbllst.c \
     cclnklst.c \
@@ -37,7 +41,8 @@ SOURCES += \
     main.cpp \
     IO/padding/bit.c \
     IO/padding/pkcs7.c \
-    tinymalloc.c
+    tinymalloc.c \
+    IO/zlib_io.c
 
 HEADERS += \
     ccdbllst.h \
@@ -60,7 +65,9 @@ HEADERS += \
     IO/padding/bit.h \
     IO/padding/pkcs7.h \
     tinymalloc.h \
-    platforms_config.h
+    platforms_config.h \
+    IO/zlib_io.h
 
 DISTFILES += \
-    README.md
+    README.md \
+    Makefile

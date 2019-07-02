@@ -169,19 +169,37 @@ size_t pkcs7_padding_encode_write(const void *ptr, size_t size, size_t count, vo
 }
 
 int pkcs7_padding_encode_flush(void *userdata, IO io) {
+    struct Pkcs7Padding *padding = userdata;
+
+    int result = io_flush(padding->io);
+    io_set_error(io, io_error(padding->io));
+
+    return result;
+}
+
+int pkcs7_padding_decode_flush(void *userdata, IO io) {
+    struct Pkcs7PaddingDecode *padding = userdata;
+
+    int result = io_flush(padding->io);
+    io_set_error(io, io_error(padding->io));
+
+    return result;
+}
+
+static void pkcs7_padding_encode_clearerr(void *userdata, IO io) {
     UNUSED(io)
 
     struct Pkcs7Padding *padding = userdata;
 
-    return io_flush(padding->io);
+    io_clearerr(padding->io);
 }
 
-int pkcs7_padding_decode_flush(void *userdata, IO io) {
+static void pkcs7_padding_decode_clearerr(void *userdata, IO io) {
     UNUSED(io)
 
     struct Pkcs7PaddingDecode *padding = userdata;
 
-    return io_flush(padding->io);
+    io_clearerr(padding->io);
 }
 
 static const char *pkcs7_padding_encode_what(void *userdata, IO io) {
@@ -204,6 +222,7 @@ static const struct InputOutputDeviceCallbacks pkcs7_padding_encode_callbacks = 
     .read = pkcs7_padding_encode_read,
     .write = pkcs7_padding_encode_write,
     .flush = pkcs7_padding_encode_flush,
+    .clearerr = pkcs7_padding_encode_clearerr,
     .stateSwitch = NULL,
     .seek = NULL,
     .seek64 = NULL,
@@ -218,6 +237,7 @@ static const struct InputOutputDeviceCallbacks pkcs7_padding_decode_callbacks = 
     .read = pkcs7_padding_decode_read,
     .write = NULL,
     .flush = pkcs7_padding_decode_flush,
+    .clearerr = pkcs7_padding_decode_clearerr,
     .stateSwitch = NULL,
     .seek = NULL,
     .seek64 = NULL,

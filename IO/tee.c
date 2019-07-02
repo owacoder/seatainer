@@ -12,13 +12,13 @@ struct TeeInitializationParams {
     IO out1, out2;
 };
 
-void *tee_open(void *userdata, IO io) {
+static void *tee_open(void *userdata, IO io) {
     memcpy(io_tempdata(io), userdata, 2*sizeof(void *));
 
     return io;
 }
 
-size_t tee_write(const void *ptr, size_t size, size_t count, void *userdata, IO io) {
+static size_t tee_write(const void *ptr, size_t size, size_t count, void *userdata, IO io) {
     UNUSED(userdata)
 
     struct TeeInitializationParams *params = (struct TeeInitializationParams *) io_tempdata(io);
@@ -36,7 +36,7 @@ size_t tee_write(const void *ptr, size_t size, size_t count, void *userdata, IO 
     return 0;
 }
 
-int tee_flush(void *userdata, IO io) {
+static int tee_flush(void *userdata, IO io) {
     UNUSED(userdata)
 
     struct TeeInitializationParams *params = (struct TeeInitializationParams *) io_tempdata(io);
@@ -54,6 +54,15 @@ int tee_flush(void *userdata, IO io) {
     return EOF;
 }
 
+static void tee_clearerr(void *userdata, IO io) {
+    UNUSED(userdata)
+
+    struct TeeInitializationParams *params = (struct TeeInitializationParams *) io_tempdata(io);
+
+    io_clearerr(params->out1);
+    io_clearerr(params->out2);
+}
+
 static const char *tee_what(void *userdata, IO io) {
     UNUSED(userdata)
     UNUSED(io)
@@ -67,6 +76,7 @@ static const struct InputOutputDeviceCallbacks tee_callbacks = {
     .read = NULL,
     .write = tee_write,
     .flush = tee_flush,
+    .clearerr = tee_clearerr,
     .stateSwitch = NULL,
     .seek = NULL,
     .seek64 = NULL,

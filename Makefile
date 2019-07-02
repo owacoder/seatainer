@@ -2,7 +2,7 @@ appname := seatainer
 path := $(PATH)
 
 CC = gcc
-CFLAGS = -Wall -std=c99 # -maes -msse4.1 -msha
+CFLAGS = -Wall -std=c99 -maes -msse4.1 -msha
 CXXFLAGS = -Wall -std=c++11
 DEFINES = -D_POSIX_C_SOURCE=200809L -DCC_INCLUDE_NETWORK
 
@@ -19,6 +19,7 @@ SRCFILES = ccdbllst.c \
            IO/sha1.c \
            IO/net.c \
            IO/tee.c \
+           IO/zlib_io.c \
            IO/padding/bit.c \
            IO/padding/pkcs7.c \
            io.c \
@@ -40,6 +41,7 @@ HEADERFILES = ccpair.h \
               IO/sha1.h \
               IO/net.h \
               IO/tee.h \
+              IO/zlib_io.h \
               IO/padding/bit.h \
               IO/padding/pkcs7.h \
               io.h \
@@ -49,7 +51,7 @@ HEADERFILES = ccpair.h \
               utility.h
 
 OBJS = $(subst .c,.o,$(SRCFILES))
-LDLIBS = -lm
+LDLIBS = -lm -lz
 
 all: $(appname)
 

@@ -671,6 +671,25 @@ int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t dst[4]) {
 }
 #endif
 
+size_t safe_multiply(size_t u, size_t v) {
+#if SIZE_MAX == UINT32_MAX
+    unsigned long long result = (unsigned long long) u * (unsigned long long) v;
+
+    return result >> 32? 0: result;
+#elif CLANG_COMPILER | GCC_COMPILER
+    __uint128_t result = (__uint128_t) u * (__uint128_t) v;
+
+    return result >> 64? 0: result;
+#else
+    size_t result = u * v;
+
+    if (u != 0 && result / u != v)
+        return 0;
+
+    return result;
+#endif
+}
+
 #if WINDOWS_OS
 int str_is_codepage_safe(LPCSTR utf8) {
     for (; *utf8; ++utf8)

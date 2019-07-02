@@ -583,11 +583,12 @@ static size_t aes_read(void *ptr, size_t size, size_t count, void *userdata, IO 
 }
 
 static int aes_flush(void *userdata, IO io) {
-    UNUSED(io)
-
     struct AES_ctx *aes = userdata;
 
-    return io_flush(aes->io);
+    int result = io_flush(aes->io);
+    io_set_error(io, io_error(aes->io));
+
+    return result;
 }
 
 static int aes_close(void *userdata, IO io) {
@@ -605,6 +606,14 @@ static int aes_state_switch(void *userdata, IO io) {
     struct AES_ctx *aes = userdata;
 
     return aes->pos = 0;
+}
+
+static void aes_clearerr(void *userdata, IO io) {
+    UNUSED(io)
+
+    struct AES_ctx *aes = userdata;
+
+    io_clearerr(aes->io);
 }
 
 static int aes_seek64(void *userdata, long long int offset, int origin, IO io) {
@@ -743,6 +752,7 @@ static const struct InputOutputDeviceCallbacks aes_callbacks = {
     .close = aes_close,
     .flush = aes_flush,
     .stateSwitch = aes_state_switch,
+    .clearerr = aes_clearerr,
     .tell = aes_tell,
     .tell64 = aes_tell64,
     .seek = NULL,

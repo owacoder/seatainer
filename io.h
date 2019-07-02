@@ -118,6 +118,7 @@ typedef int (*IO_SimpleCallback)(void *userdata, IO io);
  *         .read = custom_read,
  *         .write = custom_write,
  *         .flush = NULL,
+ *         .stateSwitch = NULL,
  *         .tell = NULL,
  *         .tell64 = NULL,
  *         .seek = NULL,
@@ -186,6 +187,15 @@ struct InputOutputDeviceCallbacks {
      */
     IO_SimpleCallback stateSwitch;
 
+    /** @brief Requests a clearing of all embedded IO objects.
+     *
+     * This callback must only call `io_clearerr()` on any embedded IO objects.
+     *
+     * @param userdata The userdata stored in @p io.
+     * @param io The IO device being acted on. Reads from or writes to the device are not allowed.
+     */
+    void (*clearerr)(void *userdata, IO io);
+
     long int (*tell)(void *userdata, IO io);
     long long int (*tell64)(void *userdata, IO io);
 
@@ -227,6 +237,7 @@ struct InputOutputDeviceCallbacks {
 
 void io_clearerr(IO io);
 int io_close(IO io);
+int io_vclose(int count, ...);
 int io_readable(IO io);
 int io_writable(IO io);
 int io_just_read(IO io);

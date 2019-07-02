@@ -122,9 +122,16 @@ static size_t hex_encode_write(const void *ptr, size_t size, size_t count, void 
 }
 
 static int hex_flush(void *userdata, IO io) {
+    int result = io_flush((IO) userdata);
+    io_set_error(io, io_error((IO) userdata));
+
+    return result;
+}
+
+static void hex_clearerr(void *userdata, IO io) {
     UNUSED(io)
 
-    return io_flush((IO) userdata);
+    io_clearerr((IO) userdata);
 }
 
 static int hex_encode_seek64(void *userdata, long long int offset, int origin, IO io) {
@@ -223,6 +230,7 @@ static const struct InputOutputDeviceCallbacks hex_encode_callbacks = {
     .open = hex_open,
     .close = NULL,
     .flush = hex_flush,
+    .clearerr = hex_clearerr,
     .stateSwitch = NULL,
     .tell = NULL,
     .tell64 = hex_encode_tell64,
@@ -237,6 +245,7 @@ static const struct InputOutputDeviceCallbacks hex_decode_callbacks = {
     .open = hex_open,
     .close = NULL,
     .flush = hex_flush,
+    .clearerr = hex_clearerr,
     .stateSwitch = NULL,
     .tell = NULL,
     .tell64 = hex_decode_tell64,

@@ -167,6 +167,14 @@ int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t dst[4]);
  */
 #define TESTBIT(x, bit) ((x) & (1ull << bit))
 
+/** @brief Performs an overflow-safe multiplication of two size_t values.
+ *
+ *  @param u The first number to multiply.
+ *  @param v The second number to multiply.
+ *  @return The product resulting from multiplying u and v, or 0 if overflow would occur.
+ */
+size_t safe_multiply(size_t u, size_t v);
+
 #if WINDOWS_OS
 int str_is_codepage_safe(LPCSTR utf8);
 LPWSTR utf8_to_wide_alloc(LPCSTR utf8);

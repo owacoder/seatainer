@@ -436,6 +436,14 @@ static int sha1_seek(void *userdata, long offset, int origin, IO io) {
     }
 }
 
+static void sha1_clearerr(void *userdata, IO io) {
+    UNUSED(io)
+
+    struct Sha1 *sha1 = userdata;
+
+    io_clearerr(sha1->io);
+}
+
 static const char *sha1_what(void *userdata, IO io) {
     UNUSED(userdata)
     UNUSED(io)
@@ -449,6 +457,7 @@ static const struct InputOutputDeviceCallbacks sha1_callbacks = {
     .open = sha1_open,
     .close = sha1_close,
     .flush = NULL,
+    .clearerr = sha1_clearerr,
     .stateSwitch = NULL,
     .tell = NULL,
     .tell64 = NULL,

@@ -4,23 +4,25 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+#include "utility.h"
+
 /* #define TINY_DEBUG */
 
 #define USER_ALIGNMENT 16
 #define USER_ALIGNMENT_MASK (USER_ALIGNMENT - 1)
 
 /* REQUIRED_ALIGNMENT must be set to the alignment needed for TinyMallocBlockHeader */
-#define REQUIRED_ALIGNMENT 2
+#define REQUIRED_ALIGNMENT 4
 #define REQUIRED_ALIGNMENT_MASK (REQUIRED_ALIGNMENT - 1)
 
 struct TinyMallocBlockHeader {
-    unsigned short nextBlock; /* nextBlock == 1 signifies last block in chain */
-    unsigned short size; /* Size consumed by user-allocated data in this block */
+    unsigned int nextBlock; /* nextBlock == 1 signifies last block in chain */
+    unsigned int size; /* Size consumed by user-allocated data in this block */
     unsigned char data[];
 };
 
 /* TODO: if USER_ALIGNMENT is specified, tiny_pool must be aligned to the same boundary */
-static unsigned char tiny_pool[65536];
+static unsigned char tiny_pool[65536 * 1024];
 static const size_t tiny_pool_size = sizeof(tiny_pool);
 struct TinyMallocBlockHeader tiny_header = {
     .nextBlock = 1 /* No valid block will ever have address 1, since they must be aligned on a multiple of 2 */
@@ -119,11 +121,10 @@ static void tiny_print_blocks() {
 #endif
 
 void *tiny_realloc(void *ptr, size_t size) {
-    if (size == 0 || size > tiny_pool_size)
-        return NULL;
-
     if (ptr == NULL)
         return tiny_malloc(size);
+    else if (size == 0 || size > tiny_pool_size)
+        return NULL;
 
     struct TinyMallocBlockHeader *header = tiny_block_for_pointer(ptr);
     size_t available = tiny_space_available_after_block(header);
@@ -143,6 +144,9 @@ void *tiny_realloc(void *ptr, size_t size) {
 }
 
 void *tiny_malloc(size_t size) {
+    if (size == 0 || size > tiny_pool_size)
+        return NULL;
+
     struct TinyMallocBlockHeader *first = &tiny_header;
     size_t required = sizeof(*first) + size + (size & REQUIRED_ALIGNMENT_MASK); /* Keep required alignment */
 
@@ -182,7 +186,7 @@ void *tiny_malloc(size_t size) {
 }
 
 void *tiny_calloc(size_t size, size_t count) {
-    void *tiny = tiny_malloc(size *= count);
+    void *tiny = tiny_malloc(safe_multiply(size, count));
 
     if (tiny != NULL)
         memset(tiny, 0, size);

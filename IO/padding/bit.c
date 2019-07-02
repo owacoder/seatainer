@@ -97,11 +97,20 @@ size_t bit_padding_encode_write(const void *ptr, size_t size, size_t count, void
 }
 
 int bit_padding_encode_flush(void *userdata, IO io) {
+    struct BitPadding *padding = userdata;
+
+    int result = io_flush(padding->io);
+    io_set_error(io, io_error(padding->io));
+
+    return result;
+}
+
+static void bit_padding_clearerr(void *userdata, IO io) {
     UNUSED(io)
 
     struct BitPadding *padding = userdata;
 
-    return io_flush(padding->io);
+    io_clearerr(padding->io);
 }
 
 static const char *bit_padding_encode_what(void *userdata, IO io) {
@@ -117,6 +126,7 @@ static const struct InputOutputDeviceCallbacks bit_padding_encode_callbacks = {
     .read = bit_padding_encode_read,
     .write = bit_padding_encode_write,
     .flush = bit_padding_encode_flush,
+    .clearerr = bit_padding_clearerr,
     .stateSwitch = NULL,
     .seek = NULL,
     .seek64 = NULL,
