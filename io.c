@@ -1123,9 +1123,9 @@ typedef struct {
             (state)->bufferLength = 3;                              \
         } else {                                                    \
             if ((len) == PRINTF_LEN_BIG_L)                          \
-                io_printf_f_long(mval, fmt_flags, prec, len, state);\
+                io_printf_f_long(mval, fmt, fmt_flags, prec, len, state); \
             else                                                    \
-                io_printf_f(mval, fmt_flags, prec, len, state);     \
+                io_printf_f(mval, fmt, fmt_flags, prec, len, state); \
         }                                                           \
     } while (0)
 
@@ -1291,6 +1291,8 @@ typedef struct {
             if (++read > width) {io_ungetc(chr, io); return --read;}\
             if (chr == 'x' || chr == 'X') {                         \
                 chr = io_getc(io);                                  \
+                if (!isxdigit(chr))                                 \
+                    return UINT_MAX;                                \
                 if (++read > width) {io_ungetc(chr, io); return --read;}\
             }                                                       \
         }                                                           \
@@ -1312,104 +1314,80 @@ typedef struct {
         return --read;                                              \
     } while (0)
 
-static void io_printf_f_long(long double value, unsigned flags, unsigned prec, unsigned len, struct io_printf_state *state) {
+static void io_printf_f_long(long double value, unsigned char fmt_char, unsigned flags, unsigned prec, unsigned len, struct io_printf_state *state) {
     UNUSED(len)
 
-    size_t mantissa_digits = (value <= 1.0)? 1: floorl(log10l(value)) + 1;
     size_t precision = (flags) & PRINTF_FLAG_HAS_PRECISION? prec: 6;
-    size_t decimal_point_len = (precision || (flags & PRINTF_FLAG_HASH))? 1: 0;
-    size_t complete_len = mantissa_digits + decimal_point_len + precision;
-    size_t allowed = LDBL_DIG + 2;
-    unsigned char *mbuf, *mptr;
-    double oldval = value;
 
-    if (complete_len > sizeof(state->internalBuffer)) {
-        mbuf = state->buffer = MALLOC(complete_len);
-        if (mbuf == NULL) {
+    /* Build format string */
+    char fmt[10] = "%.*L";
+
+    if (flags & PRINTF_FLAG_HASH)
+        strcpy(fmt, "%#.*L");
+
+    /* Then append format specifier to it */
+    size_t pos = strlen(fmt);
+    fmt[pos++] = fmt_char;
+    fmt[pos] = 0;
+
+    /* Then print */
+    int length = snprintf((char *) state->internalBuffer, sizeof(state->internalBuffer), fmt, precision, value);
+    if (length < (int) sizeof(state->internalBuffer)) {
+        state->buffer = state->internalBuffer;
+    } else {
+        unsigned char *data = MALLOC(length + 1);
+        if (data == NULL)
             state->flags |= PRINTF_STATE_ERROR;
-            return;
-        }
-        state->flags |= PRINTF_STATE_FREE_BUFFER;
+        else
+            state->flags |= PRINTF_STATE_FREE_BUFFER;
+
+        state->buffer = data;
+        snprintf((char *) state->buffer, length + 1, fmt, precision, value);
+    }
+
+    if (length < 0) {
+        state->flags |= PRINTF_STATE_ERROR;
+        state->bufferLength = 0;
     } else
-        mbuf = state->buffer;
-
-    mptr = mbuf + mantissa_digits;
-    do {
-        *--mptr = '0' + (int) floorl(fmodl(value, 10.0));
-        value /= 10.0;
-    } while (value >= 1.0);
-
-    if (mantissa_digits > allowed) {
-        memset(mbuf + allowed, '0', mantissa_digits - allowed);
-        allowed = 0;
-    }
-
-    mptr = mbuf + mantissa_digits;
-    if (decimal_point_len)
-        *mptr++ = '.';
-
-    value = (oldval - floorl(oldval)) + 0.5 / powl(10.0, precision);
-
-    while (precision--) {
-        value *= 10.0;
-        if (allowed) {
-            *mptr++ = '0' + (int) floorl(fmodl(value, 10.0));
-            --allowed;
-        } else
-            *mptr++ = '0';
-    }
-
-    state->bufferLength = complete_len;
+        state->bufferLength = length;
 }
 
-static void io_printf_f(double value, unsigned flags, unsigned prec, unsigned len, struct io_printf_state *state) {
+static void io_printf_f(double value, unsigned char fmt_char, unsigned flags, unsigned prec, unsigned len, struct io_printf_state *state) {
     UNUSED(len)
 
-    size_t mantissa_digits = (value <= 1.0)? 1: floor(log10(value)) + 1;
     size_t precision = (flags) & PRINTF_FLAG_HAS_PRECISION? prec: 6;
-    size_t decimal_point_len = (precision || (flags & PRINTF_FLAG_HASH))? 1: 0;
-    size_t complete_len = mantissa_digits + decimal_point_len + precision;
-    size_t allowed = DBL_DIG + 2;
-    unsigned char *mbuf, *mptr;
-    double oldval = value;
 
-    if (complete_len > sizeof(state->internalBuffer)) {
-        mbuf = state->buffer = MALLOC(complete_len);
-        if (mbuf == NULL) {
+    /* Build format string */
+    char fmt[10] = "%.*L";
+
+    if (flags & PRINTF_FLAG_HASH)
+        strcpy(fmt, "%#.*L");
+
+    /* Then append format specifier to it */
+    size_t pos = strlen(fmt);
+    fmt[pos++] = fmt_char;
+    fmt[pos] = 0;
+
+    /* Then print */
+    int length = snprintf((char *) state->internalBuffer, sizeof(state->internalBuffer), fmt, precision, value);
+    if (length < (int) sizeof(state->internalBuffer)) {
+        state->buffer = state->internalBuffer;
+    } else {
+        unsigned char *data = MALLOC(length + 1);
+        if (data == NULL)
             state->flags |= PRINTF_STATE_ERROR;
-            return;
-        }
-        state->flags |= PRINTF_STATE_FREE_BUFFER;
+        else
+            state->flags |= PRINTF_STATE_FREE_BUFFER;
+
+        state->buffer = data;
+        snprintf((char *) state->buffer, length + 1, fmt, precision, value);
+    }
+
+    if (length < 0) {
+        state->flags |= PRINTF_STATE_ERROR;
+        state->bufferLength = 0;
     } else
-        mbuf = state->buffer;
-
-    mptr = mbuf + mantissa_digits;
-    do {
-        *--mptr = '0' + (int) floor(fmod(value, 10.0));
-        value /= 10.0;
-    } while (value >= 1.0);
-
-    if (mantissa_digits > allowed) {
-        memset(mbuf + allowed, '0', mantissa_digits - allowed);
-        allowed = 0;
-    }
-
-    mptr = mbuf + mantissa_digits;
-    if (decimal_point_len)
-        *mptr++ = '.';
-
-    value = (oldval - floor(oldval)) + 0.5 / pow(10.0, precision);
-
-    while (precision--) {
-        value *= 10.0;
-        if (allowed) {
-            *mptr++ = '0' + (int) floor(fmod(value, 10.0));
-            --allowed;
-        } else
-            *mptr++ = '0';
-    }
-
-    state->bufferLength = complete_len;
+        state->bufferLength = length;
 }
 
 static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, unsigned prec, unsigned len, va_list_wrapper *args) {
@@ -1635,7 +1613,7 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
 
 #define CLEANUP(x) do {result = (x); goto cleanup;} while (0)
 
-/* TODO: handle floating point args for C-style strings and sized buffers */
+/* TODO: handle hexadecimal floating point format */
 int io_vprintf(IO io, const char *fmt, va_list args) {
     int result = 0;
     int written = 0;
@@ -1828,6 +1806,10 @@ done_with_flags:
                             break;
                         case 'f':
                         case 'F':
+                        case 'e':
+                        case 'E':
+                        case 'g':
+                        case 'G':
                             state.flags |= PRINTF_STATE_FLOATING_POINT;
 
                             if (fmt_len == PRINTF_LEN_BIG_L) {

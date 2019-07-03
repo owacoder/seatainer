@@ -66,7 +66,8 @@ HEADERS += \
     IO/padding/pkcs7.h \
     tinymalloc.h \
     platforms_config.h \
-    IO/zlib_io.h
+    IO/zlib_io.h \
+    test_framework.h
 
 DISTFILES += \
     README.md \

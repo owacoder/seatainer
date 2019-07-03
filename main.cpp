@@ -10,6 +10,7 @@
 #include "utility.h"
 
 #include <assert.h>
+#include "test_framework.h"
 
 #include <stdlib.h>
 
@@ -457,6 +458,8 @@ void walk(Directory directory, unsigned long long *items, unsigned long long *si
     }
 }
 
+#include <cmath>
+
 int main()
 {
     const char *strs[][2] = {
@@ -471,6 +474,13 @@ int main()
     IO defl = io_open_zlib_deflate_easy(file, ZlibDeflate, "rb");
     IO zlib = io_open_zlib_inflate_easy(defl, ZlibOnlyInflate, "rb");
     IO zout = io_open_file(stdout);
+
+    double value = -1.653354e1;
+    int result = io_printf(zout, "|%-40g|\n", value);
+    if (result != printf("|%-40g|\n", value))
+        printf("Results differ\n");
+
+    return 0;
 
     if (io_copy(zlib, zout))
         printf("%s\n", io_error_description_alloc(io_error(zlib)));

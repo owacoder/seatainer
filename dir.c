@@ -502,7 +502,7 @@ struct DirStruct {
 
 void systemTimeToTm(LPSYSTEMTIME time, struct tm *t) {
     t->tm_isdst = 0;
-    t->tm_year = time->wYear;
+    t->tm_year = time->wYear - 1900;
     t->tm_mon = time->wMonth - 1;
     t->tm_mday = time->wDay;
     t->tm_wday = time->wDayOfWeek;
