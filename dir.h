@@ -109,52 +109,134 @@ void path_destroy(Path path);
  *           This is because searching for the empty set is not allowed.
  *     xxx - Any other character matches itself. It must be present.
  *
- * Returns 0 if `str` matches `pattern`, -1 if no match, and -2 if bad pattern
+ * Returns 0 if `str` matches `pattern`, -1 if no match, and -2 if bad pattern or pattern too complex
  */
 int glob(const char *str, const char *pattern);
 
-/* Opens a directory for access, or returns NULL on allocation failure */
+/** @brief Opens a directory for access.
+ *
+ * @param dir A UTF-8 string containing the name of the directory to open.
+ * @return A new directory object, or NULL on allocation failure.
+ */
 Directory dir_open(const char *dir);
-/* Same as dir_open(), but uses ANSI functions on Windows if mode contains "@ncp", for [n]ative [c]ode [p]age */
+
+/** @brief Opens a directory for access.
+ *
+ * Same as dir_open(), but uses ANSI functions on Windows if mode contains "@ncp", for [n]ative [c]ode [p]age.
+ *
+ * @param dir A UTF-8 string containing the name of the directory to open.
+ * @return A new directory object, or NULL on allocation failure.
+ */
 Directory dir_open_with_mode(const char *dir, const char *mode);
-/* Returns path that open directory points to */
+
+/** @brief Returns path that open directory points to.
+ *
+ * @param dir The opened directory to get the path from.
+ * @return The UTF-8 path of @p dir, including the terminating path separator.
+ */
 const char *dir_path(Directory dir);
-/* Returns zero if no error occured while opening the directory, platform-specific non-zero value otherwise (errno for Linux, GetLastError for Windows) */
+
+/** @brief Returns zero if no error occured while opening the directory, or an IO error otherwise
+ *
+ * @param dir The opened directory to check the error status of.
+ * @return The error that occured while opening @p dir, or 0 on success.
+ */
 int dir_error(Directory dir);
-/* Returns a pointer to the next available directory entry, or NULL if no more entries exist
- * This pointer MUST NOT be stored permanently, as it references a temporary object. Calling dirent_destroy() on it has no effect
+
+/** @brief Returns a pointer to the next available directory entry.
+ *
+ * This pointer MUST NOT be stored permanently, as it references a temporary object contained in @p dir. Calling dirent_destroy() on it is valid but has no effect.
+ *
+ * @param dir The opened directory to get the next entry from.
+ * @return The next available directory entry, or NULL if no more entries exist.
  */
 DirectoryEntry dir_next(Directory dir);
-/* Closes a directory and invalidates the handle */
+
+/** @brief Closes a directory and invalidates the handle.
+ *
+ * @param dir The opened directory to be released.
+ */
 void dir_close(Directory dir);
 
-/* Opens a directory entry for a specific UTF-8 path */
+/** @brief Opens a directory entry for a specific UTF-8 path.
+ *
+ * A Directory object is created automatically under the hood, since a DirectoryEntry cannot exist without a Directory.
+ *
+ * @param path The UTF-8 path of a file or directory to get the information of.
+ * @return A new DirectoryEntry object that references the specified object, or NULL on allocation failure.
+ */
 DirectoryEntry dirent_open(const char *path);
-/* Same as dirent_open(), but uses ANSI functions on Windows if mode contains "@ncp", for [n]ative [c]ode [p]age */
+
+/** @brief Opens a directory entry for a specific UTF-8 path.
+ *
+ * Same as dirent_open(), but uses ANSI functions on Windows if mode contains "@ncp", for [n]ative [c]ode [p]age.
+ *
+ * @param path The UTF-8 path of a file or directory to get the information of.
+ * @return A new DirectoryEntry object that references the specified object, or NULL on allocation failure.
+ */
 DirectoryEntry dirent_open_with_mode(const char *path, const char *mode);
-/* Copies a directory entry so it can be saved easily */
+
+/** @brief Copies a directory entry so it can be saved easily.
+ *
+ * This function may be necessary if a user wants to store DirectoryEntry objects, but only have temporary objects returned from dir_next().
+ * Copying the entry with this function allows it to be stored indefinitely.
+ *
+ * @param entry The directory entry to copy.
+ * @return A new DirectoryEntry object, or NULL on allocation failure.
+ */
 DirectoryEntry dirent_copy(DirectoryEntry entry);
-/* Returns zero if no error occured while opening the directory, platform-specific non-zero value otherwise (errno for Linux, GetLastError for Windows) */
+
+/** @brief Returns zero if no error occured while opening the directory entry, or an IO error otherwise
+ *
+ * @param dir The opened directory entry to check the error status of.
+ * @return The error that occured while opening @p dir, or 0 on success.
+ */
 int dirent_error(DirectoryEntry entry);
-/* Destroys a directory entry */
+
+/** @brief Closes a directory and invalidates the handle.
+ *
+ * @param dir The opened directory entry to be released.
+ */
 void dirent_close(DirectoryEntry entry);
-/* Returns the full path of the directory entry, without the entry name */
+
+/** @brief Returns the full UTF-8 path of the directory entry, without the entry name.
+ *
+ * @param entry The entry to get the path of.
+ * @return The UTF-8 path of @p entry, including the trailing path separator.
+ */
 const char *dirent_path(DirectoryEntry entry);
-/* Returns the full path of the directory entry, including the entry name */
+
+/** @brief Returns the full UTF-8 path of the directory entry, including the entry name.
+ *
+ * @param entry The entry to get the path of.
+ * @return The complete UTF-8 path of @p entry, including the name of the entry.
+ */
 const char *dirent_fullname(DirectoryEntry entry);
-/* Returns the NUL-terminated name of the directory entry */
+
+/** @brief Returns the UTF-8 name of the directory entry, without any part of the path.
+ *
+ * @param entry The entry to get the name of.
+ * @return The UTF-8 name of @p entry. No part of the path is returned.
+ */
 const char *dirent_name(DirectoryEntry entry);
-/* Returns the size (in bytes) of the directory entry, or -1 if no size could be determined */
+
+/** @brief Returns the size of the directory entry in bytes.
+ *
+ * @param entry The entry to get the size of.
+ * @return The size of @p entry in bytes, or -1 if no size could be determined.
+ */
 long long dirent_size(DirectoryEntry entry);
 
 /* Returns 0 if trait does not exist, non-zero if trait exists (some functions may always return 0 on some platforms) */
-int dirent_is_archive(DirectoryEntry entry);
-int dirent_is_compressed(DirectoryEntry entry);
+int dirent_is_actual_entry(DirectoryEntry entry);
 int dirent_is_subdirectory(DirectoryEntry entry);
 int dirent_is_directory(DirectoryEntry entry);
+int dirent_is_normal(DirectoryEntry entry);
+
+int dirent_is_archive(DirectoryEntry entry);
+int dirent_is_compressed(DirectoryEntry entry);
 int dirent_is_encrypted(DirectoryEntry entry);
 int dirent_is_hidden(DirectoryEntry entry);
-int dirent_is_normal(DirectoryEntry entry);
 int dirent_is_not_indexed(DirectoryEntry entry);
 int dirent_is_offline(DirectoryEntry entry);
 int dirent_is_readonly(DirectoryEntry entry);

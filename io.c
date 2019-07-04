@@ -1336,11 +1336,12 @@ static void io_printf_f_long(long double value, unsigned char fmt_char, unsigned
         state->buffer = state->internalBuffer;
     } else {
         unsigned char *data = MALLOC(length + 1);
-        if (data == NULL)
+        if (data == NULL) {
             state->flags |= PRINTF_STATE_ERROR;
-        else
-            state->flags |= PRINTF_STATE_FREE_BUFFER;
+            return;
+        }
 
+        state->flags |= PRINTF_STATE_FREE_BUFFER;
         state->buffer = data;
         snprintf((char *) state->buffer, length + 1, fmt, precision, value);
     }

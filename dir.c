@@ -20,111 +20,161 @@
 
 #include "utility.h"
 
-/* TODO: currently recursive. Change to iterative version later? */
 int glob(const char *str, const char *pattern) {
-    for (; *pattern; ++pattern) {
-        switch (*pattern) {
-            case '?':
-                if (*str++ == 0)
-                    return -1;
-                break;
-            case '*': {
-                while (*pattern == '*')
-                    ++pattern;
+    /* Arbitrary stack depth limit (basically the number of '*' characters allowed in the pattern,
+     * although multiple '*' characters will be batched together and therefore count as only one '*' toward this limit) */
+    const size_t max_positions = 100;
+    struct position {
+        const char *strpos; /* Where to start searching for the pattern */
+        const char *patternpos;
+    } positions[max_positions];
 
-                if (*pattern == 0) /* Anything matches if '*' is at end of pattern */
-                    return 0;
+    /* If a wildcard is found, a new entry is pushed onto the position stack
+     *
+     * If *strpos == 0, and *patternpos contains all '*' characters or *patternpos == 0, then the match was successful. Return immediately.
+     *
+     * If *strpos == 0, and *patternpos is not a valid match, then the match failed. More characters were expected. Return immediately.
+     *
+     * If *strpos != 0, but *patternpos == 0, then the match failed. Too much input was present. Backtrack to the previous position.
+     */
 
-                for (; *str; ++str) {
-                    if (*pattern != '[' && *pattern != '?') { /* Pattern has specific char to match after star, so search for it */
-                        str = strchr((char *) str, *pattern);
+    size_t current_position = 0;
+
+    positions[0].strpos = str;
+    positions[0].patternpos = pattern;
+
+    while (1) {
+try_new_glob:
+        for (; *positions[current_position].patternpos; ++positions[current_position].patternpos) {
+            switch (*positions[current_position].patternpos) {
+                case '?':
+                    if (*positions[current_position].strpos == 0)
+                        goto stop_checking_glob_entry;
+
+                    ++positions[current_position].strpos;
+                    break;
+                case '*': {
+                    while (*positions[current_position].patternpos == '*')
+                        ++positions[current_position].patternpos;
+
+                    if (*positions[current_position].patternpos == 0) /* Anything matches if '*' is at end of pattern */
+                        return 0;
+
+                    /* Pattern has specific char to match after star, so search for it (this is optional as an optimization) */
+                    if (*positions[current_position].patternpos != '[' && *positions[current_position].patternpos != '?') {
+                        const char *str = strchr((char *) positions[current_position].strpos, *positions[current_position].patternpos);
                         if (str == NULL)
-                            return -1;
-                        ++str;
-                        ++pattern;
+                            return -1; /* Since stars are minimal matchers, if the character afterward does not exist, the string must not match */
+                        positions[current_position].strpos = str;
                     }
 
-                    if (glob(str, pattern) == 0)
-                        return 0;
+                    if (++current_position == max_positions)
+                        return -2; /* Glob too complicated! */
+
+                    positions[current_position] = positions[current_position-1];
+                    goto try_new_glob;
                 }
-
-                while (*pattern == '*')
-                    ++pattern;
-
-                return *str == 0 && *pattern == 0? 0: -1;
-            }
-            case '[': {
-                if (pattern[1] == 0 || pattern[2] == 0)
-                    return -2;
-
-                const char *lastCharInSet = pattern + 2;
-
-                while (*lastCharInSet && (lastCharInSet[-1] == '-' || (lastCharInSet == pattern + 2 && lastCharInSet[-1] == '^') || *lastCharInSet != ']'))
-                    ++lastCharInSet;
-
-                if (*lastCharInSet != ']') /* Set not concluded properly */
-                    return -2;
-
-                --lastCharInSet;
-                ++pattern;
-
-                int negateSet = *pattern == '^';
-                if (negateSet) {
-                    if (pattern == lastCharInSet) /* Negated set with nothing in it isn't valid */
+                case '[': {
+                    if (positions[current_position].patternpos[1] == 0 || positions[current_position].patternpos[2] == 0)
                         return -2;
-                    ++pattern;
-                }
 
-                /* pattern now points to first char in set and lastCharInSet points to the last char in set */
-                /* They may be pointing to the same char if it's a one-character set */
-                if (pattern == lastCharInSet) {
-                    if ((negateSet? *str++ == *pattern: *str++ != *pattern))
-                        return -1;
-                    pattern = lastCharInSet + 1;
-                } else { /* Complex set, possibly negated */
-                    int matched = negateSet; /* If matched is non-zero, the set matches */
-                    unsigned char strChr = *str;
+                    const char *lastCharInSet = positions[current_position].patternpos + 2;
 
-                    for (; pattern <= lastCharInSet; ++pattern) {
-                        if (pattern[1] == '-') { /* Compute range */
-                            int rangeLow = (unsigned char) pattern[0];
-                            int rangeHigh = (unsigned char) pattern[2];
+                    while (*lastCharInSet && (lastCharInSet[-1] == '-' || (lastCharInSet == positions[current_position].patternpos + 2 && lastCharInSet[-1] == '^') || *lastCharInSet != ']'))
+                        ++lastCharInSet;
 
-                            /* Swap range if backwards */
-                            if (rangeHigh < rangeLow) {
-                                int temp = rangeHigh;
-                                rangeHigh = rangeLow;
-                                rangeLow = temp;
-                            }
+                    if (*lastCharInSet != ']') /* Set not concluded properly */
+                        return -2;
 
-                            if (rangeLow <= strChr && strChr <= rangeHigh) {
-                                matched = !negateSet; /* Set to 1 if normal set, and 0 if negated */
+                    --lastCharInSet;
+                    ++positions[current_position].patternpos;
+
+                    int negateSet = *positions[current_position].patternpos == '^';
+                    if (negateSet) {
+                        if (positions[current_position].patternpos == lastCharInSet) /* Negated set with nothing in it isn't valid */
+                            return -2;
+                        ++positions[current_position].patternpos;
+                    }
+
+                    /* positions[current_position].patternpos now points to first char in set and lastCharInSet points to the last char in set */
+                    /* They may be pointing to the same char if it's a one-character set */
+                    if (positions[current_position].patternpos == lastCharInSet) {
+                        if ((negateSet? *positions[current_position].strpos == *positions[current_position].patternpos:
+                                        *positions[current_position].strpos != *positions[current_position].patternpos))
+                            goto stop_checking_glob_entry;
+
+                        ++positions[current_position].strpos;
+                        positions[current_position].patternpos = lastCharInSet + 1;
+                    } else { /* Complex set, possibly negated */
+                        int matched = negateSet; /* If matched is non-zero, the set matches */
+                        unsigned char strChr = *positions[current_position].strpos;
+
+                        for (; positions[current_position].patternpos <= lastCharInSet; ++positions[current_position].patternpos) {
+                            if (positions[current_position].patternpos[1] == '-') { /* Compute range */
+                                int rangeLow = (unsigned char) positions[current_position].patternpos[0];
+                                int rangeHigh = (unsigned char) positions[current_position].patternpos[2];
+
+                                /* Swap range if backwards */
+                                if (rangeHigh < rangeLow) {
+                                    int temp = rangeHigh;
+                                    rangeHigh = rangeLow;
+                                    rangeLow = temp;
+                                }
+
+                                if (rangeLow <= strChr && strChr <= rangeHigh) {
+                                    matched = !negateSet; /* Set to 1 if normal set, and 0 if negated */
+                                    break;
+                                }
+
+                                positions[current_position].patternpos += 2;
+                            } else if (*positions[current_position].strpos == *positions[current_position].patternpos) {
+                                matched = !negateSet;
                                 break;
                             }
-
-                            pattern += 2;
-                        } else if (*str == *pattern) {
-                            matched = !negateSet;
-                            break;
                         }
+
+                        if (!matched)
+                            goto stop_checking_glob_entry;
+
+                        ++positions[current_position].strpos;
+                        positions[current_position].patternpos = lastCharInSet + 1;
                     }
-
-                    if (!matched)
-                        return -1;
-
-                    ++str;
-                    pattern = lastCharInSet + 1;
+                    break;
                 }
-                break;
-            }
-            default:
-                if (*str++ != *pattern)
-                    return -1;
-                break;
-        }
-    }
+                default:
+                    if (*positions[current_position].strpos != *positions[current_position].patternpos)
+                        goto stop_checking_glob_entry;
 
-    return *str == 0? 0: -1;
+                    ++positions[current_position].strpos;
+                    break;
+            }
+        }
+stop_checking_glob_entry:
+
+        if (*positions[current_position].strpos == 0) {
+            while (*positions[current_position].patternpos == '*')
+                ++positions[current_position].patternpos;
+
+            return *positions[current_position].patternpos == 0? 0: -1;
+        }
+
+        if (current_position == 0) {
+            return -1;
+
+        } else { /* Nested glob, restart current glob at next string position */
+            /* Pattern has specific char to match after star, so search for it (this is optional as an optimization) */
+            if (*positions[current_position-1].patternpos != '[' && *positions[current_position-1].patternpos != '?') {
+                const char *str = strchr((char *) positions[current_position-1].strpos+1, *positions[current_position-1].patternpos);
+                if (str == NULL)
+                    return -1; /* Since stars are minimal matchers, if the character afterward does not exist, the string must not match */
+                positions[current_position-1].strpos = str;
+            } else { /* This is not optional :) */
+                ++positions[current_position-1].strpos;
+            }
+
+            positions[current_position] = positions[current_position-1];
+        }
+    };
 }
 
 struct PathStruct {
@@ -814,7 +864,7 @@ int dirent_refresh(DirectoryEntry entry) {
 
         return 0;
     } else
-        return -1;
+        return IO_EPERM;
 #else
     return 0;
 #endif
@@ -923,6 +973,10 @@ int dirent_is_compressed(DirectoryEntry entry) {
 
     return 0;
 #endif
+}
+
+int dirent_is_actual_entry(DirectoryEntry entry) {
+    return !dirent_is_directory(entry) || dirent_is_subdirectory(entry);
 }
 
 int dirent_is_subdirectory(DirectoryEntry entry) {

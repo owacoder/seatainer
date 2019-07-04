@@ -435,6 +435,36 @@ void test_io() {
 
 #include "dir.h"
 
+static void search_helper(IO out, Directory directory, const char *fileglob, int searchSubDirs) {
+    if (dir_error(directory)) {
+        char *reason = io_error_description_alloc(dir_error(directory));
+        printf("Cannot search %s: %s\n", dir_path(directory), reason);
+        FREE(reason);
+        return;
+    }
+
+    DirectoryEntry entry;
+    while ((entry = dir_next(directory)) != NULL) {
+        if (!dirent_is_actual_entry(entry))
+            continue;
+
+        if (glob(dirent_name(entry), fileglob) == 0)
+            io_printf(out, "%s\n", dirent_fullname(entry));
+
+        if (dirent_is_subdirectory(entry) && searchSubDirs) {
+            Directory nextDirectory = dir_open(dirent_fullname(entry));
+            if (nextDirectory) {
+                search_helper(out, nextDirectory, fileglob, searchSubDirs);
+                dir_close(nextDirectory);
+            }
+        }
+    }
+}
+
+void search(IO out, const char *path, const char *fileglob, int searchSubDirs) {
+    search_helper(out, dir_open(path), fileglob, searchSubDirs);
+}
+
 void walk(Directory directory, unsigned long long *items, unsigned long long *size) {
     if (dir_error(directory)) {
         printf("Error while scanning %s\n", dir_path(directory));
@@ -443,13 +473,18 @@ void walk(Directory directory, unsigned long long *items, unsigned long long *si
 
     DirectoryEntry entry;
     while ((entry = dir_next(directory)) != NULL) {
+        if (!dirent_is_actual_entry(entry))
+            continue;
+
+        printf("path: %s\n", dirent_fullname(entry));
+
         if (dirent_is_subdirectory(entry)) {
             Directory nextDirectory = dir_open(dirent_fullname(entry));
             if (nextDirectory) {
                 walk(nextDirectory, items, size);
                 dir_close(nextDirectory);
             }
-        } else if (!dirent_is_directory(entry)) {
+        } else {
             ++*items;
             long long dsize = dirent_size(entry);
             if (dsize >= 0)
@@ -462,23 +497,51 @@ void walk(Directory directory, unsigned long long *items, unsigned long long *si
 
 int main()
 {
+    search(io_open_file(stdout), "/shared", "*.txt", 1);
+
+    return 0;
+
     const char *strs[][2] = {
         {"input", "*"},
+        {"input1", "*n*u*"},
+        {"This is a toasty fried egg!", "[T]* t* f*g[-!]"},
+        {"1g1g1g1g1g1g1g1g1g1g1g1g1g1g.txt", "*g*g*g*g*g*g*g*g*g*g*g*g*g.txt"},
+        {"input1", "in*u*???"},
         {"pattern", "pa*"},
-        {"pattern", "*ttern?*"},
+        {"pattern", "*tt*?*"},
         {"pattern#", "pattern[0-9#a-z]"},
         {"Some really long string - with some special ranges like [ and ]", "*[^ ] really*]*"}
     };
+
+    for (size_t i = 0; i < sizeof(strs)/sizeof(*strs); ++i)
+        printf("glob(\"%s\", \"%s\") = %d\n", strs[i][0], strs[i][1], glob(strs[i][0], strs[i][1]));
+
+    return 0;
 
     IO file = io_open("/shared/Test_Data/gzip.txt", "rb");
     IO defl = io_open_zlib_deflate_easy(file, ZlibDeflate, "rb");
     IO zlib = io_open_zlib_inflate_easy(defl, ZlibOnlyInflate, "rb");
     IO zout = io_open_file(stdout);
 
-    double value = -1.653354e1;
-    int result = io_printf(zout, "|%-40g|\n", value);
-    if (result != printf("|%-40g|\n", value))
-        printf("Results differ\n");
+    const size_t iters = 1000000;
+
+    srand(time(NULL));
+
+    clock_t start = clock();
+    for (size_t i = 0; i < iters; ++i) {
+        const char *value = "My string";
+        io_printf(zout, "|%.50s|\n", value);
+    }
+    double First_timediff = (double) (clock() - start) / CLOCKS_PER_SEC;
+
+    start = clock();
+    for (size_t i = 0; i < iters; ++i) {
+        const char *value = "My string";
+        printf("|%.50s|\n", value);
+    }
+    double Second_timediff = (double) (clock() - start) / CLOCKS_PER_SEC;
+
+    printf("%g seconds for IO vs %g seconds for built-in\n", First_timediff, Second_timediff);
 
     return 0;
 
