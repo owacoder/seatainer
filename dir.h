@@ -55,50 +55,162 @@ int path_check_separator(char c);
  * @return The system-specific path separator.
  */
 char path_separator();
-/* Edits `path` to point to parent directory, or if no parent directory exists, doesn't edit the path
- * Returns `path`; this function never fails
+
+/** @brief Edits `path` to point to its parent directory, or if no parent directory exists, doesn't edit the path.
+ *
+ * @param path The path to traverse up one level from.
+ * @return Returns @p path. This function never fails.
  */
 Path path_up(Path path);
+
+/** @brief Edits `path` to point to its parent directory, or if no parent directory exists, doesn't edit the path.
+ *
+ * @param path The path to traverse up one level from.
+ * @return Returns @p path. This function never fails.
+ */
 char *path_up_cstr(char *path);
-/* Normalizes `path` to remove '.' and '..' entries
- * Returns `path`; this function never fails
+
+/** @brief Normalizes `path` to remove '.' and '..' entries, remove consecutive separator characters, and replace erroneous separators (like '/' vs '\\').
+ *
+ * @param path The path to normalize.
+ * @return Returns `path`. This function never fails.
  */
 Path path_normalize(Path path);
+
+/** @brief Normalizes `path` to remove '.' and '..' entries, remove consecutive separator characters, and replace erroneous separators (like '/' vs '\\').
+ *
+ * @param path The path to normalize.
+ * @return Returns `path`. This function never fails.
+ */
 char *path_normalize_cstr(char *path);
-/* Returns the name-only portion of the string, i.e. the deepest subfolder or the filename */
+
+/** @brief Get the folder or filename.
+ *
+ * @param path The path to get the name from.
+ * @return Returns the name-only portion of the string, i.e. the deepest subfolder or the filename
+ */
 const char *path_name(Path path);
+
+/** @brief Get the folder or filename.
+ *
+ * @param path The path to get the name from.
+ * @return Returns the name-only portion of the string, i.e. the deepest subfolder or the filename
+ */
 const char *path_name_cstr(char *path);
-/* Returns the extension of the filename, i.e. the last portion of the filename after the final '.' character */
+
+/** @brief Get the extension of the filename.
+ *
+ * If no extension exists, the result will be the empty string ("").
+ *
+ * @param path The path to get the name from.
+ * @return Returns the extension of the filename, i.e. the last portion of the filename after the final '.' character
+ */
 const char *path_ext(Path path);
+
+/** @brief Get the extension of the filename.
+ *
+ * If no extension exists, the result will be the empty string ("").
+ *
+ * @param path The path to get the name from.
+ * @return Returns the extension of the filename, i.e. the last portion of the filename after the final '.' character
+ */
 const char *path_ext_cstr(char *path);
-/* Returns the C-string representation of the path */
+
+/** @brief Returns a UTF-8 string containing the path.
+ *
+ * @param path The path to get the string from.
+ * @return A UTF-8 string containing the path represented by @p path.
+ */
 const char *path_str(Path path);
-/* Constructs a new path pointing to a specified buffer */
+
+/** @brief Constructs a new path pointing to a specified buffer.
+ *
+ * @param pathBuffer The buffer to point the new path to.
+ * @return A new path object referencing @p pathBuffer for its storage.
+ */
 Path path_construct_ref(char *pathBuffer);
-/* Constructs a path from a series of path segments */
+
+/** @brief Constructs a path from a series of path segments.
+ *
+ * Segments may contain path separators, or none at all.
+ * Path separators will automatically be inserted between segments if they don't already exist in a segment
+ * (e.g. both "path", "nextPath" and "path/", "nextPath" become "path/nextPath" on Linux),
+ * and segments that contain redundant separators will be reduced to a single separator
+ * (e.g. "path/", "/nextPath" becomes "path/nextPath" on Linux).
+ * Consecutive separators inside segments will not be reduced; this function does not normalize the path.
+ *
+ * @param args A list of strings to concatenate into a path.
+ * @param segments The number of strings in @p args.
+ * @return A new path containing a concatenation of all the path segments in @p args.
+ */
 Path path_construct_gather(const char *args[], size_t segments);
-/* Constructs a new path from a path and a name */
-/* `name` may be NULL, in which case the path is duplicated */
+
+/** @brief Constructs a new path from a path and a name.
+ *
+ * A path separator is automatically inserted between the path and the name if needed.
+ *
+ * @param path The directory path for the new Path object. The path may be terminated with a path separator, but is not required to be.
+ * @param name The file/directory name for the new Path object. This parameter may be NULL.
+ * @return A new path containing a concatenation of @p path and @p name.
+ *     If @p name is NULL, this function essentially copies @p path and ensures it ends with a path separator.
+ */
 Path path_construct(const char *path, const char *name);
-/* Appends a name to a path, and returns the modified path, or NULL if out of memory */
-/* The original path object is invalidated, even if NULL is returned */
-/* Intended use case includes the following:
+
+/** @brief Appends a name to a path, and returns the modified path, or NULL if out of memory.
  *
- *  Path path_to_modify = ...;
+ * The original path object is invalidated, even if NULL is returned
+ * Intended use case includes the following:
  *
- *  ...
+ *     Path path_to_modify = ...;
  *
- *  if ((path_to_modify = path_append(path_to_modify, "subdirectory")) == NULL)
- *      <error>;
+ *     ...
  *
+ *     if ((path_to_modify = path_append(path_to_modify, "subdirectory")) == NULL)
+ *         <error>;
+ *
+ * @param path The path to append to.
+ * @param name The file/directory name to append to @p path.
+ * @return A new path containing the concatenation of @p path and @p name.
  */
 Path path_append(Path path, const char *name);
-/* Copies a path (with an optional name appended to it) and returns the copy, or NULL if out of memory */
+
+/** @brief Copies a path, with an optional name appended to it.
+ *
+ * @param path The path to copy.
+ * @param name An optional file/directory name to append to @p path while copying. Can be set to NULL if unused.
+ * @return A new path that contains a copy of path, with @p name appended.
+ */
 Path path_copy(Path path, const char *name);
-/* Destroys a Path object */
+
+/** @brief Destroys a Path object and invalidates the handle
+ *
+ * @param path The path to destroy.
+ */
 void path_destroy(Path path);
 
-/* Glob to see if string matches pattern
+/** @brief Returns the current working directory for this process.
+ *
+ * @return A new path that contains the current working directory for this process, or NULL on allocation failure.
+ */
+Path path_get_current_working_dir();
+
+/** @brief Sets the current working directory for this process.
+ *
+ * @param path The path to set the current working directory to.
+ * @return Returns 0 on success, error code on failure.
+ */
+int path_set_current_working_dir_cstr(const char *path);
+
+/** @brief Sets the current working directory for this process.
+ *
+ * @param path The path to set the current working directory to.
+ * @return Returns 0 on success, error code on failure.
+ */
+int path_set_current_working_dir(Path path);
+
+/** @brief Glob to see if string matches pattern.
+ *
+ * This function operates on single bytes, and does not support UTF-8.
  *
  * Pattern can contain the following:
  *
@@ -109,7 +221,9 @@ void path_destroy(Path path);
  *           This is because searching for the empty set is not allowed.
  *     xxx - Any other character matches itself. It must be present.
  *
- * Returns 0 if `str` matches `pattern`, -1 if no match, and -2 if bad pattern or pattern too complex
+ * @param str The string to check.
+ * @param pattern The glob pattern to match @p str against.
+ * @return 0 if `str` matches `pattern`, -1 if no match, and -2 if the pattern has improper syntax or is too complex.
  */
 int glob(const char *str, const char *pattern);
 
@@ -227,6 +341,20 @@ const char *dirent_name(DirectoryEntry entry);
  */
 long long dirent_size(DirectoryEntry entry);
 
+/** @brief Returns whether the directory entry exists or not.
+ *
+ * @param entry The entry to check the existence of.
+ * @return 1 if the entry exists, 0 if it does not.
+ */
+int dirent_exists(DirectoryEntry entry);
+
+/** @brief Attempts to refresh the internal cache of information about the entry.
+ *
+ * @param entry The entry to refresh the cache of.
+ * @return 0 on success, or what error occured on failure.
+ */
+int dirent_refresh(DirectoryEntry entry);
+
 /* Returns 0 if trait does not exist, non-zero if trait exists (some functions may always return 0 on some platforms) */
 int dirent_is_actual_entry(DirectoryEntry entry);
 int dirent_is_subdirectory(DirectoryEntry entry);
@@ -246,10 +374,10 @@ int dirent_is_temporary(DirectoryEntry entry);
 
 /* Obtain the UTC time of file traits */
 /* Returns 0 on success, -1 on failure (failure may occur because the requested trait doesn't exist for the platform) */
-int dirent_created_time_utc(DirectoryEntry entry, struct tm *t);
-int dirent_last_access_time_utc(DirectoryEntry entry, struct tm *t);
-int dirent_last_modification_time_utc(DirectoryEntry entry, struct tm *t);
-int dirent_last_status_update_time_utc(DirectoryEntry entry, struct tm *t);
+int dirent_created_time(DirectoryEntry entry, time_t *t);
+int dirent_last_access_time(DirectoryEntry entry, time_t *t);
+int dirent_last_modification_time(DirectoryEntry entry, time_t *t);
+int dirent_last_status_update_time(DirectoryEntry entry, time_t *t);
 
 #ifdef __cplusplus
 }

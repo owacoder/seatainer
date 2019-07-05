@@ -3,7 +3,7 @@ CONFIG += console
 CONFIG -= app_bundle
 CONFIG -= qt
 
-QMAKE_CFLAGS += -msse4.1 -msha -maes
+QMAKE_CFLAGS += -msse4.1 -msha -maes -nostdlib
 QMAKE_CXXFLAGS += -std=c++11
 
 DEFINES += CC_TYPE_MISMATCH_ABORT \
@@ -38,11 +38,12 @@ SOURCES += \
     IO/net.c \
     IO/tee.c \
     dir.c \
-    main.cpp \
     IO/padding/bit.c \
     IO/padding/pkcs7.c \
     tinymalloc.c \
-    IO/zlib_io.c
+    IO/zlib_io.c \
+    main.c \
+    seaerror.c
 
 HEADERS += \
     ccdbllst.h \
@@ -67,7 +68,7 @@ HEADERS += \
     tinymalloc.h \
     platforms_config.h \
     IO/zlib_io.h \
-    test_framework.h
+    seaerror.h
 
 DISTFILES += \
     README.md \

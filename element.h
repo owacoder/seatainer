@@ -13,9 +13,7 @@
 
 #include "platforms.h"
 
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-#define C11
-
+#if C11
 #define CC_COPY(container) CC_COPY_EX((container), NULL, NULL)
 #define CC_COPY_EX(container, constructor, destructor) \
     (_Generic((container), HVector: cc_v_copy, \
@@ -89,7 +87,6 @@
  * +---...----------------+-----------------------+------------------------+-----------------------+-------------------+--------------+
  *
  */
-
 /* Direction flags */
 #define CC_FORWARD 0
 #define CC_BACKWARD 1

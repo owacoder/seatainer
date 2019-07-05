@@ -18,6 +18,7 @@
 
 #include "io.h"
 #include "utility.h"
+#include "seaerror.h"
 
 #if LINUX_OS
 #include <sys/stat.h>
@@ -441,31 +442,8 @@ int io_error(IO io) {
         default: return io->flags & IO_FLAG_ERROR? io->error: 0;
         case IO_File:
         case IO_OwnFile:
-            return ferror(io->ptr)? IO_EIO: 0;
+            return ferror(io->ptr)? CC_EIO: 0;
     }
-}
-
-char *io_error_description_alloc(int err) {
-#if WINDOWS_OS
-    LPWSTR str = NULL;
-
-    if (FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPWSTR) &str, 0, NULL)) {
-        LPSTR result = wide_to_utf8_alloc(str);
-        LocalFree(str);
-        return result;
-    }
-
-    return NULL;
-#else
-    char *error_string = strerror(err);
-    size_t error_string_len = strlen(error_string);
-
-    char *new_string = MALLOC(error_string_len + 1);
-    if (new_string != NULL)
-        memcpy(new_string, error_string, error_string_len + 1);
-
-    return new_string;
-#endif
 }
 
 int io_set_error(IO io, int err) {
@@ -536,7 +514,7 @@ int io_flush(IO io) {
 
 int io_copy_and_close(IO in, IO out) {
     if (!in || !out)
-        return IO_ENOMEM;
+        return CC_ENOMEM;
 
     int result = io_copy(in, out);
     io_close(in);
@@ -625,7 +603,7 @@ int io_getc(IO io) {
     if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
-        io->error = IO_EREAD;
+        io->error = CC_EREAD;
         return EOF;
     }
 
@@ -678,7 +656,7 @@ char *io_gets(char *str, int num, IO io) {
     if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
-        io->error = IO_EREAD;
+        io->error = CC_EREAD;
         return NULL;
     }
 
@@ -1630,7 +1608,7 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
     if (!(io->flags & IO_FLAG_WRITABLE))
     {
         io->flags |= IO_FLAG_ERROR;
-        io->error = IO_EWRITE;
+        io->error = CC_EWRITE;
         return -1;
     }
 
@@ -1948,7 +1926,7 @@ int io_putc_internal(int ch, IO io) {
     switch (io->type) {
         default:
             io->flags |= IO_FLAG_ERROR;
-            io->error = IO_EWRITE;
+            io->error = CC_EWRITE;
             return EOF;
         case IO_File:
         case IO_OwnFile: return fputc(ch, io->ptr);
@@ -1967,7 +1945,7 @@ int io_putc_internal(int ch, IO io) {
         case IO_SizedBuffer:
             if (io->data.sizes.pos == io->data.sizes.size) {
                 io->flags |= IO_FLAG_ERROR;
-                io->error = IO_ENOBUFS;
+                io->error = CC_ENOBUFS;
                 return EOF;
             }
             ((char *) io->ptr)[io->data.sizes.pos++] = (char) ch;
@@ -1991,7 +1969,7 @@ int io_putc(int ch, IO io) {
     if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
-        io->error = IO_EWRITE;
+        io->error = CC_EWRITE;
         return EOF;
     }
 
@@ -2013,7 +1991,7 @@ int io_puts(const char *str, IO io) {
     if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
-        io->error = IO_EWRITE;
+        io->error = CC_EWRITE;
         return EOF;
     }
 
@@ -2022,7 +2000,7 @@ int io_puts(const char *str, IO io) {
     switch (io->type) {
         default:
             io->flags |= IO_FLAG_ERROR;
-            io->error = IO_EWRITE;
+            io->error = CC_EWRITE;
             return EOF;
         case IO_File:
         case IO_OwnFile: return fputs(str, io->ptr);
@@ -2047,7 +2025,7 @@ int io_puts(const char *str, IO io) {
             if (avail < len) {
                 len = avail;
                 io->flags |= IO_FLAG_ERROR;
-                io->error = IO_ENOBUFS;
+                io->error = CC_ENOBUFS;
                 result = EOF;
             }
 
@@ -2106,7 +2084,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
     if (total == 0) {
         if (size && count) {
             io->flags |= IO_FLAG_ERROR;
-            io->error = IO_EINVAL;
+            io->error = CC_EINVAL;
         }
         return 0;
     }
@@ -2114,7 +2092,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
     /* Not readable or not switched over to reading yet */
     if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_ERROR))) {
         io->flags |= IO_FLAG_ERROR;
-        io->error = IO_EREAD;
+        io->error = CC_EREAD;
         return 0;
     }
 
@@ -2246,7 +2224,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
                     read = 0;
                     io->flags |= IO_FLAG_ERROR;
                     if (io->callbacks->read == NULL)
-                        io->error = IO_ENOTSUP;
+                        io->error = CC_ENOTSUP;
                 } else {
                     io->flags |= IO_FLAG_EOF;
                 }
@@ -2268,7 +2246,7 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
     if (total == 0) {
         if (size && count) {
             io->flags |= IO_FLAG_ERROR;
-            io->error = IO_EINVAL;
+            io->error = CC_EINVAL;
         }
         return 0;
     }
@@ -3155,7 +3133,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
     if (total == 0) {
         if (size && count) {
             io->flags |= IO_FLAG_ERROR;
-            io->error = IO_EINVAL;
+            io->error = CC_EINVAL;
         }
         return 0;
     }
@@ -3164,7 +3142,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
     if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_ERROR)))
     {
         io->flags |= IO_FLAG_ERROR;
-        io->error = IO_EWRITE;
+        io->error = CC_EWRITE;
         return 0;
     }
 
@@ -3173,7 +3151,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
     switch (io->type) {
         default:
             io->flags |= IO_FLAG_ERROR;
-            io->error = IO_EWRITE;
+            io->error = CC_EWRITE;
             return 0;
         case IO_File:
         case IO_OwnFile: return fwrite(ptr, size, count, io->ptr);
@@ -3186,7 +3164,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
             if (io->flags & IO_FLAG_APPEND) {
                 if (io_seek(io, 0, SEEK_END)) {
                     io->flags |= IO_FLAG_ERROR;
-                    io->error = IO_ESPIPE;
+                    io->error = CC_ESPIPE;
                     return 0;
                 }
             }
@@ -3224,7 +3202,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
         {
             if (io->callbacks->write == NULL) {
                 io->flags |= IO_FLAG_ERROR;
-                io->error = IO_ENOTSUP;
+                io->error = CC_ENOTSUP;
                 return 0;
             }
 
@@ -3242,7 +3220,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
             if (avail < max)
             {
                 io->flags |= IO_FLAG_ERROR;
-                io->error = IO_ENOBUFS;
+                io->error = CC_ENOBUFS;
 
                 max = avail - avail % size;
             }
@@ -3274,7 +3252,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
             /* grow to desired size */
             if (io_grow(io, required_size)) {
                 io->flags |= IO_FLAG_ERROR;
-                io->error = IO_ENOMEM;
+                io->error = CC_ENOMEM;
 
                 max = avail - avail % size;
                 if (grow_with_gap)
@@ -3301,7 +3279,7 @@ size_t io_write(const void *ptr, size_t size, size_t count, IO io) {
     if (total == 0) {
         if (size && count) {
             io->flags |= IO_FLAG_ERROR;
-            io->error = IO_EINVAL;
+            io->error = CC_EINVAL;
         }
         return 0;
     }
@@ -3488,7 +3466,7 @@ int io_ungetc(int chr, IO io) {
     if (!(io->flags & IO_FLAG_READABLE))
     {
         io->flags |= IO_FLAG_ERROR;
-        io->error = IO_EREAD;
+        io->error = CC_EREAD;
         return EOF;
     }
 

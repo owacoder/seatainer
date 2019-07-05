@@ -29,7 +29,7 @@ struct Vector
     HElementData buffer;
 };
 
-#ifdef C99
+#if C99
 extern inline int cc_v_push_back(HVector list, unsigned flags, HConstElementData data, ElementDataCallback construct);
 extern inline int cc_v_pop_back(HVector list, ElementDataCallback destruct);
 #else

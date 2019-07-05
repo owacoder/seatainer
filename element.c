@@ -1001,7 +1001,7 @@ int cc_el_destroy(HElementData data)
     return CC_OK;
 }
 
-#ifdef C99
+#if C99
 extern inline int cc_el_destroy_reference_at(HElementData data);
 extern inline int cc_el_destroy_reference(HElementData data);
 #else

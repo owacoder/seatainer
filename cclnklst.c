@@ -18,7 +18,7 @@ extern "C" {
 struct LinkedListNode
 {
     struct LinkedListNode *next;
-#ifdef C99
+#if C99
     void *data[]; /* Actually is a char[] containing the raw stored type
                    * The actual stored type is e.g. the int stored in the ElementData, not the ElementData itself
                    * (void * is just to align) */
@@ -36,7 +36,7 @@ struct LinkedList
 
     HContainerElementMetaData metadata;
 
-#ifdef C99
+#if C99
     /* Constructs on the internal storage, but then can be used as a pointer to another storage block
      * The internal storage must be destructed when destroying the class, by setting the storage pointer to NULL
      * To do this, call `cc_el_destroy_reference()` on the buffer
@@ -45,7 +45,7 @@ struct LinkedList
 #endif
 };
 
-#ifdef C99
+#if C99
 extern inline int cc_ll_push_front(HLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct);
 extern inline int cc_ll_pop_front(HLinkedList list, ElementDataCallback destruct);
 extern inline int cc_ll_push_back(HLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct);
@@ -108,7 +108,7 @@ int cc_ll_init_at(void *buf, size_t buffer_size, ContainerElementType type, HCon
     if (!result->metadata)
         CC_NO_MEM_HANDLER("out of memory");
 
-#ifdef C99
+#if C99
     result->buffer = cc_el_init(type, result->metadata, NULL, NULL);
     if (!result->buffer)
     {
@@ -135,7 +135,7 @@ HLinkedList cc_ll_copy(HLinkedList list, HContainerElementMetaData externalMeta,
     while (old)
     {
         HElementData d;
-#ifdef C99
+#if C99
         *cc_el_storage_location_ptr(list->buffer) = old->data;
 
         d = list->buffer;
@@ -181,7 +181,7 @@ int cc_ll_insert_after(HLinkedList list, unsigned flags, Iterator after, HConstE
     if (data && !cc_el_compatible_metadata_element(list->metadata, data))
         CC_TYPE_MISMATCH_HANDLER("cannot insert element", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(data));
 
-#ifdef C99
+#if C99
     int element_was_constructed = 0;
 
     /* In C99, we can initialize with a flexible array member */
@@ -248,7 +248,7 @@ int cc_ll_insert_after(HLinkedList list, unsigned flags, Iterator after, HConstE
     return CC_OK;
 
 cleanup:
-#ifdef C99
+#if C99
     if (element_was_constructed)
         cc_el_call_destructor_in(list->metadata, list->buffer);
 #else
@@ -273,7 +273,7 @@ int cc_ll_erase_after(HLinkedList list, Iterator after, ElementDataCallback dest
     if (list->tail == node)
         list->tail = (HLinkedListNode) after;
 
-#ifdef C99
+#if C99
     *cc_el_storage_location_ptr(list->buffer) = node->data;
 
     if (destruct)
@@ -297,7 +297,7 @@ int cc_ll_find(HLinkedList list, Iterator start, unsigned flags, HConstElementDa
 
     for (; node; node = node->next)
     {
-#ifdef C99
+#if C99
         *cc_el_storage_location_ptr(list->buffer) = node->data;
 
         int ret;
@@ -339,7 +339,7 @@ int cc_ll_find(HLinkedList list, Iterator start, unsigned flags, HConstElementDa
 
     if (swap)
     {
-#ifdef C99
+#if C99
         memswap(node->data, swap->data, cc_el_metadata_type_size(list->metadata));
 #else
         HElementData handle = node->data;
@@ -377,7 +377,7 @@ int cc_ll_iterate(HLinkedList list, ExtendedElementDataCallback callback, void *
 
     for (; node; node = node->next)
     {
-#ifdef C99
+#if C99
         *cc_el_storage_location_ptr(list->buffer) = node->data;
 
         CC_RETURN_ON_ERROR(callback(list->buffer, userdata));
@@ -430,7 +430,7 @@ int cc_ll_node_data(HLinkedList list, Iterator node, HElementData out)
     if (!cc_el_compatible_metadata_element(list->metadata, out))
         CC_TYPE_MISMATCH_HANDLER("cannot get element", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(out));
 
-#ifdef C99
+#if C99
     *cc_el_storage_location_ptr(out) = ll_node->data;
 #else
     *cc_el_storage_location_ptr(out) = cc_el_storage_location(ll_node->data);
@@ -450,7 +450,7 @@ int cc_ll_compare(HLinkedList lhs, HLinkedList rhs, ElementDualDataCallback cmp)
 
     while (lnode && rnode)
     {
-#ifdef C99
+#if C99
         cc_ll_node_data(lhs, lnode, lhs->buffer);
         cc_ll_node_data(rhs, rnode, rhs->buffer);
 
@@ -486,7 +486,7 @@ void cc_ll_clear(HLinkedList list, ElementDataCallback destruct)
 
     while (node)
     {
-#ifdef C99
+#if C99
         *cc_el_storage_location_ptr(list->buffer) = node->data;
 
         if (destruct)
@@ -511,7 +511,7 @@ void cc_ll_destroy_at(HLinkedList list, ElementDataCallback destruct)
 {
     cc_ll_clear(list, destruct);
 
-#ifdef C99
+#if C99
     /* Reinitialize buffer to point to original storage (since we constructed it and now need to destruct it) */
     cc_el_destroy_reference(list->buffer);
 #endif

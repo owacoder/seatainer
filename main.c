@@ -8,9 +8,9 @@
 #include "io.h"
 #include "platforms.h"
 #include "utility.h"
+#include "seaerror.h"
 
 #include <assert.h>
-#include "test_framework.h"
 
 #include <stdlib.h>
 
@@ -437,7 +437,7 @@ void test_io() {
 
 static void search_helper(IO out, Directory directory, const char *fileglob, int searchSubDirs) {
     if (dir_error(directory)) {
-        char *reason = io_error_description_alloc(dir_error(directory));
+        char *reason = error_description_alloc(dir_error(directory));
         printf("Cannot search %s: %s\n", dir_path(directory), reason);
         FREE(reason);
         return;
@@ -493,11 +493,36 @@ void walk(Directory directory, unsigned long long *items, unsigned long long *si
     }
 }
 
-#include <cmath>
+void walk_dir(IO out, Directory directory) {
+    if (dir_error(directory)) {
+        printf("Error while iterating %s\n", dir_path(directory));
+        return;
+    }
+
+    Path p = path_get_current_working_dir();
+    io_printf(out, "cwd: %s\n", path_str(p));
+    path_up(p);
+    if (path_set_current_working_dir(p) == 0) {
+        path_destroy(p);
+        p = path_get_current_working_dir();
+        io_printf(out, "cwd: %s\n", path_str(p));
+    }
+    path_destroy(p);
+
+    DirectoryEntry entry;
+    while ((entry = dir_next(directory)) != NULL) {
+        if (!dirent_is_actual_entry(entry))
+            continue;
+
+        size_t name_len = strlen(dirent_name(entry));
+        io_printf(out, "%s%-*c  %10lld bytes\n", dirent_name(entry), 40 - (int) name_len, dirent_is_directory(entry)? path_separator(): ' ', dirent_size(entry));
+    }
+}
 
 int main()
 {
-    search(io_open_file(stdout), "/shared", "*.txt", 1);
+    Directory wdir = dir_open("/shared");
+    walk_dir(io_open_file(stdout), wdir);
 
     return 0;
 
@@ -549,41 +574,6 @@ int main()
         printf("%s\n", io_error_description_alloc(io_error(zlib)));
 
     io_vclose(4, zout, zlib, defl, file);
-
-    return 0;
-
-    unsigned char key[16];
-
-    CryptoRandIO rnd;
-    rnd.open();
-    if (16 != rnd.read((char *) key, 16))
-        return 1;
-
-    for (size_t i = 0; i < 16; ++i)
-        FileIO(stdout).printf("%02hhx", key[i]);
-    FileIO(stdout).putLine("");
-
-    StringIO buf((const char *) key, 5);
-    FileIO outf(stdout);
-    HexEncodeIO hexencode(outf);
-    Pkcs7PaddingEncodeIO bit(hexencode, 4);
-    buf.slowCopyTo(bit);
-    bit.close();
-
-    StringIO pkcs7str("Str\3\3\1");
-    Pkcs7PaddingDecodeIO decode(pkcs7str, 3);
-    HexEncodeIO hexencode2(decode);
-    puts("");
-    hexencode2.copyTo(FileIO(stdout));
-
-    puts(hexencode2.errorDescription().c_str());
-
-    return 0;
-
-    StringIO io("Some input");
-    StringIO("Some input").copyTo(io);
-
-    FileIO(stdout).printf("%u\n%s\n", 8017, io.data().c_str());
 
     return 0;
 

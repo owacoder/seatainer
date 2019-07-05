@@ -5,6 +5,8 @@
  */
 
 #include "bit.h"
+#include "../../seaerror.h"
+
 #include <string.h>
 #include <stdint.h>
 
@@ -116,7 +118,7 @@ size_t pkcs7_padding_decode_read(void *ptr, size_t size, size_t count, void *use
 
         if (read == padding->block_size + 1) {
             if (io_ungetc(padding->buffer[padding->block_size], padding->io) == EOF) {
-                io_set_error(io, IO_EREAD);
+                io_set_error(io, CC_EREAD);
                 return SIZE_MAX;
             }
 
@@ -128,7 +130,7 @@ size_t pkcs7_padding_decode_read(void *ptr, size_t size, size_t count, void *use
             if (read == 0)
                 break;
 
-            io_set_error(io, IO_EREAD);
+            io_set_error(io, CC_EREAD);
             return SIZE_MAX;
         } else /* read == padding->block_size, no error */ {
             unsigned char pad_value = padding->buffer[padding->block_size - 1];
@@ -151,7 +153,7 @@ size_t pkcs7_padding_decode_read(void *ptr, size_t size, size_t count, void *use
     return (size*count - max) / size;
 
 cleanup:
-    io_set_error(io, IO_EREAD);
+    io_set_error(io, CC_EREAD);
     return SIZE_MAX;
 }
 

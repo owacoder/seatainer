@@ -9,7 +9,7 @@
 
 #include <stdlib.h>
 
-#if defined(__SSSE3__)
+#if defined(__SSSE3__) && defined(__SHA__)
 #define SHA1_COMPILE_SUPPORTS_X86_INTRINSICS
 #endif
 #define SHA1_HASH_BYTES 20

@@ -31,7 +31,7 @@ struct String
     size_t size; /* Size stored in upper bits, lowest bit specifies whether string is stored in `tight` (0) or `helper` (1) */
 };
 
-#ifdef C99
+#if C99
 extern inline int cc_s_push_back(HString string, char data);
 extern inline int cc_s_push_back_n(HString string, char data, size_t count);
 extern inline int cc_s_push_back_cstring(HString string, const char *data);

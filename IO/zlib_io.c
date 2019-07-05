@@ -1,5 +1,7 @@
 #include "zlib_io.h"
 
+#include "../seaerror.h"
+
 struct ZlibParameters {
     IO io;
     int windowBits;
@@ -62,9 +64,9 @@ static void *zlib_open(void *userdata, IO io) {
         int *err = params->err;
 
         switch (result) {
-            case Z_MEM_ERROR: *err = IO_ENOMEM; goto cleanup;
-            case Z_STREAM_ERROR: *err = IO_EINVAL; goto cleanup;
-            case Z_VERSION_ERROR: *err = IO_EIO; goto cleanup;
+            case Z_MEM_ERROR: *err = CC_ENOMEM; goto cleanup;
+            case Z_STREAM_ERROR: *err = CC_EINVAL; goto cleanup;
+            case Z_VERSION_ERROR: *err = CC_EIO; goto cleanup;
             case Z_OK: break;
         }
     }
@@ -109,9 +111,9 @@ static size_t zlib_read(void *buf, size_t size, size_t count, void *userdata, IO
 
         switch (result) {
             case Z_STREAM_ERROR:
-            case Z_NEED_DICT: io_set_error(io, IO_EIO); return SIZE_MAX;
-            case Z_DATA_ERROR: io_set_error(io, IO_EBADMSG); return SIZE_MAX;
-            case Z_MEM_ERROR: io_set_error(io, IO_ENOMEM); return SIZE_MAX;
+            case Z_NEED_DICT: io_set_error(io, CC_EIO); return SIZE_MAX;
+            case Z_DATA_ERROR: io_set_error(io, CC_EBADMSG); return SIZE_MAX;
+            case Z_MEM_ERROR: io_set_error(io, CC_ENOMEM); return SIZE_MAX;
             case Z_STREAM_END: goto done;
         }
     } while (state->zlib.avail_out != 0);
@@ -140,9 +142,9 @@ static size_t zlib_write(const void *buf, size_t size, size_t count, void *userd
 
         switch (result) {
             case Z_STREAM_ERROR:
-            case Z_NEED_DICT: io_set_error(io, IO_EIO); return 0;
-            case Z_DATA_ERROR: io_set_error(io, IO_EBADMSG); return 0;
-            case Z_MEM_ERROR: io_set_error(io, IO_ENOMEM); return 0;
+            case Z_NEED_DICT: io_set_error(io, CC_EIO); return 0;
+            case Z_DATA_ERROR: io_set_error(io, CC_EBADMSG); return 0;
+            case Z_MEM_ERROR: io_set_error(io, CC_ENOMEM); return 0;
         }
 
         size_t used = sizeof(state->buffer) - state->zlib.avail_out;
@@ -167,9 +169,9 @@ static int zlib_close(void *userdata, IO io) {
     }
 
     if (state->deflating)
-        result = deflateEnd(&state->zlib) != Z_OK? result? result: IO_EIO: 0;
+        result = deflateEnd(&state->zlib) != Z_OK? result? result: CC_EIO: 0;
     else
-        result = inflateEnd(&state->zlib) != Z_OK? result? result: IO_EIO: 0;
+        result = inflateEnd(&state->zlib) != Z_OK? result? result: CC_EIO: 0;
 
     FREE(state);
     return result;

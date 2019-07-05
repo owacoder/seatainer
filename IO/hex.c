@@ -6,6 +6,8 @@
 
 #include "hex.h"
 
+#include "../seaerror.h"
+
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -35,7 +37,7 @@ static size_t hex_decode_read(void *ptr, size_t size, size_t count, void *userda
 
         char *sptr = strchr(alpha, tolower(ch));
         if (sptr == NULL) {
-            io_set_error(io, IO_EBADMSG);
+            io_set_error(io, CC_EBADMSG);
             return SIZE_MAX;
         }
 

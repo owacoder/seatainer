@@ -2,9 +2,11 @@ appname := seatainer
 path := $(PATH)
 
 CC = gcc
-CFLAGS = -Wall -std=c99 -maes -msse4.1 -msha
+LD = gcc # define to ld if you want freestanding behavior (not yet supported)
+CFLAGS = -Wall -std=c99 # -maes -msse4.1 -msha
 CXXFLAGS = -Wall -std=c++11
 DEFINES = -D_POSIX_C_SOURCE=200809L -DCC_INCLUDE_NETWORK
+LDLIBS = -lm -lz
 
 SRCFILES = ccdbllst.c \
            ccstring.c \
@@ -26,10 +28,10 @@ SRCFILES = ccdbllst.c \
            dir.c \
            main.c \
            utility.c \
-           ccpair.c
+           seaerror.c \
+           tinymalloc.c
 
-HEADERFILES = ccpair.h \
-              ccdbllst.h \
+HEADERFILES = ccdbllst.h \
               element.h \
               ccstring.h \
               cchash.h \
@@ -48,15 +50,16 @@ HEADERFILES = ccpair.h \
               cclnklst.h \
               dir.h \
               platforms.h \
-              utility.h
+              utility.h \
+              seaerror.h \
+              tinymalloc.h
 
 OBJS = $(subst .c,.o,$(SRCFILES))
-LDLIBS = -lm -lz
 
 all: $(appname)
 
 $(appname): $(OBJS)
-	$(CC) $(LDFLAGS) -o $(appname) $(OBJS) $(LDLIBS)
+	$(LD) $(LDFLAGS) -o $(appname) $(OBJS) $(LDLIBS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(DEFINES) -o $(subst .c,.o,$<) -c $<

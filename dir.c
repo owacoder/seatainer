@@ -224,17 +224,26 @@ Path path_construct_gather(const char *args[], size_t segments) {
     result->external = NULL;
 
     char *ptr = result->path;
-    size_t lastLength = 0;
+    size_t lastLength = 0, lastIndex = 0;
 
     for (size_t i = 0; i < segments; ++i) {
         size_t len = strlen(args[i]);
         if (i && len &&
-                !path_check_separator(args[i-1][lastLength-1]) &&
+                !path_check_separator(args[lastIndex][lastLength-1]) &&
                 !path_check_separator(*args[i]))
             *ptr++ = path_separator();
+
+        if (i && path_check_separator(args[lastIndex][lastLength-1]) &&
+                 path_check_separator(*args[i]))
+            --ptr;
+
+        if (len) {
+            lastIndex = i;
+            lastLength = len;
+        }
+
         memcpy(ptr, args[i], len);
         ptr += len;
-        lastLength = len;
     }
 
     *ptr = 0;
@@ -494,6 +503,93 @@ const char *path_ext(Path path) {
     return path_ext_cstr(path_data(path));
 }
 
+int path_is_relative_cstr(const char *pathStr) {
+#if WINDOWS_OS
+    return !(pathStr[0] == path_separator() ||
+            (pathStr[0] && pathStr[1] == ':' && pathStr[2] == path_separator()));
+#else
+    if (pathStr[0] == '/')
+        return 0;
+
+    const char *minAddr = strchr(pathStr, '/');
+    if (minAddr == NULL || minAddr[-1] != ':')
+        return 1;
+    else if (minAddr[1] == '/') /* Resource locator has two slashes (i.e. "smb://"), so look for the next slash */
+        return 0;
+    else
+        return 1;
+#endif
+}
+
+int path_is_relative(Path path) {
+    return path_is_relative_cstr(path_data(path));
+}
+
+Path path_get_current_working_dir() {
+#if WINDOWS_OS
+    DWORD size = GetCurrentDirectoryW(NULL, 0);
+    WCHAR wbuf = MALLOC(size);
+    if (wbuf == NULL)
+        return NULL;
+
+    GetCurrentDirectoryW(wbuf, size);
+
+    char *wd = wide_to_utf8_alloc(wbuf);
+    FREE(wbuf);
+    if (wd == NULL)
+        return NULL;
+#elif LINUX_OS
+    char *wd = getcwd(NULL, 0);
+    if (wd == NULL)
+        return NULL;
+#else
+    size_t wd_size = 256;
+    char *wd = MALLOC(wd_size);
+
+    do {
+        if (getcwd(wd, wd_size) != NULL)
+            break;
+
+        if (errno != ERANGE) {
+            FREE(wd);
+            return NULL;
+        }
+
+        wd_size *= 2;
+        char *new_wd = REALLOC(wd, wd_size);
+        if (new_wd == NULL) {
+            FREE(wd);
+            return NULL;
+        }
+    } while (1);
+#endif
+
+    Path p = path_construct(wd, NULL);
+    FREE(wd);
+
+    return p;
+}
+
+int path_set_current_working_dir_cstr(const char *path) {
+#if WINDOWS_OS
+    WCHAR *wide = utf8_to_wide_alloc(path);
+    if (wide == NULL)
+        return CC_ENOMEM;
+
+    if (SetCurrentDirectoryW(wide) == 0)
+        return GetLastError();
+
+    FREE(wide);
+    return 0;
+#else
+    return chdir(path);
+#endif
+}
+
+int path_set_current_working_dir(Path path) {
+    return path_set_current_working_dir_cstr(path_data(path));
+}
+
 #if LINUX_OS
 struct DirEntryStruct {
     char *path; /* Points to path in DirStruct, doesn't have ownership */
@@ -549,6 +645,18 @@ struct DirStruct {
     size_t path_len;
     char path[MAX_PATH + 1]; /* Owned copy of path */
 };
+
+void filetime_to_time_t(FILETIME *time, time_t *t) {
+    ULARGE_INTEGER large;
+
+    large.LowPart = time->dwLowDateTime;
+    large.HighPart = time->dwHighDateTime;
+
+    large.QuadPart /= 10000000; /* Convert from 100 nanosecond intervals to seconds */
+    large.QuadPart -= 11644473600LL; /* Number of seconds between Jan 1, 1601 and Jan 1, 1970 */
+
+    *t = (time_t) large.QuadPart;
+}
 
 void systemTimeToTm(LPSYSTEMTIME time, struct tm *t) {
     t->tm_isdst = 0;
@@ -852,7 +960,7 @@ int dirent_refresh(DirectoryEntry entry) {
         } else {
             LPWSTR wide = utf8_to_wide_alloc(dirent_fullname(entry));
             if (!wide)
-                return -1;
+                return CC_ENOMEM;
 
             entry->ownedDir->findFirstHandle = FindFirstFileW(wide, &entry->fdata.wdata);
 
@@ -864,7 +972,7 @@ int dirent_refresh(DirectoryEntry entry) {
 
         return 0;
     } else
-        return IO_EPERM;
+        return CC_EPERM;
 #else
     return 0;
 #endif
@@ -1154,16 +1262,14 @@ int dirent_is_temporary(DirectoryEntry entry) {
 #endif
 }
 
-int dirent_created_time_utc(DirectoryEntry entry, struct tm *t) {
+int dirent_created_time(DirectoryEntry entry, time_t *t) {
 #if WINDOWS_OS
     if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
 
-    SYSTEMTIME time;
-    if (!FileTimeToSystemTime(entry->is_wide? &entry->fdata.wdata.ftCreationTime: &entry->fdata.data.ftCreationTime, &time))
-        return -1;
+    FILETIME time = entry->is_wide? entry->fdata.wdata.ftCreationTime: entry->fdata.data.ftCreationTime;
 
-    systemTimeToTm(&time, t);
+    filetime_to_time_t(&time, t);
 
     return 0;
 #else
@@ -1174,23 +1280,21 @@ int dirent_created_time_utc(DirectoryEntry entry, struct tm *t) {
 #endif
 }
 
-int dirent_last_access_time_utc(DirectoryEntry entry, struct tm *t) {
+int dirent_last_access_time(DirectoryEntry entry, time_t *t) {
 #if LINUX_OS
     if (dirFillExtData(entry))
         return -1;
 
-    gmtime_r(&entry->extData.st_atime, t);
+    *t = entry->extData.st_atime;
 
     return 0;
 #elif WINDOWS_OS
     if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
 
-    SYSTEMTIME time;
-    if (!FileTimeToSystemTime(entry->is_wide? &entry->fdata.wdata.ftLastAccessTime: &entry->fdata.data.ftLastAccessTime, &time))
-        return -1;
+    FILETIME time = entry->is_wide? entry->fdata.wdata.ftLastAccessTime: entry->fdata.data.ftLastAccessTime;
 
-    systemTimeToTm(&time, t);
+    filetime_to_time_t(&time, t);
 
     return 0;
 #else
@@ -1201,23 +1305,21 @@ int dirent_last_access_time_utc(DirectoryEntry entry, struct tm *t) {
 #endif
 }
 
-int dirent_last_modification_time_utc(DirectoryEntry entry, struct tm *t) {
+int dirent_last_modification_time(DirectoryEntry entry, time_t *t) {
 #if LINUX_OS
     if (dirFillExtData(entry))
         return -1;
 
-    gmtime_r(&entry->extData.st_mtime, t);
+    *t = entry->extData.st_mtime;
 
     return 0;
 #elif WINDOWS_OS
     if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
 
-    SYSTEMTIME time;
-    if (!FileTimeToSystemTime(entry->is_wide? &entry->fdata.wdata.ftLastWriteTime: &entry->fdata.data.ftLastWriteTime, &time))
-        return -1;
+    FILETIME time = entry->is_wide? entry->fdata.wdata.ftLastWriteTime: entry->fdata.data.ftLastWriteTime;
 
-    systemTimeToTm(&time, t);
+    filetime_to_time_t(&time, t);
 
     return 0;
 #else
@@ -1228,12 +1330,12 @@ int dirent_last_modification_time_utc(DirectoryEntry entry, struct tm *t) {
 #endif
 }
 
-int dirent_last_status_update_time_utc(DirectoryEntry entry, struct tm *t) {
+int dirent_last_status_update_time(DirectoryEntry entry, time_t *t) {
 #if LINUX_OS
     if (dirFillExtData(entry))
         return -1;
 
-    gmtime_r(&entry->extData.st_ctime, t);
+    *t = entry->extData.st_ctime;
 
     return 0;
 #else

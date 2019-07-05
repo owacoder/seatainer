@@ -1,5 +1,51 @@
 /** @file
  *
+ *  Contains various convenience macros for detecting the compiler (xxx_COMPILER),
+ *  the operating system (xxx_OS), the processor (xxx_CPU), and the language (C<digits>).
+ *
+ *  The language macros are defined if the feature exists, and undefined otherwise.
+ *  All other macros are always defined, just to 1 if the feature exists and 0 if not.
+ *
+ *  Compilers detected:
+ *     - GCC
+ *     - Clang
+ *     - Intel C++ compiler
+ *     - MSVC
+ *
+ *  Operating systems detected:
+ *     - Android
+ *     - iOS
+ *     - MacOS
+ *     - Windows
+ *     - Linux
+ *     - BSD (FreeBSD, OpenBSD, DragonflyBSD, NetBSD)
+ *     - DOS
+ *
+ *  Convenience groupings for operating systems include:
+ *     - IS_POSIX_COMPLIANT_OS - Defined to 1 if the operating system provides POSIX-compliant implementations of system calls.
+ *     - IS_MOBILE_OS - Defined to 1 if the operating system is designed for mobile devices (i.e. iOS or Android, especially).
+ *
+ *  Processors detected:
+ *     - Alpha
+ *     - AMD64 (x86-64)
+ *     - ARM
+ *     - ARM64
+ *     - Blackfin
+ *     - Convex
+ *     - Epiphany
+ *     - HPPA RISC
+ *     - x86 (x86-32)
+ *     - Itanium
+ *     - Motorola 68k
+ *     - MIPS
+ *     - PowerPC
+ *     - Pyramid
+ *     - RS6000
+ *     - SPARC
+ *     - SuperH
+ *     - SystemZ
+ *     - TMS470
+ *
  *  @author Oliver Adams
  *  @copyright Copyright (C) 2019
  */
@@ -8,223 +54,291 @@
 #define PLATFORMS_H
 
 /* C89/C99/C11 keywords */
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
-#define C99
-#define INLINE inline
-#define RESTRICT restrict
-#define INLINE_DEFINITION(x) x
+#if defined(__STDC_VERSION__)
+# if __STDC_VERSION__ >= 201112L
+#  define C11 1
+# endif
+
+# if __STDC_VERSION__ >= 199901L
+#  define C99 1
+#  define INLINE inline
+#  define RESTRICT restrict
+#  define INLINE_DEFINITION(x) x
+# endif
+#else
+# define C11 0
+# define C99 0
 #endif
 
-#define C89
+#define C89 1
 #ifndef INLINE
-#define INLINE
+# define INLINE
 #endif
 #ifndef RESTRICT
-#define RESTRICT
+# define RESTRICT
 #endif
 #ifndef INLINE_DEFINITION
-#define INLINE_DEFINITION(x) ;
+# define INLINE_DEFINITION(x) ;
 #endif
 
 #ifdef PLATFORMS_CONFIG
-#include <platforms_config.h>
+# include <platforms_config.h>
 #endif
 
 /* Memory management */
 #ifndef MALLOC
-#define MALLOC malloc
+# define MALLOC malloc
 #endif
 
 #ifndef REALLOC
-#define REALLOC realloc
+# define REALLOC realloc
 #endif
 
 #ifndef CALLOC
-#define CALLOC calloc
+# define CALLOC calloc
 #endif
 
 #ifndef FREE
-#define FREE free
+# define FREE free
 #endif
 
 /* Min/Max */
 #ifndef MAX
-#define MAX(x, y) ((x) < (y)? (y): (x))
+# define MAX(x, y) ((x) < (y)? (y): (x))
 #endif
 
 #ifndef MIN
-#define MIN(x, y) ((x) < (y)? (x): (y))
+# define MIN(x, y) ((x) < (y)? (x): (y))
 #endif
 
+/* Compiler */
 #ifdef __clang__
-#define CLANG_COMPILER 1
+# define CLANG_COMPILER 1
 #else
-#define CLANG_COMPILER 0
+# define CLANG_COMPILER 0
 #endif
 
 #if defined(__GNUC__) && !CLANG_COMPILER
-#define GCC_COMPILER 1
+# define GCC_COMPILER 1
 #else
-#define GCC_COMPILER 0
+# define GCC_COMPILER 0
 #endif
 
 #ifdef __INTEL_COMPILER
-#define INTEL_COMPILER 1
+# define INTEL_COMPILER 1
 #else
-#define INTEL_COMPILER 0
+# define INTEL_COMPILER 0
 #endif
 
 #ifdef _MSC_VER
-#define MSVC_COMPILER 1
+# define MSVC_COMPILER 1
 #else
-#define MSVC_COMPILER 0
+# define MSVC_COMPILER 0
 #endif
 
-#if defined(__linux) || defined(__linux__)
-#define LINUX_OS 1
-#ifdef CC_INCLUDE_NETWORK
-#define INVALID_SOCKET (-1)
-#define SOCKET_ERROR (-1)
-#define SOCKET int
-
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <unistd.h>
-#endif /* CC_INCLUDE_NETWORK */
+/* Operating system */
+#if defined(macintosh) | defined(Macintosh)
+# define IOS_SIMULATOR_OS 0
+# define IOS_OS 0
+# define MAC_OS 1
+#elif defined(__APPLE__)
+# include "TargetConditionals.h"
+# if TARGET_IPHONE_SIMULATOR
+#  define IOS_SIMULATOR_OS 1
+#  define IOS_OS 1
+#  define MAC_OS 0
+# elif TARGET_OS_IPHONE
+#  define IOS_SIMULATOR_OS 0
+#  define IOS_OS 1
+#  define MAC_OS 0
+# elif TARGET_OS_MAC
+#  define IOS_SIMULATOR_OS 0
+#  define IOS_OS 0
+#  define MAC_OS 1
+# endif
 #else
-#define LINUX_OS 0
+# define IOS_SIMULATOR_OS 0
+# define IOS_OS 0
+# define MAC_OS 0
 #endif
 
-#if defined(__WIN32) || defined(__WIN64) || defined(WIN32) || defined(WIN64)
-#define WINDOWS_OS 1
-#ifdef CC_INCLUDE_NETWORK
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#endif /* CC_INCLUDE_NETWORK */
-#include <windows.h>
+#if defined(__FreeBSD__) | defined(__NetBSD__) | defined(__OpenBSD__) | defined(__Dragonfly__) | defined(__bsdi__)
+# define BSD_OS 1
 #else
-#define WINDOWS_OS 0
+# define BSD_OS 0
 #endif
 
+#if defined(__ANDROID__)
+# define ANDROID_OS 1
+#else
+# define ANDROID_OS 0
+#endif
+
+#if !MAC_OS && !IOS_OS && !ANDROID_OS && !BSD_OS && (defined(__linux) | defined(__linux__) | defined(linux))
+# define LINUX_OS 1
+#else
+# define LINUX_OS 0
+#endif
+
+#if defined(MSDOS) | defined(__MSDOS__) | defined(_MSDOS) | defined(__DOS__)
+# define DOS_OS 1
+#else
+# define DOS_OS 0
+#endif
+
+#if defined(__WIN32) | defined(__WIN64) | defined(WIN32) | defined(WIN64) | defined(__WIN32__) | defined(_WIN16) | defined(_WIN32) | defined(_WIN64)
+# define WINDOWS_OS 1
+# ifdef CC_INCLUDE_NETWORK
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+# endif /* CC_INCLUDE_NETWORK */
+# include <windows.h>
+#else
+# define WINDOWS_OS 0
+#endif
+
+#if MAC_OS | LINUX_OS | BSD_OS
+# define IS_POSIX_COMPLIANT_OS 1
+# ifdef CC_INCLUDE_NETWORK
+#  define INVALID_SOCKET (-1)
+#  define SOCKET_ERROR (-1)
+#  define SOCKET int
+
+#  include <sys/types.h>
+#  include <sys/socket.h>
+#  include <netinet/in.h>
+#  include <netdb.h>
+#  include <unistd.h>
+# endif /* CC_INCLUDE_NETWORK */
+#else
+# define IS_POSIX_COMPLIANT_OS 0
+#endif
+
+#if ANDROID_OS | IOS_OS
+# define IS_MOBILE_OS 1
+#else
+# define IS_MOBILE_OS 0
+#endif
+
+/* CPU type */
 #if (defined(__alpha__) | defined(__alpha) | defined(_M_ALPHA))
-#define ALPHA_CPU 1
+# define ALPHA_CPU 1
 #else
-#define ALPHA_CPU 0
+# define ALPHA_CPU 0
 #endif
 
 #if (defined(__amd64__) | defined(__amd64) | defined(__x86_64__) | defined(__x86_64) | defined(_M_AMD64))
-#define AMD64_CPU 1
+# define AMD64_CPU 1
 #else
-#define AMD64_CPU 0
+# define AMD64_CPU 0
 #endif
 
 #if (defined(__arm__) | defined(__thumb__) | defined(__TARGET_ARCH_ARM) | defined(__TARGET_ARCH_THUMB) | defined(_ARM) | defined(_M_ARM) | defined(_M_ARMT) | defined(__arm))
-#define ARM_CPU 1
+# define ARM_CPU 1
 #else
-#define ARM_CPU 0
+# define ARM_CPU 0
 #endif
 
 #if (defined(__aarch64__))
-#define ARM64_CPU 1
+# define ARM64_CPU 1
 #else
-#define ARM64_CPU 0
+# define ARM64_CPU 0
 #endif
 
 #if (defined(__bfin) | defined(__BFIN__))
-#define BLACKFIN_CPU 1
+# define BLACKFIN_CPU 1
 #else
-#define BLACKFIN_CPU 0
+# define BLACKFIN_CPU 0
 #endif
 
 #if (defined(__convex__))
-#define CONVEX_CPU 1
+# define CONVEX_CPU 1
 #else
-#define CONVEX_CPU 0
+# define CONVEX_CPU 0
 #endif
 
 #if (defined(__epiphany__))
-#define EPIPHANY_CPU 1
+# define EPIPHANY_CPU 1
 #else
-#define EPIPHANY_CPU 0
+# define EPIPHANY_CPU 0
 #endif
 
 #if (defined(__hppa__) | defined(__HPPA__) | defined(__hppa))
-#define HPPA_RISC_CPU 1
+# define HPPA_RISC_CPU 1
 #else
-#define HPPA_RISC_CPU 0
+# define HPPA_RISC_CPU 0
 #endif
 
 #if (defined(i386) | defined(__i386) | defined(__i386__) | defined(__i486__) | defined(__i586__) | defined(__i686__) | defined(__IA32__) | \
      defined(_M_I86) | defined(_M_IX86) | defined(__X86__) | defined(_X86_) | defined(__THW_INTEL__) | defined(__I86__) | defined(__INTEL__) | defined(__386))
-#define X86_CPU 1
+# define X86_CPU 1
 #else
-#define X86_CPU 0
+# define X86_CPU 0
 #endif
 
 #if (defined(__ia64__) | defined(_IA64) | defined(__IA64__) | defined(__ia64) | defined(_M_IA64) | defined(__itanium__))
-#define ITANIUM_CPU 1
+# define ITANIUM_CPU 1
 #else
-#define ITANIUM_CPU 0
+# define ITANIUM_CPU 0
 #endif
 
 #if (defined(__m68k__) | defined(M68000) | defined(__MC68K__))
-#define M68K_CPU 1
+# define M68K_CPU 1
 #else
-#define M68K_CPU 0
+# define M68K_CPU 0
 #endif
 
 #if (defined(__mips__) | defined(mips) | defined(__mips) | defined(__MIPS__))
-#define MIPS_CPU 1
+# define MIPS_CPU 1
 #else
-#define MIPS_CPU 0
+# define MIPS_CPU 0
 #endif
 
 #if (defined(__powerpc) | defined(__powerpc__) | defined(__powerpc64__) | defined(__POWERPC__) | defined(__ppc__) | defined(__ppc64__) | \
      defined(__PPC__) | defined(__PPC64__) | defined(_ARCH_PPC) | defined(_ARCH_PPC64) | defined(_M_PPC) | defined(_ARCH_PPC) | \
      defined(_ARCH_PPC64) | defined(__PPCGECKO__) | defined(__PPCBROADWAY__) | defined(_XENON) | defined(__ppc))
-#define POWERPC_CPU 1
+# define POWERPC_CPU 1
 #else
-#define POWERPC_CPU 0
+# define POWERPC_CPU 0
 #endif
 
 #if (defined(pyr))
-#define PYRAMID_CPU 1
+# define PYRAMID_CPU 1
 #else
-#define PYRAMID_CPU 0
+# define PYRAMID_CPU 0
 #endif
 
 #if (defined(__THW_RS6000) | defined(_IBMR2) | defined(_POWER) | defined(_ARCH_PWR) | defined(_ARCH_PWR2) | defined(_ARCH_PWR3) | defined(_ARCH_PWR4))
-#define RS6000_CPU 1
+# define RS6000_CPU 1
 #else
-#define RS6000_CPU 0
+# define RS6000_CPU 0
 #endif
 
 #if (defined(__sparc__) | defined(__sparc) | defined(__sparc_v8__) | defined(__sparc_v9__) | defined(__sparc_v8) | defined(__sparc_v9))
-#define SPARC_CPU 1
+# define SPARC_CPU 1
 #else
-#define SPARC_CPU 0
+# define SPARC_CPU 0
 #endif
 
 #if (defined(__sh__) | defined(__sh1__) | defined(__sh2__) | defined(__sh3__) | defined(__sh4__) | defined(__sh5__))
-#define SUPERH_CPU 1
+# define SUPERH_CPU 1
 #else
-#define SUPERH_CPU 0
+# define SUPERH_CPU 0
 #endif
 
 #if (defined(__370__) | defined(__THW_370__) | defined(__s390__) | defined(__s390x__) | defined(__zarch__) | defined(__SYSC_ZARCH__))
-#define SYSTEMZ_CPU 1
+# define SYSTEMZ_CPU 1
 #else
-#define SYSTEMZ_CPU 0
+# define SYSTEMZ_CPU 0
 #endif
 
 #if (defined(__TMS470__))
-#define TMS470_CPU 1
+# define TMS470_CPU 1
 #else
-#define TMS470_CPU 0
+# define TMS470_CPU 0
 #endif
 
+/* Include processor intrinsics */
 #if X86_CPU | AMD64_CPU
 # if MSVC_COMPILER
 #  include <intrin.h>
@@ -235,123 +349,6 @@
 #elif ARM_CPU | ARM64_CPU
 # include <sys/auxv.h>
 # include <asm/hwcap.h>
-#endif
-
-/* Cross-platform error constants for IO */
-#if WINDOWS_OS
-#define IO_E2BIG ERROR_BAD_ARGUMENTS
-#define IO_EACCES ERROR_ACCESS_DENIED
-#define IO_EADDRINUSE ERROR_ADDRESS_ALREADY_ASSOCIATED
-#define IO_EADDRNOTAVAIL ERROR_INCORRECT_ADDRESS /* ? */
-
-#define IO_EBADMSG ERROR_INVALID_DATA
-
-#define IO_ECONNABORTED ERROR_CONNECTION_ABORTED
-#define IO_ECONNREFUSED ERROR_CONNECTION_REFUSED
-
-#define IO_EILSEQ ERROR_INVALID_DATA
-
-#define IO_EIO ERROR_IO_DEVICE
-#define IO_EISCONN ERROR_ALREADY_INITIALIZED
-
-#define IO_ENOBUFS ERROR_DISK_FULL
-
-#define IO_ENOMEM ERROR_OUTOFMEMORY
-
-#define IO_ENOTSUP ERROR_NOT_SUPPORTED
-
-#define IO_ESPIPE ERROR_SEEK_ON_DEVICE
-
-#define IO_ETIME ERROR_TIMEOUT
-#define IO_ETIMEDOUT ERROR_TIMEOUT
-
-#define IO_EREAD ERROR_READ_FAULT
-#define IO_EWRITE ERROR_WRITE_FAULT
-#else
-#define IO_E2BIG E2BIG
-#define IO_EACCES EACCES
-#define IO_EADDRINUSE EADDRINUSE
-#define IO_EADDRNOTAVAIL EADDRNOTAVAIL
-#define IO_EAFNOSUPPORT EAFNOSUPPORT
-#define IO_EAGAIN EAGAIN
-#define IO_EALREADY EALREADY
-#define IO_EBADF EBADF
-#define IO_EBADMSG EBADMSG
-#define IO_EBUSY EBUSY
-#define IO_ECANCELED ECANCELED
-#define IO_ECHILD ECHILD
-#define IO_ECONNABORTED ECONNABORTED
-#define IO_ECONNREFUSED ECONNREFUSED
-#define IO_ECONNRESET ECONNRESET
-#define IO_EDEADLK EDEADLK
-#define IO_EDESTADDRREQ EDESTADDRREQ
-#define IO_EDOM EDOM
-#define IO_EDQUOT EDQUOT
-#define IO_EEXIST EEXIST
-#define IO_EFAULT EFAULT
-#define IO_EFBIG EFBIG
-#define IO_EHOSTUNREACH EHOSTUNREACH
-#define IO_EIDRM EIDRM
-#define IO_EILSEQ EILSEQ
-#define IO_EINPROGRESS EINPROGRESS
-#define IO_EINTR EINTR
-#define IO_EINVAL EINVAL
-#define IO_EIO EIO
-#define IO_EISCONN EISCONN
-#define IO_EISDIR EISDIR
-#define IO_ELOOP ELOOP
-#define IO_EMFILE EMFILE
-#define IO_EMLINK EMLINK
-#define IO_EMSGSIZE EMSGSIZE
-#define IO_EMULTIHOP EMULTIHOP
-#define IO_ENAMETOOLONG ENAMETOOLONG
-#define IO_ENETDOWN ENETDOWN
-#define IO_ENETRESET ENETRESET
-#define IO_ENETUNREACH ENETUNREACH
-#define IO_ENFILE ENFILE
-#define IO_ENOBUFS ENOBUFS
-#define IO_ENODATA ENODATA
-#define IO_ENODEV ENODEV
-#define IO_ENOENT ENOENT
-#define IO_ENOEXEC ENOEXEC
-#define IO_ENOLCK ENOLCK
-#define IO_ENOLINK ENOLINK
-#define IO_ENOMEM ENOMEM
-#define IO_ENOMSG ENOMSG
-#define IO_ENOPROTOOPT ENOPROTOOPT
-#define IO_ENOSPC ENOSPC
-#define IO_ENOSR ENOSR
-#define IO_ENOSTR ENOSTR
-#define IO_ENOSYS ENOSYS
-#define IO_ENOTCONN ENOTCONN
-#define IO_ENOTDIR ENOTDIR
-#define IO_ENOTEMPTY ENOTEMPTY
-#define IO_ENOTRECOVERABLE ENOTRECOVERABLE
-#define IO_ENOTSOCK ENOTSOCK
-#define IO_ENOTSUP ENOTSUP
-#define IO_ENOTTY ENOTTY
-#define IO_ENXIO ENXIO
-#define IO_EOPNOTSUPP EOPNOTSUPP
-#define IO_EOVERFLOW EOVERFLOW
-#define IO_EOWNERDEAD EOWNERDEAD
-#define IO_EPERM EPERM
-#define IO_EPIPE EPIPE
-#define IO_EPROTO EPROTO
-#define IO_EPROTONOSUPPORT EPROTONOSUPPORT
-#define IO_EPROTOTYPE EPROTOTYPE
-#define IO_ERANGE ERANGE
-#define IO_EROFS EROFS
-#define IO_ESPIPE ESPIPE
-#define IO_ESRCH ESRCH
-#define IO_ESTALE ESTALE
-#define IO_ETIME ETIME
-#define IO_ETIMEDOUT ETIMEDOUT
-#define IO_ETXTBUSY ETXTBUSY
-#define IO_EWOULDBLOCK EWOULDBLOCK
-#define IO_EXDEV EXDEV
-
-#define IO_EREAD EIO
-#define IO_EWRITE EIO
 #endif
 
 #define UNUSED(x) (void) (x);

@@ -17,7 +17,7 @@ extern "C" {
 struct DoublyLinkedListNode
 {
     struct DoublyLinkedListNode *next, *prev;
-#ifdef C99
+#if C99
     void *data[]; /* Actually is a char[] containing the raw stored type
                    * The actual stored type is e.g. the int stored in the ElementData, not the ElementData itself
                    * (void * is just to align) */
@@ -35,7 +35,7 @@ struct DoublyLinkedList
 
     HContainerElementMetaData metadata;
 
-#ifdef C99
+#if C99
     /* Constructs on the internal storage, but then can be used as a pointer to another storage block
      * The internal storage must be destructed when destroying the class, by setting the storage pointer to NULL
      * To do this, call `cc_el_destroy_reference()` on the buffer
@@ -77,7 +77,7 @@ static void cc_dll_remove_node(HDoublyLinkedList list, HDoublyLinkedListNode nod
         list->tail = node->prev;
 }
 
-#ifdef C99
+#if C99
 extern inline int cc_dll_push_front(HDoublyLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct);
 extern inline int cc_dll_pop_front(HDoublyLinkedList list, ElementDataCallback destruct);
 extern inline int cc_dll_push_back(HDoublyLinkedList list, unsigned flags, HConstElementData data, ElementDataCallback construct);
@@ -134,7 +134,7 @@ int cc_dll_init_at(void *buf, size_t buffer_size, ContainerElementType type)
     if (!result->metadata)
         CC_NO_MEM_HANDLER("out of memory");
 
-#ifdef C99
+#if C99
     result->buffer = cc_el_init(type, result->metadata, NULL, NULL);
     if (!result->buffer)
     {
@@ -159,7 +159,7 @@ HDoublyLinkedList cc_dll_copy(HDoublyLinkedList list, ElementDataCallback constr
     while (old)
     {
         HElementData d;
-#ifdef C99
+#if C99
         *cc_el_storage_location_ptr(list->buffer) = old->data;
 
         d = list->buffer;
@@ -205,7 +205,7 @@ int cc_dll_insert_after(HDoublyLinkedList list, unsigned flags, Iterator after, 
     if (data && !cc_el_compatible_metadata_element(list->metadata, data))
         CC_TYPE_MISMATCH_HANDLER("cannot insert element", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(data));
 
-#ifdef C99
+#if C99
     int element_was_constructed = 0;
 
     /* In C99, we can initialize with a flexible array member */
@@ -287,7 +287,7 @@ int cc_dll_insert_after(HDoublyLinkedList list, unsigned flags, Iterator after, 
     return CC_OK;
 
 cleanup:
-#ifdef C99
+#if C99
     if (element_was_constructed)
         cc_el_call_destructor_in(list->metadata, list->buffer);
 #else
@@ -306,7 +306,7 @@ int cc_dll_erase(HDoublyLinkedList list, Iterator element, ElementDataCallback d
 
     list->size -= 1;
 
-#ifdef C99
+#if C99
     *cc_el_storage_location_ptr(list->buffer) = node->data;
 
     if (destruct)
@@ -330,7 +330,7 @@ int cc_dll_find(HDoublyLinkedList list, Iterator start, unsigned flags, HConstEl
 
     for (; node; node = CC_DIRECTION(flags) == CC_FORWARD? node->next: node->prev)
     {
-#ifdef C99
+#if C99
         *cc_el_storage_location_ptr(list->buffer) = node->data;
 
         int ret;
@@ -383,7 +383,7 @@ int cc_dll_find(HDoublyLinkedList list, Iterator start, unsigned flags, HConstEl
 
     if (swap)
     {
-#ifdef C99
+#if C99
         memswap(node->data, swap->data, cc_el_metadata_type_size(list->metadata));
 #else
         HElementData handle = node->data;
@@ -405,7 +405,7 @@ int cc_dll_iterate(HDoublyLinkedList list, unsigned flags, ExtendedElementDataCa
 
     for (; node; node = direction == CC_FORWARD? node->next: node->prev)
     {
-#ifdef C99
+#if C99
         *cc_el_storage_location_ptr(list->buffer) = node->data;
 
         CC_RETURN_ON_ERROR(callback(list->buffer, userdata));
@@ -495,7 +495,7 @@ int cc_dll_node_data(HDoublyLinkedList list, Iterator node, HElementData out)
     if (!cc_el_compatible_metadata_element(list->metadata, out))
         CC_TYPE_MISMATCH_HANDLER("cannot get element", /*expected*/ cc_el_metadata_type(list->metadata), /*actual*/ cc_el_type(out));
 
-#ifdef C99
+#if C99
     *cc_el_storage_location_ptr(out) = ll_node->data;
 #else
     *cc_el_storage_location_ptr(out) = *cc_el_storage_location_ptr(ll_node->data);
@@ -515,7 +515,7 @@ int cc_dll_compare(HDoublyLinkedList lhs, HDoublyLinkedList rhs, ElementDualData
 
     while (lnode && rnode)
     {
-#ifdef C99
+#if C99
         cc_dll_node_data(lhs, lnode, lhs->buffer);
         cc_dll_node_data(rhs, rnode, rhs->buffer);
 
@@ -551,7 +551,7 @@ void cc_dll_clear(HDoublyLinkedList list, ElementDataCallback destruct)
 
     while (node)
     {
-#ifdef C99
+#if C99
         *cc_el_storage_location_ptr(list->buffer) = node->data;
 
         if (destruct)
@@ -576,7 +576,7 @@ void cc_dll_destroy_at(HDoublyLinkedList list, ElementDataCallback destruct)
 {
     cc_dll_clear(list, destruct);
 
-#ifdef C99
+#if C99
     /* Reinitialize buffer to point to original storage (since we constructed it and now need to destruct it) */
     cc_el_destroy_reference(list->buffer);
 #endif
