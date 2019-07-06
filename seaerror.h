@@ -24,6 +24,7 @@ extern "C" {
 # define CC_EADDRINUSE ERROR_ADDRESS_ALREADY_ASSOCIATED
 # define CC_EADDRNOTAVAIL ERROR_INCORRECT_ADDRESS /* ? */
 
+# define CC_EBADF ERROR_INVALID_HANDLE
 # define CC_EBADMSG ERROR_INVALID_DATA
 
 # define CC_ECONNABORTED ERROR_CONNECTION_ABORTED
@@ -31,6 +32,7 @@ extern "C" {
 
 # define CC_EILSEQ ERROR_INVALID_DATA
 
+# define CC_EINVAL ERROR_BAD_ARGUMENTS
 # define CC_EIO ERROR_IO_DEVICE
 # define CC_EISCONN ERROR_ALREADY_INITIALIZED
 
@@ -39,6 +41,8 @@ extern "C" {
 # define CC_ENOMEM ERROR_OUTOFMEMORY
 
 # define CC_ENOTSUP ERROR_NOT_SUPPORTED
+
+# define CC_EPERM ERROR_ACCESS_DENIED
 
 # define CC_ESPIPE ERROR_SEEK_ON_DEVICE
 
@@ -134,7 +138,23 @@ extern "C" {
 # define CC_EWRITE EIO
 #endif
 
+/** @brief Returns a human-readable description of the error code, or an empty string if an error occured.
+ *
+ * This function is thread-safe.
+ *
+ * @param err The error code to get a description of.
+ * @return A dynamically-allocated string containing a human-readable description of @p err.
+ */
 char *error_description_alloc(int err);
+
+/** @brief Returns a human-readable description of the error code, or an empty string if an error occured.
+ *
+ * This function is not thread-safe.
+ *
+ * @param err The error code to get a description of.
+ * @return A statically-allocated string containing a human-readable description of @p err.
+ */
+const char *error_description(int err);
 
 #ifdef __cplusplus
 }

@@ -6,8 +6,9 @@
 
 #include "dir.h"
 
+#include "seaerror.h"
+
 #include <string.h>
-#include <errno.h>
 #include <stdlib.h>
 
 #if LINUX_OS
@@ -527,12 +528,12 @@ int path_is_relative(Path path) {
 
 Path path_get_current_working_dir() {
 #if WINDOWS_OS
-    DWORD size = GetCurrentDirectoryW(NULL, 0);
-    WCHAR wbuf = MALLOC(size);
+    DWORD size = GetCurrentDirectoryW(0, NULL);
+    LPWSTR wbuf = MALLOC(size * sizeof(*wbuf));
     if (wbuf == NULL)
         return NULL;
 
-    GetCurrentDirectoryW(wbuf, size);
+    GetCurrentDirectoryW(size, wbuf);
 
     char *wd = wide_to_utf8_alloc(wbuf);
     FREE(wbuf);
@@ -561,6 +562,8 @@ Path path_get_current_working_dir() {
             FREE(wd);
             return NULL;
         }
+
+        wd = new_wd;
     } while (1);
 #endif
 
@@ -592,16 +595,15 @@ int path_set_current_working_dir(Path path) {
 
 #if LINUX_OS
 struct DirEntryStruct {
-    char *path; /* Points to path in DirStruct, doesn't have ownership */
-    size_t path_len; /* Length of directory path in DirStruct */
+    Directory parent; /* Points to parent DirStruct, doesn't have ownership */
     struct dirent data; /* Only use name field if ownedDir is non-zero */
     struct stat extData;
     char hasExtData; /* non-zero if extData is valid, zero if extData is not valid */
-    Directory ownedDir;  /* non-zero if this structure should be free()d.
-                          * This will only be non-zero if the entry was created
-                          * independently of a dir_next() call, i.e. using dirent_open()
-                          * This is because a Directory object is always needed for a DirectoryEntry to exist
-                          * If ownedDir is NULL, do not use `struct dirent` member `data` (except for the name field), only use `extData` using `dirFillExtData` */
+    char ownedDir;   /* non-zero if this structure should be free()d.
+                      * This will only be non-zero if the entry was created
+                      * independently of a dir_next() call, i.e. using dirent_open()
+                      * This is because a Directory object is always needed for a DirectoryEntry to exist
+                      * If ownedDir is 0, do not use `struct dirent` member `data` (except for the name field), only use `extData` using `dirFillExtData` */
 };
 
 struct DirStruct {
@@ -616,26 +618,27 @@ int dirFillExtData(DirectoryEntry entry) {
     if (entry->hasExtData)
         return 0;
 
-    if (lstat(dirent_fullname(entry), &entry->extData))
+    if (lstat(dirent_fullname(entry), &entry->extData)) {
+        entry->parent->error = errno;
         return -1;
+    }
 
     entry->hasExtData = 1;
     return 0;
 }
 #elif WINDOWS_OS
 struct DirEntryStruct {
-    char *path; /* Points to path in DirStruct, doesn't have ownership */
-    size_t path_len; /* Length of directory path in DirStruct */
-    int is_wide; /* Whether to use `data` (0) or `wdata` (1) */
+    Directory parent; /* Points to parent DirStruct, doesn't have ownership */
     union {
         WIN32_FIND_DATAA data; /* Only use name field if ownedDir is non-zero */
         WIN32_FIND_DATAW wdata; /* Only use name field if ownedDir is non-zero */
     } fdata;
-    Directory ownedDir; /* non-zero if this structure should be free()d.
-                         * This will only be non-zero if the entry was created
-                         * independently of a dir_next() call, i.e. using dirent_open()
-                         * This is because a Directory object is always needed for a DirectoryEntry to exist */
-    char name[MAX_PATH * 6 + 1]; /* contains UTF-8 encoding of name if is_wide is true */
+    char is_wide; /* Whether to use `data` (0) or `wdata` (1) */
+    char ownedDir; /* non-zero if this structure should be free()d.
+                    * This will only be non-zero if the entry was created
+                    * independently of a dir_next() call, i.e. using dirent_open()
+                    * This is because a Directory object is always needed for a DirectoryEntry to exist */
+    char name[MAX_PATH * 4]; /* contains UTF-8 encoding of name if is_wide is true */
 };
 
 struct DirStruct {
@@ -656,18 +659,6 @@ void filetime_to_time_t(FILETIME *time, time_t *t) {
     large.QuadPart -= 11644473600LL; /* Number of seconds between Jan 1, 1601 and Jan 1, 1970 */
 
     *t = (time_t) large.QuadPart;
-}
-
-void systemTimeToTm(LPSYSTEMTIME time, struct tm *t) {
-    t->tm_isdst = 0;
-    t->tm_year = time->wYear - 1900;
-    t->tm_mon = time->wMonth - 1;
-    t->tm_mday = time->wDay;
-    t->tm_wday = time->wDayOfWeek;
-
-    t->tm_hour = time->wHour;
-    t->tm_min = time->wMinute;
-    t->tm_sec = time->wSecond;
 }
 #endif
 
@@ -691,8 +682,7 @@ Directory dir_open_with_mode(const char *dir, const char *mode) {
     result->path[len] = 0;
     result->path_len = len;
 
-    result->findData.path = result->lastFoundData.path = result->path;
-    result->findData.path_len = result->lastFoundData.path_len = result->path_len;
+    result->findData.parent = result->lastFoundData.parent = result;
     result->findData.ownedDir = result->lastFoundData.ownedDir = NULL;
     result->handle = opendir(dir);
 
@@ -733,9 +723,7 @@ Directory dir_open_with_mode(const char *dir, const char *mode) {
     /* Copy to new Directory object */
     strcpy(result->path, name);
     result->path_len = len;
-    result->findData.path = result->lastFoundData.path = result->path;
-    result->findData.path_len = result->lastFoundData.path_len = result->path_len;
-    result->findData.ownedDir = result->lastFoundData.ownedDir = NULL;
+    result->findData.parent = result->lastFoundData.parent = result;
 
     /* Finish adding glob to end of path */
     name[len++] = '*';
@@ -773,6 +761,10 @@ Directory dir_open_with_mode(const char *dir, const char *mode) {
 
 int dir_error(Directory dir) {
     return dir->error;
+}
+
+void dir_clearerr(Directory dir) {
+    dir->error = 0;
 }
 
 DirectoryEntry dir_next(Directory dir) {
@@ -912,9 +904,8 @@ DirectoryEntry dirent_open_with_mode(const char *path, const char *mode) {
     dir->path[dir->path_len++] = path_separator();
     dir->path[dir->path_len] = 0;
 
-    entry->ownedDir = dir;
-    entry->path = dir->path;
-    entry->path_len = dir->path_len;
+    entry->parent = dir;
+    entry->ownedDir = 1;
 
     return entry;
 
@@ -934,16 +925,17 @@ DirectoryEntry dirent_copy(DirectoryEntry entry) {
 
 void dirent_close(DirectoryEntry entry) {
     if (entry->ownedDir) {
-        dir_close(entry->ownedDir);
+        dir_close(entry->parent);
         FREE(entry);
     }
 }
 
 int dirent_error(DirectoryEntry entry) {
-    if (entry->ownedDir)
-        return entry->ownedDir->error;
+    return entry->parent->error;
+}
 
-    return 0;
+void dirent_clearerr(DirectoryEntry entry) {
+    entry->parent->error = 0;
 }
 
 int dirent_refresh(DirectoryEntry entry) {
@@ -952,40 +944,43 @@ int dirent_refresh(DirectoryEntry entry) {
     return 0;
 #elif WINDOWS_OS
     if (entry->ownedDir) { /* Can only refresh independently-created entries, not those tied to a Directory */
-        if (entry->ownedDir->findFirstHandle != INVALID_HANDLE_VALUE)
-            FindClose(entry->ownedDir->findFirstHandle);
+        entry->parent->error = 0;
+
+        if (entry->parent->findFirstHandle != INVALID_HANDLE_VALUE)
+            FindClose(entry->parent->findFirstHandle);
 
         if (!entry->is_wide) {
-            entry->ownedDir->findFirstHandle = FindFirstFileA(dirent_fullname(entry), &entry->fdata.data);
+            entry->parent->findFirstHandle = FindFirstFileA(dirent_fullname(entry), &entry->fdata.data);
         } else {
             LPWSTR wide = utf8_to_wide_alloc(dirent_fullname(entry));
             if (!wide)
-                return CC_ENOMEM;
+                return entry->parent->error = CC_ENOMEM;
 
-            entry->ownedDir->findFirstHandle = FindFirstFileW(wide, &entry->fdata.wdata);
+            entry->parent->findFirstHandle = FindFirstFileW(wide, &entry->fdata.wdata);
 
             FREE(wide);
         }
 
-        if (entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
-            entry->ownedDir->error = GetLastError();
+        if (entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
+            entry->parent->error = GetLastError();
 
-        return 0;
+        return entry->parent->error;
     } else
         return CC_EPERM;
 #else
-    return 0;
+    entry->parent->error = CC_ENOTSUP;
+    return -1;
 #endif
 }
 
 const char *dirent_path(DirectoryEntry entry) {
-    entry->path[entry->path_len] = 0;
-    return entry->path;
+    entry->parent->path[entry->parent->path_len] = 0;
+    return entry->parent->path;
 }
 
 const char *dirent_fullname(DirectoryEntry entry) {
-    strcpy(entry->path + entry->path_len, dirent_name(entry));
-    return entry->path;
+    strcpy(entry->parent->path + entry->parent->path_len, dirent_name(entry));
+    return entry->parent->path;
 }
 
 const char *dirent_name(DirectoryEntry entry) {
@@ -1014,8 +1009,12 @@ long long dirent_size(DirectoryEntry entry) {
 #elif WINDOWS_OS
     LARGE_INTEGER li;
 
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    entry->parent->error = 0;
+
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
+        entry->parent->error = CC_EBADF;
         return -1LL;
+    }
     else if (entry->is_wide) {
         li.LowPart = entry->fdata.wdata.nFileSizeLow;
         li.HighPart = entry->fdata.wdata.nFileSizeHigh;
@@ -1037,7 +1036,7 @@ int dirent_exists(DirectoryEntry entry) {
     return !dirFillExtData(entry);
 #elif WINDOWS_OS
     if (entry->ownedDir)
-        return entry->ownedDir->findFirstHandle != INVALID_HANDLE_VALUE;
+        return entry->parent->findFirstHandle != INVALID_HANDLE_VALUE;
 
     return 1;
 #else
@@ -1053,7 +1052,7 @@ int dirent_exists(DirectoryEntry entry) {
 
 int dirent_is_archive(DirectoryEntry entry) {
 #if WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE;
@@ -1069,7 +1068,7 @@ int dirent_is_archive(DirectoryEntry entry) {
 
 int dirent_is_compressed(DirectoryEntry entry) {
 #if WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED;
@@ -1096,7 +1095,7 @@ int dirent_is_subdirectory(DirectoryEntry entry) {
 
 int dirent_is_directory(DirectoryEntry entry) {
 #if WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
@@ -1113,7 +1112,7 @@ int dirent_is_directory(DirectoryEntry entry) {
 
 int dirent_is_encrypted(DirectoryEntry entry) {
 #if WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED;
@@ -1129,7 +1128,7 @@ int dirent_is_encrypted(DirectoryEntry entry) {
 
 int dirent_is_hidden(DirectoryEntry entry) {
 #if WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN;
@@ -1152,7 +1151,7 @@ int dirent_is_normal(DirectoryEntry entry) {
 
     return S_ISREG(entry->extData.st_mode);
 #elif WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes == FILE_ATTRIBUTE_NORMAL;
@@ -1168,7 +1167,7 @@ int dirent_is_normal(DirectoryEntry entry) {
 
 int dirent_is_not_indexed(DirectoryEntry entry) {
 #if WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
@@ -1184,7 +1183,7 @@ int dirent_is_not_indexed(DirectoryEntry entry) {
 
 int dirent_is_offline(DirectoryEntry entry) {
 #if WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE;
@@ -1200,7 +1199,7 @@ int dirent_is_offline(DirectoryEntry entry) {
 
 int dirent_is_readonly(DirectoryEntry entry) {
 #if WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_READONLY;
@@ -1216,7 +1215,7 @@ int dirent_is_readonly(DirectoryEntry entry) {
 
 int dirent_is_sparse(DirectoryEntry entry) {
 #if WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_SPARSE_FILE;
@@ -1232,7 +1231,7 @@ int dirent_is_sparse(DirectoryEntry entry) {
 
 int dirent_is_system(DirectoryEntry entry) {
 #if WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM;
@@ -1248,7 +1247,7 @@ int dirent_is_system(DirectoryEntry entry) {
 
 int dirent_is_temporary(DirectoryEntry entry) {
 #if WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
         return 0;
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_TEMPORARY;
@@ -1264,8 +1263,10 @@ int dirent_is_temporary(DirectoryEntry entry) {
 
 int dirent_created_time(DirectoryEntry entry, time_t *t) {
 #if WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
-        return 0;
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
+        entry->parent->error = CC_EBADF;
+        return -1;
+    }
 
     FILETIME time = entry->is_wide? entry->fdata.wdata.ftCreationTime: entry->fdata.data.ftCreationTime;
 
@@ -1289,8 +1290,10 @@ int dirent_last_access_time(DirectoryEntry entry, time_t *t) {
 
     return 0;
 #elif WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
-        return 0;
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
+        entry->parent->error = CC_EBADF;
+        return -1;
+    }
 
     FILETIME time = entry->is_wide? entry->fdata.wdata.ftLastAccessTime: entry->fdata.data.ftLastAccessTime;
 
@@ -1314,8 +1317,10 @@ int dirent_last_modification_time(DirectoryEntry entry, time_t *t) {
 
     return 0;
 #elif WINDOWS_OS
-    if (entry->ownedDir && entry->ownedDir->findFirstHandle == INVALID_HANDLE_VALUE)
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
+        entry->parent->error = CC_EBADF;
         return 0;
+    }
 
     FILETIME time = entry->is_wide? entry->fdata.wdata.ftLastWriteTime: entry->fdata.data.ftLastWriteTime;
 
@@ -1326,6 +1331,7 @@ int dirent_last_modification_time(DirectoryEntry entry, time_t *t) {
     UNUSED(entry)
     UNUSED(t)
 
+    entry->parent->error = CC_ENOTSUP;
     return -1;
 #endif
 }
@@ -1342,6 +1348,7 @@ int dirent_last_status_update_time(DirectoryEntry entry, time_t *t) {
     UNUSED(entry)
     UNUSED(t)
 
+    entry->parent->error = CC_ENOTSUP;
     return -1;
 #endif
 }

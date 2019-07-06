@@ -257,6 +257,12 @@ const char *dir_path(Directory dir);
  */
 int dir_error(Directory dir);
 
+/** @brief Clears any error indicator in @p dir.
+ *
+ * @param dir The opened directory to clear the error in.
+ */
+void dir_clearerr(Directory dir);
+
 /** @brief Returns a pointer to the next available directory entry.
  *
  * This pointer MUST NOT be stored permanently, as it references a temporary object contained in @p dir. Calling dirent_destroy() on it is valid but has no effect.
@@ -306,6 +312,12 @@ DirectoryEntry dirent_copy(DirectoryEntry entry);
  * @return The error that occured while opening @p dir, or 0 on success.
  */
 int dirent_error(DirectoryEntry entry);
+
+/** @brief Clears any error indicator in @p entry.
+ *
+ * @param entry The opened directory entry to clear the error in.
+ */
+void dirent_clearerr(DirectoryEntry entry);
 
 /** @brief Closes a directory and invalidates the handle.
  *

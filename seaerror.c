@@ -1,4 +1,5 @@
 #include "seaerror.h"
+#include "utility.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -15,13 +16,44 @@ char *error_description_alloc(int err) {
 
     return NULL;
 #else
-    char *error_string = strerror(err);
-    size_t error_string_len = strlen(error_string);
+    size_t buf_size = 256;
+    char *buf = MALLOC(buf_size);
 
-    char *new_string = MALLOC(error_string_len + 1);
-    if (new_string != NULL)
-        memcpy(new_string, error_string, error_string_len + 1);
+    do {
+        if (strerror_r(err, buf, buf_size) == 0)
+            break;
 
-    return new_string;
+        if (errno != ERANGE) {
+            FREE(buf);
+            return NULL;
+        }
+
+        buf_size *= 2;
+        char *new_buf = REALLOC(buf, buf_size);
+        if (new_buf == NULL) {
+            FREE(buf);
+            return NULL;
+        }
+
+        buf = new_buf;
+    } while (1);
+
+    return buf;
+#endif
+}
+
+const char *error_description(int err) {
+#if WINDOWS_OS
+    static WCHAR wbuffer[32768];
+    static char buffer[sizeof(wbuffer)/sizeof(*wbuffer) * 4 + 1];
+
+    if (FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), wbuffer, sizeof(wbuffer)/sizeof(*wbuffer), NULL)) {
+        WideCharToMultiByte(CP_UTF8, 0, wbuffer, -1, buffer, sizeof(buffer), NULL, NULL);
+        return buffer;
+    }
+
+    return "";
+#else
+    return strerror(err);
 #endif
 }

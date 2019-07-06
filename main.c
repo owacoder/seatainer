@@ -495,7 +495,7 @@ void walk(Directory directory, unsigned long long *items, unsigned long long *si
 
 void walk_dir(IO out, Directory directory) {
     if (dir_error(directory)) {
-        printf("Error while iterating %s\n", dir_path(directory));
+        printf("Error while iterating %s: %s", dir_path(directory), error_description(dir_error(directory)));
         return;
     }
 
@@ -514,17 +514,28 @@ void walk_dir(IO out, Directory directory) {
         if (!dirent_is_actual_entry(entry))
             continue;
 
+        time_t time;
         size_t name_len = strlen(dirent_name(entry));
         io_printf(out, "%s%-*c  %10lld bytes\n", dirent_name(entry), 40 - (int) name_len, dirent_is_directory(entry)? path_separator(): ' ', dirent_size(entry));
+
+        if (dirent_created_time(entry, &time) == 0)
+            io_printf(out, "  Created: %s", asctime(localtime(&time)));
+
+        if (dirent_last_modification_time(entry, &time) == 0)
+            io_printf(out, "  Modified: %s", asctime(localtime(&time)));
+
+        if (dirent_last_status_update_time(entry, &time) == 0)
+            io_printf(out, "  Updated: %s", asctime(localtime(&time)));
+
+        if (dirent_last_access_time(entry, &time) == 0)
+            io_printf(out, "  Accessed: %s", asctime(localtime(&time)));
     }
 }
 
 int main()
 {
-    Directory wdir = dir_open("/shared");
+    Directory wdir = dir_open("F:\\");
     walk_dir(io_open_file(stdout), wdir);
-
-    return 0;
 
     const char *strs[][2] = {
         {"input", "*"},
@@ -543,6 +554,7 @@ int main()
 
     return 0;
 
+#ifdef CC_INCLUDE_ZLIB
     IO file = io_open("/shared/Test_Data/gzip.txt", "rb");
     IO defl = io_open_zlib_deflate_easy(file, ZlibDeflate, "rb");
     IO zlib = io_open_zlib_inflate_easy(defl, ZlibOnlyInflate, "rb");
@@ -576,6 +588,7 @@ int main()
     io_vclose(4, zout, zlib, defl, file);
 
     return 0;
+#endif
 
     Url url = url_from_percent_encoded("http://www.google.com:80/teapot");
     int httperr;

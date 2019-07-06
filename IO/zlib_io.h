@@ -1,8 +1,10 @@
 #ifndef ZLIB_IO_H
 #define ZLIB_IO_H
 
-#include <zlib.h>
 #include "../io.h"
+
+#ifdef CC_INCLUDE_ZLIB
+#include <zlib.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,6 +29,8 @@ IO io_open_zlib_inflate_easy(IO io, enum ZlibType type, const char *mode);
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif
 
 #endif // ZLIB_IO_H

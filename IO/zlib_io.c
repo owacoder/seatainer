@@ -2,6 +2,7 @@
 
 #include "../seaerror.h"
 
+#ifdef CC_INCLUDE_ZLIB
 struct ZlibParameters {
     IO io;
     int windowBits;
@@ -265,3 +266,5 @@ IO io_open_zlib_inflate_easy(IO io, enum ZlibType type, const char *mode) {
         default: return NULL;
     }
 }
+
+#endif

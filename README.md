@@ -97,6 +97,7 @@ Seatainer officially supports C89 and newer.
  - `CC_NO_SUCH_METHOD_ABORT` - Define to make procedures with no valid method to call spit out an error and abort the program.
  - `CC_IO_STATIC_INSTANCES` - Define to a non-negative integer to allow fast allocation of a limited number of IO instances. If this limit is reached, the subsequent devices will be dynamically allocated. If this value is not defined, all allocations will be dynamic.
  - `CC_INCLUDE_NETWORK` - Define to specify that network access through sockets should be built.
+ - `CC_INCLUDE_ZLIB` - Define to specify that the ZLib wrapper should be built.
 
 ### IO devices
 
