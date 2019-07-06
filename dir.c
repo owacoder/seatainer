@@ -683,7 +683,6 @@ Directory dir_open_with_mode(const char *dir, const char *mode) {
     result->path_len = len;
 
     result->findData.parent = result->lastFoundData.parent = result;
-    result->findData.ownedDir = result->lastFoundData.ownedDir = NULL;
     result->handle = opendir(dir);
 
     struct dirent *dEntry;

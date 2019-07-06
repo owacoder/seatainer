@@ -534,7 +534,7 @@ void walk_dir(IO out, Directory directory) {
 
 int main()
 {
-    Directory wdir = dir_open("F:\\");
+    Directory wdir = dir_open("/shared");
     walk_dir(io_open_file(stdout), wdir);
 
     const char *strs[][2] = {
