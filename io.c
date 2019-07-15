@@ -143,12 +143,12 @@ struct InputOutputDevice {
 #endif
 
 #ifdef CC_IO_HAS_STATIC_INSTANCES
-static struct InputOutputDevice io_devices[CC_IO_STATIC_INSTANCES];
+THREAD_STATIC struct InputOutputDevice io_devices[CC_IO_STATIC_INSTANCES];
 
-static enum IO_OpenHint io_device_open_hint;
-static enum IO_OpenHint io_device_open_permanent_hint;
+THREAD_STATIC enum IO_OpenHint io_device_open_hint;
+THREAD_STATIC enum IO_OpenHint io_device_open_permanent_hint;
 
-static Atomic io_static_alloc_lock; /* 1 if lock is held, 0 otherwise */
+THREAD_STATIC Atomic io_static_alloc_lock; /* 1 if lock is held, 0 otherwise */
 
 static IO io_static_alloc(enum IO_Type type) {
     IO io = NULL;
@@ -523,8 +523,9 @@ int io_copy_and_close(IO in, IO out) {
 }
 
 int io_copy(IO in, IO out) {
-    const size_t size = 256;
-    char data[size];
+#define IO_COPY_SIZE 256
+    const size_t size = IO_COPY_SIZE;
+    char data[IO_COPY_SIZE];
     size_t read = size;
 
     while (read == size) {
@@ -2114,12 +2115,12 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
             if (io->data.sizes.ptr2 == NULL) /* No buffering */
                 return io_native_unbuffered_read(ptr, size, count, io);
             else if (io->data.sizes.pos >= max) {
-                memcpy(ptr, io->data.sizes.ptr2 + io->data.sizes.size - io->data.sizes.pos, max);
+                memcpy(ptr, (char *) io->data.sizes.ptr2 + io->data.sizes.size - io->data.sizes.pos, max);
                 io->data.sizes.pos -= max;
                 return count;
             } else { /* Buffered and requested more than buffer holds */
                 size_t read = io->data.sizes.pos;
-                memcpy(cptr, io->data.sizes.ptr2 + io->data.sizes.size - io->data.sizes.pos, read);
+                memcpy(cptr, (char *) io->data.sizes.ptr2 + io->data.sizes.size - io->data.sizes.pos, read);
 
                 max -= read;
                 cptr += read;
@@ -2135,13 +2136,13 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
 
                     /* Move front-aligned buffer to end-aligned buffer as needed */
                     if (io->data.sizes.pos != io->data.sizes.size)
-                        memmove(io->data.sizes.ptr2 + io->data.sizes.size - io->data.sizes.pos, io->data.sizes.ptr2, io->data.sizes.pos);
+                        memmove((char *) io->data.sizes.ptr2 + io->data.sizes.size - io->data.sizes.pos, io->data.sizes.ptr2, io->data.sizes.pos);
 
                     /* Allow for end of input */
                     if (max > io->data.sizes.pos)
                         max = io->data.sizes.pos;
 
-                    memcpy(cptr, io->data.sizes.ptr2 + io->data.sizes.size - io->data.sizes.pos, max);
+                    memcpy(cptr, (char *) io->data.sizes.ptr2 + io->data.sizes.size - io->data.sizes.pos, max);
                     io->data.sizes.pos -= max;
 
                     return (read + max) / size;
@@ -3172,12 +3173,12 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
             if (io->data.sizes.ptr2 == NULL) /* No buffering */
                 return io_native_unbuffered_write(ptr, size, count, io);
             else if (io->data.sizes.size - io->data.sizes.pos >= max) {
-                memcpy(io->data.sizes.ptr2 + io->data.sizes.pos, ptr, max);
+                memcpy((char *) io->data.sizes.ptr2 + io->data.sizes.pos, ptr, max);
                 io->data.sizes.pos += max;
                 return count;
             } else { /* Buffered and requested output greater than buffer size */
                 size_t written = io->data.sizes.size - io->data.sizes.pos;
-                memcpy(io->data.sizes.ptr2 + io->data.sizes.pos, cptr, written);
+                memcpy((char *) io->data.sizes.ptr2 + io->data.sizes.pos, cptr, written);
 
                 max -= written;
                 cptr += written;

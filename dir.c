@@ -24,11 +24,12 @@
 int glob(const char *str, const char *pattern) {
     /* Arbitrary stack depth limit (basically the number of '*' characters allowed in the pattern,
      * although multiple '*' characters will be batched together and therefore count as only one '*' toward this limit) */
-    const size_t max_positions = 100;
+#define GLOB_MAX_POSITIONS 100
+    const size_t max_positions = GLOB_MAX_POSITIONS;
     struct position {
         const char *strpos; /* Where to start searching for the pattern */
         const char *patternpos;
-    } positions[max_positions];
+    } positions[GLOB_MAX_POSITIONS];
 
     /* If a wildcard is found, a new entry is pushed onto the position stack
      *
@@ -171,6 +172,182 @@ stop_checking_glob_entry:
                 positions[current_position-1].strpos = str;
             } else { /* This is not optional :) */
                 ++positions[current_position-1].strpos;
+            }
+
+            positions[current_position] = positions[current_position-1];
+        }
+    };
+}
+
+int utf8glob(const char *str, const char *pattern) {
+    /* Arbitrary stack depth limit (basically the number of '*' characters allowed in the pattern,
+     * although multiple '*' characters will be batched together and therefore count as only one '*' toward this limit) */
+#define GLOB_MAX_POSITIONS 100
+    const size_t max_positions = GLOB_MAX_POSITIONS;
+    struct position {
+        const char *strpos; /* Where to start searching for the pattern */
+        const char *patternpos;
+    } positions[GLOB_MAX_POSITIONS];
+
+    /* If a wildcard is found, a new entry is pushed onto the position stack
+     *
+     * If *strpos == 0, and *patternpos contains all '*' characters or *patternpos == 0, then the match was successful. Return immediately.
+     *
+     * If *strpos == 0, and *patternpos is not a valid match, then the match failed. More characters were expected. Return immediately.
+     *
+     * If *strpos != 0, but *patternpos == 0, then the match failed. Too much input was present. Backtrack to the previous position.
+     */
+
+    size_t current_position = 0;
+
+    positions[0].strpos = str;
+    positions[0].patternpos = pattern;
+
+    while (1) {
+try_new_glob:
+        for (; *positions[current_position].patternpos; utf8next(positions[current_position].patternpos, &positions[current_position].patternpos)) {
+            switch (*positions[current_position].patternpos) {
+                case '?':
+                    if (*positions[current_position].strpos == 0)
+                        goto stop_checking_glob_entry;
+
+                    utf8next(positions[current_position].strpos, &positions[current_position].strpos);
+                    break;
+                case '*': {
+                    while (*positions[current_position].patternpos == '*')
+                        utf8next(positions[current_position].patternpos, &positions[current_position].patternpos);
+
+                    if (*positions[current_position].patternpos == 0) /* Anything matches if '*' is at end of pattern */
+                        return 0;
+
+                    /* Pattern has specific char to match after star, so search for it (this is optional as an optimization) */
+                    if (*positions[current_position].patternpos != '[' && *positions[current_position].patternpos != '?') {
+                        const char *str = utf8chr((char *) positions[current_position].strpos, utf8next(positions[current_position].patternpos, NULL));
+                        if (str == NULL)
+                            return -1; /* Since stars are minimal matchers, if the character afterward does not exist, the string must not match */
+                        positions[current_position].strpos = str;
+                    }
+
+                    if (++current_position == max_positions)
+                        return -2; /* Glob too complicated! */
+
+                    positions[current_position] = positions[current_position-1];
+                    goto try_new_glob;
+                }
+                case '[': {
+                    /* TODO: doesn't support UTF-8 yet. */
+                    if (positions[current_position].patternpos[1] == 0 || positions[current_position].patternpos[2] == 0)
+                        return -2;
+
+                    const char *lastCharInSet = NULL, *endOfSet = NULL, *initialEndOfSet = NULL;
+                    utf8next(positions[current_position].patternpos + 1, &endOfSet);
+
+                    lastCharInSet = positions[current_position].patternpos + 1;
+                    initialEndOfSet = endOfSet;
+                    while (*endOfSet && (endOfSet[-1] == '-' || (endOfSet == initialEndOfSet && endOfSet[-1] == '^') || *endOfSet != ']')) {
+                        lastCharInSet = endOfSet;
+                        utf8next(endOfSet, &endOfSet);
+                    }
+
+                    if (*endOfSet != ']') /* Set not concluded properly */
+                        return -2;
+
+                    utf8next(positions[current_position].patternpos, &positions[current_position].patternpos);
+
+                    int negateSet = *positions[current_position].patternpos == '^';
+                    if (negateSet) {
+                        if (positions[current_position].patternpos == lastCharInSet) /* Negated set with nothing in it isn't valid */
+                            return -2;
+                        ++positions[current_position].patternpos;
+                    }
+
+                    printf("1: %s\n2: %s\n", lastCharInSet, positions[current_position].patternpos);
+
+                    /* positions[current_position].patternpos now points to first char in set and lastCharInSet points to the last char in set */
+                    /* They may be pointing to the same char if it's a one-character set */
+                    if (positions[current_position].patternpos == lastCharInSet) {
+                        const char *nextStr = NULL, *nextPattern = NULL;
+                        if (negateSet? utf8next(positions[current_position].strpos, &nextStr) == utf8next(positions[current_position].patternpos, &nextPattern):
+                                       utf8next(positions[current_position].strpos, &nextStr) != utf8next(positions[current_position].patternpos, &nextPattern))
+                            goto stop_checking_glob_entry;
+
+                        positions[current_position].strpos = nextStr;
+                        positions[current_position].patternpos = nextPattern;
+                    } else { /* Complex set, possibly negated */
+                        int matched = negateSet; /* If matched is non-zero, the set matches */
+                        const char *nextStr = NULL;
+                        uint32_t strChr = utf8next(positions[current_position].strpos, &nextStr);
+
+                        while (positions[current_position].patternpos <= lastCharInSet) {
+                            const char *nextPattern = NULL;
+                            uint32_t patternCodepoint = utf8next(positions[current_position].patternpos, &nextPattern);
+
+                            if (*nextPattern == '-') { /* Compute range */
+                                uint32_t rangeLow = patternCodepoint;
+                                uint32_t rangeHigh = utf8next(nextPattern + 1, &nextPattern);
+
+                                /* Swap range if backwards */
+                                if (rangeHigh < rangeLow) {
+                                    uint32_t temp = rangeHigh;
+                                    rangeHigh = rangeLow;
+                                    rangeLow = temp;
+                                }
+
+                                if (rangeLow <= strChr && strChr <= rangeHigh) {
+                                    matched = !negateSet; /* Set to 1 if normal set, and 0 if negated */
+                                    break;
+                                }
+                            } else if (strChr == patternCodepoint) {
+                                matched = !negateSet;
+                                break;
+                            }
+
+                            positions[current_position].patternpos = nextPattern;
+                        }
+
+                        if (!matched)
+                            goto stop_checking_glob_entry;
+
+                        positions[current_position].strpos = nextStr;
+                        positions[current_position].patternpos = endOfSet;
+                    }
+                    break;
+                }
+                default: {
+                    const char *first = NULL;
+
+                    if (utf8next(positions[current_position].strpos, &first) != utf8next(positions[current_position].patternpos, NULL))
+                        goto stop_checking_glob_entry;
+
+                    positions[current_position].strpos = first;
+                    break;
+                }
+            }
+        }
+stop_checking_glob_entry:
+
+        if (*positions[current_position].strpos == 0) {
+            while (*positions[current_position].patternpos == '*')
+                utf8next(positions[current_position].patternpos, &positions[current_position].patternpos);
+
+            return *positions[current_position].patternpos == 0? 0: -1;
+        }
+
+        if (current_position == 0) {
+            return -1;
+
+        } else { /* Nested glob, restart current glob at next string position */
+            /* Pattern has specific char to match after star, so search for it (this is optional as an optimization) */
+            if (*positions[current_position-1].patternpos != '[' && *positions[current_position-1].patternpos != '?') {
+                const char *strPlus1 = NULL;
+                utf8next(positions[current_position-1].strpos, &strPlus1);
+
+                const char *str = utf8chr(strPlus1, utf8next(positions[current_position-1].patternpos, NULL));
+                if (str == NULL)
+                    return -1; /* Since stars are minimal matchers, if the character afterward does not exist, the string must not match */
+                positions[current_position-1].strpos = str;
+            } else { /* This is not optional :) */
+                utf8next(positions[current_position-1].strpos, &positions[current_position-1].strpos);
             }
 
             positions[current_position] = positions[current_position-1];

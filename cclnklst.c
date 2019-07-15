@@ -417,10 +417,17 @@ Iterator cc_ll_next(HLinkedList list, Iterator node)
 
 HElementData cc_ll_node_data_easy(HLinkedList list, Iterator node)
 {
+#if C99
     if (cc_ll_node_data(list, node, list->buffer) != CC_OK)
         return NULL;
 
     return list->buffer;
+#else
+    UNUSED(list)
+    HLinkedListNode ll_node = node;
+
+    return ll_node->data;
+#endif
 }
 
 int cc_ll_node_data(HLinkedList list, Iterator node, HElementData out)

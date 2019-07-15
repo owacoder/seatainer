@@ -546,11 +546,12 @@ int main()
         {"pattern", "pa*"},
         {"pattern", "*tt*?*"},
         {"pattern#", "pattern[0-9#a-z]"},
-        {"Some really long string - with some special ranges like [ and ]", "*[^ ] really*]*"}
+        {"Some really long string - with some special ranges like [ and ]", "*[^ ] really*]*"},
+        {"Ҹари н[әшрләр", "*н[[]*[ә-н]шр*"}
     };
 
     for (size_t i = 0; i < sizeof(strs)/sizeof(*strs); ++i)
-        printf("glob(\"%s\", \"%s\") = %d\n", strs[i][0], strs[i][1], glob(strs[i][0], strs[i][1]));
+        printf("utf8glob(\"%s\", \"%s\") = %d\n", strs[i][0], strs[i][1], utf8glob(strs[i][0], strs[i][1]));
 
     return 0;
 
@@ -583,7 +584,7 @@ int main()
     return 0;
 
     if (io_copy(zlib, zout))
-        printf("%s\n", io_error_description_alloc(io_error(zlib)));
+        printf("%s\n", error_description_alloc(io_error(zlib)));
 
     io_vclose(4, zout, zlib, defl, file);
 
@@ -594,7 +595,7 @@ int main()
     int httperr;
     httperr = io_copy_and_close(io_http_get(url, NULL), io_open_file(stdout));
     if (httperr) {
-        char *err = io_error_description_alloc(httperr);
+        char *err = error_description_alloc(httperr);
         if (!err)
             printf("Error: %d\n", httperr);
         else

@@ -57,6 +57,7 @@
 #if defined(__STDC_VERSION__)
 # if __STDC_VERSION__ >= 201112L
 #  define C11 1
+#  define THREAD_STATIC static _Thread_local
 # endif
 
 # if __STDC_VERSION__ >= 199901L
@@ -79,6 +80,9 @@
 #endif
 #ifndef INLINE_DEFINITION
 # define INLINE_DEFINITION(x) ;
+#endif
+#ifndef THREAD_STATIC
+# define THREAD_STATIC static
 #endif
 
 #ifdef PLATFORMS_CONFIG

@@ -276,6 +276,141 @@ int memxor(void *dst, void *src, size_t size) {
     return 0;
 }
 
+int utf8size(uint32_t codepoint) {
+    if (codepoint < 0x80) return 1;
+    else if (codepoint < 0x800) return 2;
+    else if (codepoint < 0x10000) return 3;
+    else if (codepoint < 0x110000) return 4;
+    else return 0;
+}
+
+const char *utf8error(const char *utf8) {
+    while (*utf8) {
+        const char *current = utf8;
+        if (utf8next(utf8, &utf8) > UTF8_MAX)
+            return current;
+    }
+
+    return NULL;
+}
+
+const char *utf8chr(const char *utf8, uint32_t chr) {
+    while (*utf8) {
+        const char *current = utf8;
+        if (utf8next(utf8, &utf8) == chr)
+            return current;
+    }
+
+    return NULL;
+}
+
+size_t utf8len(const char *utf8) {
+    size_t len = 0;
+
+    while (*utf8) {
+        utf8next(utf8, &utf8);
+    }
+
+    return len;
+}
+
+uint32_t utf8next(const char *utf8, const char **next) {
+    static const unsigned char high5BitsToByteCount[32] = {
+        1, /* 00000, valid single byte */
+        1, /* 00001, valid single byte */
+        1, /* 00010, valid single byte */
+        1, /* 00011, valid single byte */
+        1, /* 00100, valid single byte */
+        1, /* 00101, valid single byte */
+        1, /* 00110, valid single byte */
+        1, /* 00111, valid single byte */
+        1, /* 01000, valid single byte */
+        1, /* 01001, valid single byte */
+        1, /* 01010, valid single byte */
+        1, /* 01011, valid single byte */
+        1, /* 01100, valid single byte */
+        1, /* 01101, valid single byte */
+        1, /* 01110, valid single byte */
+        1, /* 01111, valid single byte */
+        0, /* 10000, invalid continuation byte */
+        0, /* 10001, invalid continuation byte */
+        0, /* 10010, invalid continuation byte */
+        0, /* 10011, invalid continuation byte */
+        0, /* 10100, invalid continuation byte */
+        0, /* 10101, invalid continuation byte */
+        0, /* 10110, invalid continuation byte */
+        0, /* 10111, invalid continuation byte */
+        2, /* 11000, 2-byte code */
+        2, /* 11001, 2-byte code */
+        2, /* 11010, 2-byte code */
+        2, /* 11011, 2-byte code */
+        3, /* 11100, 3-byte code */
+        3, /* 11101, 3-byte code */
+        4, /* 11110, 4-byte code */
+        0, /* 11111, invalid byte (should never be seen) */
+    };
+
+    const uint32_t error = 0x8000fffdul;
+    int bytesInCode = high5BitsToByteCount[(unsigned char) *utf8 >> 3];
+    uint32_t codepoint = 0;
+
+    if (next)
+        *next = utf8 + 1;
+
+    if (bytesInCode == 0) /* Some sort of error */
+        return error;
+    else if (bytesInCode == 1) /* Shortcut for single byte, since there's no way to fail */
+        return *utf8;
+
+    /* Shift out high byte-length bits and begin result */
+    codepoint = (unsigned char) *utf8 & (0xff >> bytesInCode);
+
+    /* Obtain continuation bytes */
+    for (size_t i = 1; i < bytesInCode; ++i) {
+        if ((utf8[i] & 0xC0) != 0x80) /* Invalid continuation byte (note this handles a terminating NUL just fine) */
+            return error;
+
+        codepoint = (codepoint << 6) | (utf8[i] & 0x3f);
+    }
+
+    /* Syntax is good, now check for overlong encoding and invalid values */
+    if (utf8size(codepoint) != bytesInCode || /* Overlong encoding */
+            (codepoint >= 0xd800 && codepoint <= 0xdfff) || /* Not supposed to allow UTF-16 surrogates */
+            codepoint > UTF8_MAX) /* Too large of a codepoint */
+        return error;
+
+    /* Finished without error */
+    if (next)
+        *next = utf8 + bytesInCode;
+    return codepoint;
+}
+
+char *utf8append(char *utf8, uint32_t codepoint, size_t *remainingBytes) {
+    static const unsigned char headerForCodepointSize[5] = {
+        0x80, /* 10000000 for continuation byte */
+        0x00, /* 00000000 for single byte */
+        0xC0, /* 11000000 for 2-byte */
+        0xE0, /* 11100000 for 3-byte */
+        0xF0, /* 11110000 for 4-byte */
+    };
+    const size_t bytesInCode = utf8size(codepoint);
+    const size_t continuationBytesInCode = bytesInCode - 1;
+
+    if (bytesInCode == 0 || *remainingBytes < bytesInCode ||
+            (codepoint >= 0xd800 && codepoint <= 0xdfff)) /* Invalid codepoint or no room for encoding */
+        return NULL;
+
+    *utf8++ = headerForCodepointSize[bytesInCode] | (unsigned char) (codepoint >> (continuationBytesInCode * 6));
+
+    for (size_t i = continuationBytesInCode; i > 0; --i) {
+        *utf8++ = 0x80 | (0x3f & (codepoint >> ((i-1) * 6)));
+    }
+
+    *remainingBytes -= bytesInCode;
+    *utf8 = 0;
+    return utf8;
+}
+
 char *strlower(char *str) {
     char *ptr = str;
 
@@ -476,7 +611,7 @@ unsigned pearson_hash(const char *data, size_t size)
  *  @return @p v, rotated left (toward the MSB) by @p amount bits
  */
 uint32_t rotate_left32(uint32_t v, unsigned amount) {
-    return (v << amount) | (v >> (-amount & 0x1f));
+    return (v << amount) | (v >> ((~amount + 1) & 0x1f));
 }
 
 /** @brief Rotates @p v right by @p amount bits.
@@ -486,7 +621,7 @@ uint32_t rotate_left32(uint32_t v, unsigned amount) {
  *  @return @p v, rotated right (toward the LSB) by @p amount bits
  */
 uint32_t rotate_right32(uint32_t v, unsigned amount) {
-    return (v >> amount) | (v << (-amount & 0x1f));
+    return (v >> amount) | (v << ((~amount + 1) & 0x1f));
 }
 
 /** @brief Rotates @p v left by @p amount bits.
@@ -496,7 +631,7 @@ uint32_t rotate_right32(uint32_t v, unsigned amount) {
  *  @return @p v, rotated left (toward the MSB) by @p amount bits
  */
 uint64_t rotate_left64(uint64_t v, unsigned amount) {
-    return (v << amount) | (v >> (-amount & 0x3f));
+    return (v << amount) | (v >> ((~amount + 1) & 0x3f));
 }
 
 /** @brief Rotates @p v right by @p amount bits.
@@ -506,7 +641,7 @@ uint64_t rotate_left64(uint64_t v, unsigned amount) {
  *  @return @p v, rotated right (toward the LSB) by @p amount bits
  */
 uint64_t rotate_right64(uint64_t v, unsigned amount) {
-    return (v >> amount) | (v << (-amount & 0x3f));
+    return (v >> amount) | (v << ((~amount + 1) & 0x3f));
 }
 
 /* PUT FUNCTIONS */

@@ -44,8 +44,8 @@ char *error_description_alloc(int err) {
 
 const char *error_description(int err) {
 #if WINDOWS_OS
-    static WCHAR wbuffer[32768];
-    static char buffer[sizeof(wbuffer)/sizeof(*wbuffer) * 4 + 1];
+    THREAD_STATIC WCHAR wbuffer[32768];
+    THREAD_STATIC char buffer[65536];
 
     if (FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), wbuffer, sizeof(wbuffer)/sizeof(*wbuffer), NULL)) {
         WideCharToMultiByte(CP_UTF8, 0, wbuffer, -1, buffer, sizeof(buffer), NULL, NULL);

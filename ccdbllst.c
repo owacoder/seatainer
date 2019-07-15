@@ -482,10 +482,17 @@ Iterator cc_dll_rnext(HDoublyLinkedList list, Iterator node)
 
 HElementData cc_dll_node_data_easy(HDoublyLinkedList list, Iterator node)
 {
+#if C99
     if (cc_dll_node_data(list, node, list->buffer) != CC_OK)
         return NULL;
 
     return list->buffer;
+#else
+    UNUSED(list)
+    HDoublyLinkedListNode ll_node = node;
+
+    return ll_node->data;
+#endif
 }
 
 int cc_dll_node_data(HDoublyLinkedList list, Iterator node, HElementData out)

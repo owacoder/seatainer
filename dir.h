@@ -26,6 +26,7 @@ struct PathStruct;
  * This is an opaque handle to an object that does not need (or want) any member access.
  */
 typedef struct DirStruct *Directory;
+
 /** @brief The root object type to perform all file information operations on.
  *
  * A DirectoryEntry object is created for each call to `dir_next()`, but may also be created independently with `dirent_open()`.
@@ -33,6 +34,7 @@ typedef struct DirStruct *Directory;
  * This is an opaque handle to an object that does not need (or want) any member access.
  */
 typedef struct DirEntryStruct *DirectoryEntry;
+
 /** @brief The root object type to perform all path operations on.
  *
  * A path object allows some convenient path manipulation functions that are difficult to accomplish with raw strings.
@@ -226,6 +228,7 @@ int path_set_current_working_dir(Path path);
  * @return 0 if `str` matches `pattern`, -1 if no match, and -2 if the pattern has improper syntax or is too complex.
  */
 int glob(const char *str, const char *pattern);
+int utf8glob(const char *str, const char *pattern);
 
 /** @brief Opens a directory for access.
  *

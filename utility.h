@@ -50,6 +50,59 @@ int memswap(void *p, void *q, size_t size);
 
 int memxor(void *dst, void *src, size_t size);
 
+#define UTF8_MAX (0x10ffff)
+#define UTF8_MASK (0x1fffff)
+
+/** @brief Gets the size in bytes that a codepoint would require to be encoded in UTF-8.
+ *
+ * @param codepoint The codepoint to get the encoding size of.
+ * @return The number of bytes it would take to encode @p codepoint as UTF-8.
+ */
+int utf8size(uint32_t codepoint);
+
+/** @brief Gets the length of the UTF-8 string in characters
+ *
+ * @param utf8 The UTF-8 string to get the length of.
+ * @return The length of @p utf8 in UTF-8 characters.
+ */
+size_t utf8len(const char *utf8);
+
+/** @brief Determines if and where an encoding error appears in a UTF-8 string.
+ *
+ * @param utf8 The UTF-8 string to check for an error.
+ * @return If an error is found, a pointer to the error location is returned. On success, NULL is returned.
+ */
+const char *utf8error(const char *utf8);
+
+/** @brief Finds a UTF-8 character in a UTF-8 string.
+ *
+ * @param utf8 The UTF-8 string to search.
+ * @param chr The UTF-8 character codepoint to search for.
+ * @return Same as `strchr`. If the character is found, a pointer to the first instance of that character is returned, otherwise NULL is returned.
+ */
+const char *utf8chr(const char *utf8, uint32_t chr);
+
+/** @brief Gets the codepoint of the first character in a UTF-8 string.
+ *
+ * @param utf8 The UTF-8 string to extract the first character from.
+ * @param next A reference to a pointer that stores the position of the character following the one extracted. Can be NULL if unused.
+ * @return The codepoint of the first UTF-8 character in @p utf8, or 0x8000fffd on error.
+ *    This constant allows detection of error by performing `result > UTF8_MAX`,
+ *    and providing the Unicode replacement character 0xfffd if masked with UTF8_MASK.
+ */
+uint32_t utf8next(const char *utf8, const char **next);
+
+/** @brief Attempts to concatenate a codepoint to a UTF-8 string.
+ *
+ * @param utf8 The UTF-8 string to append to. This must point to the NUL character at the end of the string.
+ * @param codepoint The codepoint to append to @p utf8.
+ * @param remainingBytes A pointer to the number of bytes remaining in the buffer after @p utf8.
+ *     The NUL that @p utf8 points to must not be included in this size.
+ *     This field is updated with the number of bytes available after the function returns.
+ * @return On success, a pointer to the NUL at the end of the string is returned, otherwise NULL is returned and nothing is appended.
+ */
+char *utf8append(char *utf8, uint32_t codepoint, size_t *remainingBytes);
+
 /** @brief Lowercases the string.
  *
  * @param str The string to lowercase.
