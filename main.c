@@ -547,7 +547,7 @@ int main()
         {"pattern", "*tt*?*"},
         {"pattern#", "pattern[0-9#a-z]"},
         {"Some really long string - with some special ranges like [ and ]", "*[^ ] really*]*"},
-        {"Ҹари н[әшрләр", "*н[[]*[ә-н]шр*"}
+        {"Ҹари н[ншрләр", "*н[[]*[ә-a]шр*"}
     };
 
     for (size_t i = 0; i < sizeof(strs)/sizeof(*strs); ++i)

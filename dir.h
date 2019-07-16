@@ -370,6 +370,23 @@ int dirent_exists(DirectoryEntry entry);
  */
 int dirent_refresh(DirectoryEntry entry);
 
+/* Flags to describe the directory entry attributes */
+#if WINDOWS_OS
+#define DIRENT_ATTRIBUTE_ARCHIVE FILE_ATTRIBUTE_ARCHIVE
+#define DIRENT_ATTRIBUTE_COMPRESSED FILE_ATTRIBUTE_COMPRESSED
+#define DIRENT_ATTRIBUTE_DIRECTORY FILE_ATTRIBUTE_DIRECTORY
+#define DIRENT_ATTRIBUTE_ENCRYPTED FILE_ATTRIBUTE_ENCRYPTED
+#define DIRENT_ATTRIBUTE_HIDDEN FILE_ATTRIBUTE_HIDDEN
+#define DIRENT_ATTRIBUTE_NOT_INDEXED FILE_ATTRIBUTE_NOT_CONTENT_INDEXED
+#define DIRENT_ATTRIBUTE_NORMAL FILE_ATTRIBUTE_NORMAL
+#define DIRENT_ATTRIBUTE_OFFLINE FILE_ATTRIBUTE_OFFLINE
+#define DIRENT_ATTRIBUTE_READONLY FILE_ATTRIBUTE_READONLY
+#define DIRENT_ATTRIBUTE_SYMLINK FILE_ATTRIBUTE_REPARSE_POINT
+#define DIRENT_ATTRIBUTE_SPARSE FILE_ATTRIBUTE_SPARSE_FILE
+#define DIRENT_ATTRIBUTE_SYSTEM FILE_ATTRIBUTE_SYSTEM
+#define DIRENT_ATTRIBUTE_TEMPORARY FILE_ATTRIBUTE_TEMPORARY
+#endif
+
 /* Returns 0 if trait does not exist, non-zero if trait exists (some functions may always return 0 on some platforms) */
 int dirent_is_actual_entry(DirectoryEntry entry);
 int dirent_is_subdirectory(DirectoryEntry entry);
@@ -384,8 +401,11 @@ int dirent_is_not_indexed(DirectoryEntry entry);
 int dirent_is_offline(DirectoryEntry entry);
 int dirent_is_readonly(DirectoryEntry entry);
 int dirent_is_sparse(DirectoryEntry entry);
+int dirent_is_symlink(DirectoryEntry entry);
 int dirent_is_system(DirectoryEntry entry);
 int dirent_is_temporary(DirectoryEntry entry);
+
+int dirent_set_attributes(DirectoryEntry entry, unsigned long attributes);
 
 /* Obtain the UTC time of file traits */
 /* Returns 0 on success, -1 on failure (failure may occur because the requested trait doesn't exist for the platform) */

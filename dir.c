@@ -21,10 +21,11 @@
 
 #include "utility.h"
 
+#define GLOB_MAX_POSITIONS 100
+
 int glob(const char *str, const char *pattern) {
     /* Arbitrary stack depth limit (basically the number of '*' characters allowed in the pattern,
      * although multiple '*' characters will be batched together and therefore count as only one '*' toward this limit) */
-#define GLOB_MAX_POSITIONS 100
     const size_t max_positions = GLOB_MAX_POSITIONS;
     struct position {
         const char *strpos; /* Where to start searching for the pattern */
@@ -182,7 +183,6 @@ stop_checking_glob_entry:
 int utf8glob(const char *str, const char *pattern) {
     /* Arbitrary stack depth limit (basically the number of '*' characters allowed in the pattern,
      * although multiple '*' characters will be batched together and therefore count as only one '*' toward this limit) */
-#define GLOB_MAX_POSITIONS 100
     const size_t max_positions = GLOB_MAX_POSITIONS;
     struct position {
         const char *strpos; /* Where to start searching for the pattern */
@@ -807,8 +807,8 @@ int dirFillExtData(DirectoryEntry entry) {
 struct DirEntryStruct {
     Directory parent; /* Points to parent DirStruct, doesn't have ownership */
     union {
-        WIN32_FIND_DATAA data; /* Only use name field if ownedDir is non-zero */
-        WIN32_FIND_DATAW wdata; /* Only use name field if ownedDir is non-zero */
+        WIN32_FIND_DATAA data;
+        WIN32_FIND_DATAW wdata;
     } fdata;
     char is_wide; /* Whether to use `data` (0) or `wdata` (1) */
     char ownedDir; /* non-zero if this structure should be free()d.
@@ -1142,7 +1142,7 @@ int dirent_refresh(DirectoryEntry entry) {
 
         return entry->parent->error;
     } else
-        return CC_EPERM;
+        return entry->parent->error = CC_EPERM;
 #else
     entry->parent->error = CC_ENOTSUP;
     return -1;
@@ -1405,6 +1405,23 @@ int dirent_is_sparse(DirectoryEntry entry) {
 #endif
 }
 
+int dirent_is_symlink(DirectoryEntry entry) {
+#if WINDOWS_OS
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT;
+    } else {
+        return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT;
+    }
+#else
+    UNUSED(entry)
+
+    /* TODO: handle Unix/Linux symlinks */
+    return 0;
+#endif
+}
+
 int dirent_is_system(DirectoryEntry entry) {
 #if WINDOWS_OS
     if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
@@ -1434,6 +1451,97 @@ int dirent_is_temporary(DirectoryEntry entry) {
     UNUSED(entry)
 
     return 0;
+#endif
+}
+
+unsigned long dirent_get_attributes(DirectoryEntry entry) {
+#if WINDOWS_OS
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
+        return 0;
+    else if (entry->is_wide) {
+        return entry->fdata.wdata.dwFileAttributes;
+    } else {
+        return entry->fdata.data.dwFileAttributes;
+    }
+#else
+    UNUSED(entry)
+
+    return 0;
+#endif
+}
+
+int dirent_set_attributes(DirectoryEntry entry, unsigned long attributes) {
+#if WINDOWS_OS
+    LPWSTR wide = utf8_to_wide_alloc(dirent_fullname(entry));
+    if (wide == NULL)
+        return entry->parent->error = CC_ENOMEM;
+
+    /* Change to directory */
+    if (!!(attributes & DIRENT_ATTRIBUTE_DIRECTORY) != dirent_is_directory(entry))
+        return entry->parent->error = CC_ENOTSUP;
+
+    /* Change to symlink/reparse point */
+    if (!!(attributes & DIRENT_ATTRIBUTE_SYMLINK) != dirent_is_symlink(entry))
+        return entry->parent->error = CC_ENOTSUP;
+
+    /* Change to compression or sparsity */
+    if ((    attributes                   & (DIRENT_ATTRIBUTE_COMPRESSED | DIRENT_ATTRIBUTE_SPARSE)) !=
+            (dirent_get_attributes(entry) & (DIRENT_ATTRIBUTE_COMPRESSED | DIRENT_ATTRIBUTE_SPARSE))) {
+        HANDLE handle = CreateFileW(wide, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+        if (handle == INVALID_HANDLE_VALUE)
+            goto cleanup;
+
+        /* Handle compression attribute */
+        /* https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/77f650a3-e3a2-4a25-baac-4bf9b36bcc46 */
+        DWORD bytesReturned;
+        WORD type = !!(attributes & DIRENT_ATTRIBUTE_COMPRESSED);
+        if (DeviceIoControl(handle, FSCTL_SET_COMPRESSION, &type, 2, NULL, 0, &bytesReturned, NULL) == 0) {
+            CloseHandle(handle);
+            goto cleanup;
+        }
+
+        /* Handle sparse attribute */
+        /* https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/6a884fe5-3da1-4abb-84c4-f419d349d878 */
+        BYTE sparse = !!(attributes & DIRENT_ATTRIBUTE_SPARSE);
+        if (DeviceIoControl(handle, FSCTL_SET_SPARSE, &sparse, 1, NULL, 0, &bytesReturned, NULL) == 0) {
+            CloseHandle(handle);
+            goto cleanup;
+        }
+
+        if (CloseHandle(handle) == 0)
+            goto cleanup;
+    }
+
+    /* Change to encryption */
+    if (!!(attributes & DIRENT_ATTRIBUTE_ENCRYPTED) != dirent_is_encrypted(entry)) {
+        if (attributes & DIRENT_ATTRIBUTE_ENCRYPTED) {
+            if (EncryptFileW(wide) == 0)
+                goto cleanup;
+        } else {
+            if (DecryptFileW(wide, 0) == 0)
+                goto cleanup;
+        }
+    }
+
+    attributes &=
+            DIRENT_ATTRIBUTE_ARCHIVE |
+            DIRENT_ATTRIBUTE_HIDDEN |
+            DIRENT_ATTRIBUTE_NORMAL |
+            DIRENT_ATTRIBUTE_NOT_INDEXED |
+            DIRENT_ATTRIBUTE_OFFLINE |
+            DIRENT_ATTRIBUTE_READONLY |
+            DIRENT_ATTRIBUTE_SYSTEM |
+            DIRENT_ATTRIBUTE_TEMPORARY;
+
+    if (SetFileAttributesW(wide, attributes) == 0)
+        goto cleanup;
+
+    FREE(wide);
+    return dirent_refresh(entry); /* TODO: if entry is returned from dir_next(), it will return an error and will not reflect changes to the directory entry, since such entries cannot be refreshed. */
+
+cleanup:
+    FREE(wide);
+    return entry->parent->error = GetLastError();
 #endif
 }
 
