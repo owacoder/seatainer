@@ -11,6 +11,7 @@ DEFINES += CC_TYPE_MISMATCH_ABORT \
            CC_BAD_PARAM_ABORT \
            CC_NO_SUCH_METHOD_ABORT \
            CC_INCLUDE_NETWORK \
+           CC_INCLUDE_SSL \
            PLATFORMS_CONFIG
 
 win32 {
@@ -18,7 +19,7 @@ win32 {
 }
 
 unix: !win32 {
-    LIBS += -lz
+    LIBS += -lz -lssl -lcrypto
 }
 
 SOURCES += \

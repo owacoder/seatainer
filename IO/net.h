@@ -66,6 +66,12 @@ void io_net_destroy();
 IO io_open_tcp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err);
 IO io_open_udp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err);
 
+#ifdef CC_INCLUDE_SSL
+#include <openssl/ssl.h>
+
+IO io_open_ssl_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, SSL_CTX *ctx, int *err);
+#endif
+
 IO io_http_get(Url url, int *err);
 #endif
 

@@ -261,8 +261,6 @@ try_new_glob:
                         ++positions[current_position].patternpos;
                     }
 
-                    printf("1: %s\n2: %s\n", lastCharInSet, positions[current_position].patternpos);
-
                     /* positions[current_position].patternpos now points to first char in set and lastCharInSet points to the last char in set */
                     /* They may be pointing to the same char if it's a one-character set */
                     if (positions[current_position].patternpos == lastCharInSet) {

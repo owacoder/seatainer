@@ -451,6 +451,8 @@ int io_set_error(IO io, int err) {
         default:
             if (err)
                 io->flags |= IO_FLAG_ERROR;
+            else
+                io->flags &= ~IO_FLAG_ERROR;
 
             io->error = err;
             return 0;
@@ -529,13 +531,15 @@ int io_copy(IO in, IO out) {
     size_t read = size;
 
     while (read == size) {
-        if ((read = io_read(data, 1, size, in)) != size) {
-            if (io_error(in))
-                return io_error(in);
-        }
+        read = io_read(data, 1, size, in);
 
         if (io_write(data, 1, read, out) != read)
             return io_error(out);
+
+        if (read != size) {
+            if (io_error(in))
+                return io_error(in);
+        }
     }
 
     return 0;
