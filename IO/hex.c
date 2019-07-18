@@ -38,7 +38,7 @@ static size_t hex_decode_read(void *ptr, size_t size, size_t count, void *userda
         char *sptr = strchr(alpha, tolower(ch));
         if (sptr == NULL) {
             io_set_error(io, CC_EBADMSG);
-            return SIZE_MAX;
+            return (cptr - (unsigned char *) ptr) / size;
         }
 
         ch = sptr - alpha;
@@ -53,7 +53,7 @@ static size_t hex_decode_read(void *ptr, size_t size, size_t count, void *userda
     }
 
     io_set_error(io, io_error((IO) userdata));
-    return io_error((IO) userdata)? SIZE_MAX: (cptr - (unsigned char *) ptr) / size;
+    return (cptr - (unsigned char *) ptr) / size;
 }
 
 static size_t hex_encode_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {

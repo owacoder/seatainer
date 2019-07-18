@@ -12,6 +12,7 @@ DEFINES += CC_TYPE_MISMATCH_ABORT \
            CC_NO_SUCH_METHOD_ABORT \
            CC_INCLUDE_NETWORK \
            CC_INCLUDE_SSL \
+           CC_INCLUDE_ZLIB \
            PLATFORMS_CONFIG
 
 win32 {

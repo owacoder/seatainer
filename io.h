@@ -136,7 +136,9 @@ struct InputOutputDeviceCallbacks {
     /** @brief Reads some data from the IO device.
      *
      * Read callbacks function identically to the `fread()` standard C library call, except for the return value.
-     * If a read callback returns `SIZE_MAX`, then a read error occured. The callback must set the `io` parameter's error code with `io_set_error()`. Otherwise, if the return value is less than the requested number of objects, EOF is assumed to have been reached.
+     * If a read callback returns `SIZE_MAX`, or sets an error, then a read error occured.
+     * The callback must set the `io` parameter's error code with `io_set_error()`.
+     * If no error is returned, and the return value is less than the requested number of objects, EOF is assumed to have been reached.
      */
     IO_ReadCallback read;
 
@@ -305,6 +307,19 @@ int io_vprintf(IO io, const char *fmt, va_list args);
 int io_printf(IO io, const char *fmt, ...);
 int io_putc(int ch, IO io);
 int io_puts(const char *str, IO io);
+
+/** @brief Reads a block of data from the IO device.
+ *
+ * If the return value is equal to @p count, the entire read was successful. If the return value is less than @p count,
+ * then EOF was reached or an error occured. Check io_error() or io_eof() to make sure which event happened. Regardless of what occured,
+ * the data read from this function is always valid, and may be necessary to finalize the stream, if it is recoverable.
+ *
+ * @param ptr The destination buffer to write to.
+ * @param size The element size of the elements being read. If not needed, just set to 1.
+ * @param count The number of elements being read.
+ * @param io The IO device that is being read from.
+ * @return The number of elements successfully read.
+ */
 size_t io_read(void *ptr, size_t size, size_t count, IO io);
 int io_set_read_timeout(IO io, long long usecs);
 int io_set_write_timeout(IO io, long long usecs);

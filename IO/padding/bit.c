@@ -52,7 +52,7 @@ size_t bit_padding_encode_read(void *ptr, size_t size, size_t count, void *userd
 
     if (io_error(padding->io)) {
         io_set_error(io, io_error(padding->io));
-        return SIZE_MAX;
+        return read;
     } else if (read == max) /* Read everything */
         ;
     else if (io_eof(padding->io)) { /* Ran out of data while reading */

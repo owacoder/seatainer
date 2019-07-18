@@ -533,12 +533,11 @@ int io_copy(IO in, IO out) {
     while (read == size) {
         read = io_read(data, 1, size, in);
 
-        if (io_write(data, 1, read, out) != read)
+        if (read && io_write(data, 1, read, out) != read)
             return io_error(out);
 
-        if (read != size) {
-            if (io_error(in))
-                return io_error(in);
+        if (read != size && io_error(in)) {
+            return io_error(in);
         }
     }
 
@@ -2097,7 +2096,8 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
     /* Not readable or not switched over to reading yet */
     if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_ERROR))) {
         io->flags |= IO_FLAG_ERROR;
-        io->error = CC_EREAD;
+        if (0 == (io->flags & IO_FLAG_ERROR)) /* Don't overwrite error code if already present */
+            io->error = CC_EREAD;
         return 0;
     }
 
@@ -2225,8 +2225,10 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
 
             if (io->callbacks->read == NULL ||
                     (read = io->callbacks->read(cptr, 1, max, io->ptr, io)) != max) {
-                if (read == SIZE_MAX) {
-                    read = 0;
+                if (read == SIZE_MAX || io_error(io)) {
+                    if (read == SIZE_MAX)
+                        read = 0;
+
                     io->flags |= IO_FLAG_ERROR;
                     if (io->callbacks->read == NULL)
                         io->error = CC_ENOTSUP;
@@ -3144,10 +3146,10 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
     }
 
     /* Not writable or not switched over to writing yet */
-    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_ERROR)))
-    {
+    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_ERROR))) {
         io->flags |= IO_FLAG_ERROR;
-        io->error = CC_EWRITE;
+        if (0 == (io->flags & IO_FLAG_ERROR))
+            io->error = CC_EWRITE;
         return 0;
     }
 
