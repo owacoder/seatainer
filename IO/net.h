@@ -82,6 +82,12 @@ IO http_request_body(HttpState state, const char *mimeType);
 int http_begin_response(HttpState state);
 IO http_response_body(HttpState state);
 int http_end_response(HttpState state);
+
+#ifdef CC_INCLUDE_SSL
+#include <openssl/ssl.h>
+
+IO io_open_ssl_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, SSL_CTX *ctx, int *err);
+#endif
 #endif
 
 #ifdef __cplusplus

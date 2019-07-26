@@ -556,6 +556,7 @@ int main()
         return 0;
     }
 
+#if 0
     Directory wdir = dir_open("/shared");
     walk_dir(io_open_file(stdout), wdir);
 
@@ -645,13 +646,14 @@ int main()
     url_destroy(url);
 
     return 0;
+#endif
 
     int err;
-    const char *host = "jw.org";
-    IO net = io_open_tcp_socket(host, 80, NetAddressAny, "rwb", &err);
+    const char *host = "www.google.com";
+    IO net = io_open_ssl_socket(host, 443, NetAddressAny, "rwb", NULL, &err);
     IO stdio = io_open_file(stdout);
 
-    io_printf(net, "GET / HTTP/1.0\r\nHost: %s\r\n\r\n", host);
+    io_printf(net, "GET /en HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
     io_seek(net, 0, SEEK_CUR);
 
     if (io_error(net))
@@ -664,10 +666,13 @@ int main()
     else if (io_copy(net, stdio) != 0)
         io_puts("Error while copying\n", stdio);
 
-    io_puts("End of response.\n", stdio);
+    if (io_error(net))
+        printf("Net: %s\n", error_description(io_error(net)));
+    else if (io_error(stdio))
+        printf("Stdio: %s\n", error_description(io_error(stdio)));
 
-    io_close(net);
-    io_close(stdio);
+    printf("Close: %s\n", error_description(io_close(net)));
+    printf("Close: %s\n", error_description(io_close(stdio)));
     return 0;
 
 #if 1
@@ -731,9 +736,6 @@ int main()
 
     dir_close(dir);
 #endif
-
-    for (size_t i = 0; i < sizeof(strs)/sizeof(*strs); ++i)
-        printf("glob(\"%s\", \"%s\") = %d\n", strs[i][0], strs[i][1], glob(strs[i][0], strs[i][1]));
 
     test_io();
 

@@ -90,8 +90,6 @@ static void calculate_sha1_x86(struct Sha1 *sha1) {
     __m128i MSG0, MSG1, MSG2, MSG3;
     const __m128i MASK = _mm_set_epi64x(0x0001020304050607ULL, 0x08090a0b0c0d0e0fULL);
 
-    puts("Using intrinsic version of SHA1\n");
-
     /* Load initial values */
     ABCD = _mm_loadu_si128((const __m128i*) sha1->state);
     E0 = _mm_set_epi32(sha1->state[4], 0, 0, 0);

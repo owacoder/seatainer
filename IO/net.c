@@ -1,5 +1,6 @@
 #include "net.h"
 #include "../utility.h"
+#include "../seaerror.h"
 
 #include "../seaerror.h"
 
@@ -271,7 +272,8 @@ static unsigned short url_port_from_scheme(Url url) {
         const char *scheme;
         unsigned short port;
     } mapping[] = {
-        {.scheme = "http", .port = 80}
+        {.scheme = "http", .port = 80},
+        {.scheme = "https", .port = 443}
     };
 
     const char *scheme = url_get_scheme(url);
@@ -370,20 +372,82 @@ const char *url_get_percent_encoded(Url url) {
 #endif
 #endif
 
+#define CC_SOCKET_TYPE(io) *io_tempdata(io)
+#define CC_UDP_SOCKET 0
+#define CC_TCP_SOCKET 1
+#define CC_SSL_SOCKET 2
+
+#include <signal.h>
+
+#ifdef CC_INCLUDE_SSL
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
+struct NetContext {
+    SOCKET fd;
+    SSL_CTX *ctx;
+    SSL *socket;
+    char ownsCtx; /* 1 if ctx is owned by this struct, 0 if ctx is external */
+};
+
+/* If this function returns CC_EPIPE, don't use the underlying file descriptor anymore */
+static int net_upgrade_to_ssl(void *userdata, IO io) {
+    struct NetContext *context = userdata;
+
+    if (context->ctx == NULL) {
+        context->ownsCtx = 1;
+        context->ctx = SSL_CTX_new(TLS_client_method());
+        if (context->ctx == NULL)
+            return CC_ENOMEM;
+
+        /* Only allow TLSv1.0, TLSv1.1, TLSv1.2, TLSv1.3 */
+        if (SSL_CTX_set_min_proto_version(context->ctx, TLS1_VERSION) != 1)
+            return CC_EPROTO;
+    }
+
+    context->socket = SSL_new(context->ctx);
+    if (context->socket == NULL)
+        return CC_ENOMEM;
+
+    if (SSL_set_fd(context->socket, context->fd) != 1)
+        return CC_EBADF;
+
+    int err = SSL_connect(context->socket);
+    if (err == 1) {
+        CC_SOCKET_TYPE(io) = CC_SSL_SOCKET;
+        return 0;
+    }
+
+    return err < 0? CC_EPIPE: CC_EPROTO;
+}
+#else
+struct NetContext {
+    SOCKET fd;
+};
+#endif
+
 /* TODO: allow non-blocking connect to allow custom timeout for connecting */
 struct SocketInitializationParams {
     const char *host;
     unsigned short port;
+    int socketType; /* One of CC_XXX_SOCKET types */
     int socketMode;
     enum NetAddressType type;
     int *err;
-};
 
-#include <signal.h>
+#ifdef CC_INCLUDE_SSL
+    SSL_CTX *sslContext;
+#endif
+};
 
 void io_net_init() {
 #if !WINDOWS_OS
     signal(SIGPIPE, SIG_IGN);
+#endif
+
+#ifdef CC_INCLUDE_SSL
+    SSL_load_error_strings();
+    SSL_library_init();
 #endif
 }
 
@@ -393,6 +457,7 @@ void io_net_destroy() {
 
 static size_t net_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {
     UNUSED(io)
+    struct NetContext *context = userdata;
 
     char *cptr = ptr;
     size_t max = size*count;
@@ -400,17 +465,47 @@ static size_t net_read(void *ptr, size_t size, size_t count, void *userdata, IO 
     do {
         int transfer = max > INT_MAX? INT_MAX: (int) max;
 
-        transfer = recv((SOCKET) (uintptr_t) userdata, cptr, transfer, 0);
-        if (transfer == SOCKET_ERROR) {
-#if WINDOWS_OS
-            io_set_error(io, WSAGetLastError());
-#else
-            io_set_error(io, errno);
+#ifdef CC_INCLUDE_SSL
+        if (CC_SOCKET_TYPE(io) != CC_SSL_SOCKET) {
 #endif
-            return SIZE_MAX;
+            transfer = recv(context->fd, cptr, transfer, 0);
+            if (transfer == SOCKET_ERROR) {
+#if WINDOWS_OS
+                io_set_error(io, WSAGetLastError());
+#else
+                io_set_error(io, errno);
+#endif
+                return SIZE_MAX;
+            }
+            else if (transfer == 0)
+                return (size*count - max) / size;
+#ifdef CC_INCLUDE_SSL
+        } else /* SSL transfer */ {
+            transfer = SSL_read(context->socket, cptr, transfer);
+            if (transfer <= 0) {
+                const int err = SSL_get_error(context->socket, transfer);
+                const int errStack = ERR_get_error();
+
+                switch (err) {
+                    default:
+                    case SSL_ERROR_SSL: io_set_error(io, CC_EPROTO); return SIZE_MAX;
+                    case SSL_ERROR_SYSCALL:
+#if WINDOWS_OS
+                        io_set_error(io, WSAGetLastError());
+#else
+                        io_set_error(io, errno);
+#endif
+                        if (errStack != 0 || io_error(io) != 0) /* A real error occured */
+                            return SIZE_MAX;
+
+                        /* Server closed socket without clean shutdown, set Connection Reset error to signify short read and return */
+                        io_set_error(io, CC_ECONNRESET);
+                        /* fallthrough */
+                    case SSL_ERROR_ZERO_RETURN: return (size*count - max) / size;
+                }
+            }
         }
-        else if (transfer == 0)
-            return (size*count - max) / size;
+#endif
 
         cptr += transfer;
         max -= transfer;
@@ -421,6 +516,7 @@ static size_t net_read(void *ptr, size_t size, size_t count, void *userdata, IO 
 
 static size_t net_write(const void *ptr, size_t size, size_t count, void *userdata, IO io) {
     UNUSED(io)
+    struct NetContext *context = userdata;
 
     const char *cptr = ptr;
     size_t max = size*count;
@@ -429,15 +525,36 @@ static size_t net_write(const void *ptr, size_t size, size_t count, void *userda
         int transfer = max > INT_MAX? INT_MAX: (int) max;
 
         /* TODO: no protection against sending UDP packets that are too large */
-        transfer = send((SOCKET) (uintptr_t) userdata, cptr, transfer, 0);
-        if (transfer == SOCKET_ERROR) {
-#if WINDOWS_OS
-            io_set_error(io, WSAGetLastError());
-#else
-            io_set_error(io, errno);
+#ifdef CC_INCLUDE_SSL
+        if (CC_SOCKET_TYPE(io) != CC_SSL_SOCKET) {
 #endif
-            return (size*count - max) / size;
+            transfer = send(context->fd, cptr, transfer, 0);
+            if (transfer == SOCKET_ERROR) {
+#if WINDOWS_OS
+                io_set_error(io, WSAGetLastError());
+#else
+                io_set_error(io, errno);
+#endif
+                return (size*count - max) / size;
+            }
+#ifdef CC_INCLUDE_SSL
+        } else /* SSL transfer */ {
+            transfer = SSL_write(context->socket, cptr, transfer);
+            if (transfer <= 0) {
+                int err = SSL_get_error(context->socket, transfer);
+
+                switch (err) {
+                    default:
+                    case SSL_ERROR_SSL: io_set_error(io, CC_EPROTO); return SIZE_MAX;
+#if WINDOWS_OS
+                    case SSL_ERROR_SYSCALL: io_set_error(io, WSAGetLastError()); return SIZE_MAX;
+#else
+                    case SSL_ERROR_SYSCALL: io_set_error(io, errno); return SIZE_MAX;
+#endif
+                }
+            }
         }
+#endif
 
         cptr += transfer;
         max -= transfer;
@@ -449,6 +566,13 @@ static size_t net_write(const void *ptr, size_t size, size_t count, void *userda
 static void *net_open(void *userdata, IO io) {
     UNUSED(io)
     struct SocketInitializationParams *params = userdata;
+
+    struct NetContext *context = CALLOC(1, sizeof(*context));
+    if (context == NULL) {
+        if (params->err)
+            *params->err = CC_ENOMEM;
+        return NULL;
+    }
 
     if (params->err)
         *params->err = 0;
@@ -475,7 +599,7 @@ static void *net_open(void *userdata, IO io) {
     hints.ai_socktype = params->socketMode;
     hints.ai_protocol = params->socketMode == SOCK_STREAM? IPPROTO_TCP: IPPROTO_UDP;
 
-    *io_tempdata(io) = params->socketMode != SOCK_STREAM;
+    CC_SOCKET_TYPE(io) = params->socketType;
 
     /* Convert port number to NUL-terminated string */
     char portStr[sizeof(unsigned short) * CHAR_BIT];
@@ -537,8 +661,26 @@ static void *net_open(void *userdata, IO io) {
 
     freeaddrinfo(result);
 
-    if (sock != INVALID_SOCKET)
-        return (void *) (uintptr_t) sock;
+    /* Valid connected socket, now just initialize SSL as needed */
+    if (sock != INVALID_SOCKET) {
+        context->fd = sock;
+
+#ifdef CC_INCLUDE_SSL
+        if (CC_SOCKET_TYPE(io) == CC_SSL_SOCKET) { /* SSL connection specified instead of regular TCP */
+            context->ctx = params->sslContext;
+            context->ownsCtx = 0;
+
+            CC_SOCKET_TYPE(io) = CC_TCP_SOCKET; /* Downgrade specifier to TCP; it will be upgraded in net_upgrade_to_ssl() */
+            int result = net_upgrade_to_ssl(context, io);
+            if (result) {
+                *params->err = result;
+                goto cleanup;
+            }
+        }
+#endif
+
+        return context;
+    }
 
 cleanup:
 #if WINDOWS_OS
@@ -550,31 +692,67 @@ cleanup:
         close(sock);
 #endif
 
+#ifdef CC_INCLUDE_SSL
+    if (context->socket)
+        SSL_free(context->socket);
+
+    if (context->ownsCtx && context->ctx)
+        SSL_CTX_free(context->ctx);
+#endif
+
+    FREE(context);
     return NULL;
 }
 
 static int net_close(void *userdata, IO io) {
     UNUSED(io)
+    struct NetContext *context = userdata;
+
+    int result = 0;
+
+#ifdef CC_INCLUDE_SSL
+    if (io_error(io) != CC_EPROTO) {
+        result = SSL_shutdown(context->socket);
+
+        /* If result == 0, the server didn't send a close_notify yet, but we don't care because we're just going to shutdown anyway */
+        if (result < 0)
+            result = CC_EPROTO;
+        else
+            result = 0;
+    }
+
+    if (context->socket)
+        SSL_free(context->socket);
+
+    if (context->ownsCtx)
+        SSL_CTX_free(context->ctx);
+#endif
 
 #if WINDOWS_OS
-    int result = closesocket((SOCKET) userdata);
+    int closeResult = closesocket(context->fd);
 
     WSACleanup();
 #elif LINUX_OS
-    int result = close((SOCKET) (uintptr_t) userdata);
+    int closeResult = close(context->fd);
 #endif
 
+#ifdef CC_INCLUDE_SSL
+    if (result == 0)
+        result = closeResult;
+#endif
+
+    FREE(context);
     return result;
 }
 
-/* First byte of tempdata is 0 if TCP, 1 if UDP */
 static const char *net_what(void *userdata, IO io) {
     UNUSED(userdata)
 
-    switch (*io_tempdata(io)) {
+    switch (CC_SOCKET_TYPE(io)) {
         default: return "unknown_socket";
-        case 0: return "tcp_socket";
-        case 1: return "udp_socket";
+        case CC_UDP_SOCKET: return "udp_socket";
+        case CC_TCP_SOCKET: return "tcp_socket";
+        case CC_SSL_SOCKET: return "ssl_socket";
     }
 }
 
@@ -598,6 +776,7 @@ IO io_open_tcp_socket(const char *host, unsigned short port, enum NetAddressType
     {
         .host = host,
         .port = port,
+        .socketType = CC_TCP_SOCKET,
         .socketMode = SOCK_STREAM,
         .type = type,
         .err = err
@@ -611,6 +790,7 @@ IO io_open_udp_socket(const char *host, unsigned short port, enum NetAddressType
     {
         .host = host,
         .port = port,
+        .socketType = CC_UDP_SOCKET,
         .socketMode = SOCK_DGRAM,
         .type = type,
         .err = err
@@ -618,6 +798,23 @@ IO io_open_udp_socket(const char *host, unsigned short port, enum NetAddressType
 
     return io_open_custom(&net_callbacks, &params, mode);
 }
+
+#ifdef CC_INCLUDE_SSL
+IO io_open_ssl_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, SSL_CTX *ctx, int *err) {
+    struct SocketInitializationParams params =
+    {
+        .host = host,
+        .port = port,
+        .socketType = CC_SSL_SOCKET,
+        .socketMode = SOCK_STREAM,
+        .type = type,
+        .err = err,
+        .sslContext = ctx
+    };
+
+    return io_open_custom(&net_callbacks, &params, mode);
+}
+#endif
 
 struct HttpChunkedStruct {
     IO io;

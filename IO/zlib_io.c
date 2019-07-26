@@ -1,6 +1,7 @@
 #include "zlib_io.h"
-
 #include "../seaerror.h"
+
+#include <stdint.h>
 
 #ifdef CC_INCLUDE_ZLIB
 struct ZlibParameters {
@@ -94,11 +95,12 @@ static size_t zlib_read(void *buf, size_t size, size_t count, void *userdata, IO
         if (state->zlib.avail_in == 0) {
             state->zlib.avail_in = io_read(state->buffer, 1, sizeof(state->buffer), state->io);
 
-            if (state->zlib.avail_in != sizeof(state->buffer)) {
+            if (flush == Z_FINISH && state->zlib.avail_in == 0 && io_error(state->io)) {
                 io_set_error(io, io_error(state->io));
-                if (io_error(state->io))
-                    return SIZE_MAX;
+                break;
+            }
 
+            if (state->zlib.avail_in != sizeof(state->buffer)) {
                 flush = Z_FINISH;
             }
 
@@ -112,9 +114,9 @@ static size_t zlib_read(void *buf, size_t size, size_t count, void *userdata, IO
 
         switch (result) {
             case Z_STREAM_ERROR:
-            case Z_NEED_DICT: io_set_error(io, CC_EIO); return SIZE_MAX;
-            case Z_DATA_ERROR: io_set_error(io, CC_EBADMSG); return SIZE_MAX;
-            case Z_MEM_ERROR: io_set_error(io, CC_ENOMEM); return SIZE_MAX;
+            case Z_NEED_DICT: io_set_error(io, io_error(state->io)? io_error(state->io): CC_EIO); return SIZE_MAX;
+            case Z_DATA_ERROR: io_set_error(io, io_error(state->io)? io_error(state->io): CC_EBADMSG); return SIZE_MAX;
+            case Z_MEM_ERROR: io_set_error(io, io_error(state->io)? io_error(state->io): CC_ENOMEM); return SIZE_MAX;
             case Z_STREAM_END: goto done;
         }
     } while (state->zlib.avail_out != 0);

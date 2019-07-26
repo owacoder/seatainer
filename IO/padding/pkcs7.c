@@ -66,7 +66,7 @@ size_t pkcs7_padding_encode_read(void *ptr, size_t size, size_t count, void *use
 
     if (io_error(padding->io)) {
         io_set_error(io, io_error(padding->io));
-        return SIZE_MAX;
+        return read;
     } else if (read == max) /* Read everything */
         ;
     else if (io_eof(padding->io)) { /* Ran out of data while reading */
@@ -125,7 +125,7 @@ size_t pkcs7_padding_decode_read(void *ptr, size_t size, size_t count, void *use
             padding->buffer_avail = padding->block_size;
         } else if (io_error(padding->io)) {
             io_set_error(io, io_error(padding->io));
-            return SIZE_MAX;
+            return read;
         } else if (read < padding->block_size) {
             if (read == 0)
                 break;
