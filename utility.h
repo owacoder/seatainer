@@ -117,6 +117,16 @@ char *strlower(char *str);
  */
 char *strupper(char *str);
 
+/** @brief Compares two case insensitive strings.
+ *
+ * Behavior is identical to strcmp(), except ASCII characters are compared case insensitively.
+ *
+ * @param lhs One string to compare.
+ * @param rhs The other string to compare.
+ * @return Returns < 0 if lhs < rhs lexicographically, > 0 if lhs > rhs lexicographically, and 0 if the strings are equal (case insensitively).
+ */
+int strcmp_no_case(const char *lhs, const char *rhs);
+
 /** @brief Gathers, or concatenates, an array of strings into one allocated string.
  * 
  * @param strings The array of strings to concatenate.

@@ -7,6 +7,8 @@
 #include "crypto_rand.h"
 #include <limits.h>
 
+#include "seaerror.h"
+
 #if WINDOWS_OS
 #include <windows.h>
 
@@ -59,15 +61,19 @@ static size_t crypto_rand_read(void *ptr, size_t size, size_t count, void *userd
 
     struct CryptoRand *cryptoRand = userdata;
 
-    if (cryptoRand->RtlGenRandom(ptr, size*count))
-        return size*count;
+    size_t max = size*count;
 
-#if WINDOWS_OS
-    io_set_error(io, ERROR_READ_FAULT);
-#else
-    io_set_error(io, EIO);
-#endif
-    return SIZE_MAX;
+    do {
+        ULONG read = max > ULONG_MAX? ULONG_MAX: (ULONG) max;
+        if (!cryptoRand->RtlGenRandom(ptr, read)) {
+            io_set_error(io, CC_EREAD);
+            return SIZE_MAX;
+        }
+
+        max -= read;
+    } while (max);
+
+    return count;
 }
 
 static const char *crypto_rand_what(void *userdata, IO io) {

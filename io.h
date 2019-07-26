@@ -196,9 +196,27 @@ struct InputOutputDeviceCallbacks {
      */
     void (*clearerr)(void *userdata, IO io);
 
+    /** @brief Requests the current position of the read/write pointer.
+     *
+     * This callback must not call a seek function, but can call any other function.
+     *
+     * If only one of `tell` or `tell64` are non-NULL, that overload will be used exclusively.
+     *
+     * @param userdata The userdata stored in @p io.
+     * @param io The IO device that the position is being requested from.
+     * @return The current position of the read/write pointer in @p io, or -1 if no position is available or an error occurred.
+     */
     long int (*tell)(void *userdata, IO io);
     long long int (*tell64)(void *userdata, IO io);
 
+    /** @brief Requests the current position of the read/write pointer.
+     *
+     * If only one of `seek` or `seek64` are non-NULL, that overload will be used exclusively, with appropriate range handling.
+     *
+     * @param userdata The userdata stored in @p io.
+     * @param io The IO device that the position is being changed on.
+     * @return Zero on success, or non-zero if seeking is not available or an error occurred.
+     */
     int (*seek)(void *userdata, long int offset, int origin, IO io);
     int (*seek64)(void *userdata, long long int offset, int origin, IO io);
 
@@ -227,36 +245,132 @@ struct InputOutputDeviceCallbacks {
 /* For Large File Support on Linux, the compile flag -D_FILE_OFFSET_BITS=64 must be used for
  * io_[seek/tell]64() functions to work with 64-bit offsets. io.c specifies these defines */
 
-/* Define IO_DEFAULT_TEXT_MODE to default to text-mode reading and writing, and define
- * IO_DEFAULT_BINARY_MODE to default to binary-mode reading and writing. The default if neither is specified
- * is text mode, just like the C standard library.
+/** Define IO_DEFAULT_TEXT_MODE to default to text-mode reading and writing, and define
+ *  IO_DEFAULT_BINARY_MODE to default to binary-mode reading and writing. The default if neither is specified
+ *  is text mode, just like the C standard library.
  */
 #if !defined(IO_DEFAULT_TEXT_MODE) && !defined(IO_DEFAULT_BINARY_MODE)
 # define IO_DEFAULT_TEXT_MODE
 #endif
 
+/** @brief Clears any error or EOF flag present in an IO device.
+ *
+ * @param io The device to clear error flags on.
+ */
 void io_clearerr(IO io);
+
+/** @brief Closes a device.
+ *
+ * @param io The device to close. The handle is invalidated after this function is called.
+ * @return An error code showing what error occurred when trying to close @p io. Returns 0 on success.
+ */
 int io_close(IO io);
+
+/** @brief Closes multiple devices at once.
+ *
+ * @param count The number of devices to close.
+ * @param ... The IO devices to close.
+ * @return Returns EOF if an error occurred, or 0 on success. The specific error that occurred is not accessible.
+ */
 int io_vclose(int count, ...);
+
+/** @brief Detect whether an IO device is readable or not.
+ *
+ * @param io The IO device on which to check read ability.
+ * @return Non-zero if @p io is readable, zero otherwise.
+ */
 int io_readable(IO io);
+
+/** @brief Detect whether an IO device is writable or not.
+ *
+ * @param io The IO device on which to check write ability.
+ * @return Non-zero if @p io is writable, zero otherwise.
+ */
 int io_writable(IO io);
+
+/** @brief Detect whether the last operation performed on an IO device was a read operation.
+ *
+ * @param io The IO device on which to check the last operation.
+ * @return Non-zero if @p io was just read from, zero otherwise.
+ */
 int io_just_read(IO io);
+
+/** @brief Detect whether the last operation performed on an IO device was a write operation.
+ *
+ * @param io The IO device on which to check the last operation.
+ * @return Non-zero if @p io was just written to, zero otherwise.
+ */
 int io_just_wrote(IO io);
+
+/** @brief Detect whether an IO device is opened as a binary device.
+ *
+ * Binary devices pass all data through unmodified.
+ *
+ * @param io The IO device to check the binary/text status of.
+ * @return Non-zero if @p io is a binary device.
+ */
 int io_binary(IO io);
+
+/** @brief Detect whether an IO device is opened as a text device.
+ *
+ * Text devices convert the native line ending into a single '\\n' character when reading,
+ * and convert a single '\\n' character into the native line ending when writing.
+ *
+ * @param io The IO device to check the binary/text status of.
+ * @return Non-zero if @p io is a binary device.
+ */
 int io_text(IO io);
 
+/** @brief If the IO device was opened accessing an external file, grabs ownership of that file descriptor.
+ *
+ * @param io The device containing the file descriptor to grab ownership of.
+ */
 void io_grab_file(IO io);
+
+/** @brief Releases ownership of any file descriptor referenced by an IO device.
+ *
+ * @param io The device containing the file descriptor to release ownership of.
+ */
 void io_ungrab_file(IO io);
 
-/* Returns pointer to under-the-hood data
- * This pointer should *never* be freed
+/** @brief Returns pointer to type-specific data.
+ *
+ * This pointer should *never* be freed.
+ *
+ * @param io The device to get the userdata reference from.
+ * @return The userdata stored in @p io.
  */
 void *io_userdata(IO io);
-/* Returns pointer to dynamic buffer for IO_MinimalBuffer and IO_DynamicBuffer, NULL otherwise */
+
+/** @brief If the device is a dynamically-allocated buffer, returns a pointer to that buffer, NULL otherwise.
+ *
+ * This function only returns a non-NULL pointer for IO_MinimalBuffer and IO_DynamicBuffer.
+ * The pointer returned by this function is not freed when the IO device is destroyed, and must be done manually.
+ *
+ * @param io The device to get the buffer from.
+ * @return The underlying buffer that was allocated to store data by the IO device.
+ */
 char *io_underlying_buffer(IO io);
+
+/** @brief If the device is a dynamically-allocated buffer, returns the size if data contained in that buffer, 0 otherwise.
+ *
+ * This function only returns a non-zero value for IO_MinimalBuffer and IO_DynamicBuffer.
+ *
+ * @param io The device to get the buffer size of.
+ * @return The size of data contained in the underlying buffer that was allocated to store data by the IO device.
+ */
 size_t io_underlying_buffer_size(IO io);
+
+/** @brief If the device is a dynamically-allocated buffer, returns the capacity (maximum data size) of that buffer, 0 otherwise.
+ *
+ * This function only returns a non-zero value for IO_MinimalBuffer and IO_DynamicBuffer.
+ *
+ * @param io The device to get the buffer capacity of.
+ * @return The capacity of the underlying buffer that was allocated to store data by the IO device.
+ */
 size_t io_underlying_buffer_capacity(IO io);
-/** @brief Returns pointer to object-specific raw buffer
+
+/** @brief Returns pointer to object-specific raw buffer.
  *
  * The size of the returned buffer is given by io_tempdata_size(), and is guaranteed to be >= 8 for Custom-type objects and hold at least two pointers.
  * The returned buffer can be used for anything.
@@ -265,17 +379,65 @@ size_t io_underlying_buffer_capacity(IO io);
  * @return If this function returns NULL, no buffer is available. Otherwise, the object-specific raw buffer is returned.
  */
 unsigned char *io_tempdata(IO io);
+
+/** @brief Returns size of object-specific raw buffer.
+ *
+ * The size is guaranteed to be >= 8 for Custom-type objects and hold at least two pointers.
+ *
+ * @param io The object to obtain the temporary buffer size of.
+ * @return If this function returns 0, no buffer is available. Otherwise, the size of the object-specific raw buffer is returned.
+ */
 size_t io_tempdata_size(IO io);
 
-/** @brief Returns what the last error that occured on the device was. These values are system-dependant (i.e. errno for Linux, GetLastError() for Windows) */
+/** @brief Returns what the last error that occured on the device was.
+ *
+ * These values are system-dependant (i.e. errno for Linux, GetLastError() and WSAGetLastError() for Windows),
+ * but convenience comparison macros are available using the `seaerror.h` header, using the prefix CC_<errno value>.
+ *
+ * @param io The IO device to retrieve the last error from.
+ * @return The last error announced by the device, or 0 if no error is currently set.
+ */
 int io_error(IO io);
 
-char *io_error_description_alloc(int err);
+/** @brief Sets or clears the error code in an IO device.
+ *
+ * @param io The IO device to set the error code of.
+ * @param err The error code to set on the device. If @p err is 0, the error flag is cleared (but the EOF flag is unmodified).
+ * @return 0 on success, EOF on failure.
+ */
 int io_set_error(IO io, int err);
+
+/** @brief Returns the state of the EOF flag on an IO device.
+ *
+ * @param io The IO device to get the EOF flag from.
+ * @return Non-zero if the EOF flag is set, zero otherwise.
+ */
 int io_eof(IO io);
+
+/** @brief Flushes the input or output buffer of an IO device, depending on the current mode.
+ *
+ * @param io The IO device to flush.
+ * @return Zero on success, or EOF if the flush failed.
+ */
 int io_flush(IO io);
+
+/** @brief Gets the next character from the input stream.
+ *
+ * Continued calls to this function after EOF is reached will continue to return EOF and will not create an error.
+ *
+ * @param io The IO device to get the next character from.
+ * @return Returns the next character (byte) in the input stream, or EOF if there is no more input or an error occurred.
+ */
 int io_getc(IO io);
+
+/** @brief Gets the current position of the IO device, if available.
+ *
+ * @param io The IO device to get the current read/write position from.
+ * @param pos The location to save the current position in. This value must not be modified by the end user.
+ * @return Zero on success, non-zero if an error occurred.
+ */
 int io_getpos(IO io, IO_Pos *pos);
+
 char *io_gets(char *str, int num, IO io);
 IO io_open(const char *filename, const char *mode);
 /* If `mode` contains "@ncp" on Windows, the [n]ative [c]ode [p]age is used, instead of UTF-8 */
@@ -301,9 +463,52 @@ IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdat
  */
 int io_copy(IO in, IO out);
 int io_copy_and_close(IO in, IO out);
+
+/** @brief Print a number of arguments to an IO device using a specific format string.
+ *
+ * With the exception of wide strings, and hexadecimal floating-point output, this function should perform identically to the standard
+ * library functions in the `printf()` family. Wide strings and hexadecimal floating-point output are not supported.
+ *
+ * @param io The IO device to write to.
+ * @param fmt The format string specifying what arguments to print.
+ * @param args The va_list containing the arguments to print.
+ * @return Returns the number of characters successfully written, -1 if a write error occurred, or -2 if the format string was formatted improperly.
+ */
 int io_vprintf(IO io, const char *fmt, va_list args);
+
+/** @brief Print a number of arguments to an IO device using a specific format string.
+ *
+ * With the exception of wide strings, and hexadecimal floating-point output, this function should perform identically to the standard
+ * library functions in the `printf()` family. Wide strings and hexadecimal floating-point output are not supported.
+ *
+ * This function forwards the argument list on to io_vprintf().
+ *
+ * @param io The IO device to write to.
+ * @param fmt The format string specifying what arguments to print.
+ * @param ... A list of arguments to print.
+ * @return Returns the number of characters successfully written, -1 if a write error occurred, or -2 if the format string was formatted improperly.
+ */
 int io_printf(IO io, const char *fmt, ...);
+
+/** @brief Writes a character to an IO device.
+ *
+ * If the stream is opened as a text stream, any newline (10) characters written to the stream will be converted to the native
+ * newline as needed.
+ *
+ * @param ch The character to write, which will be casted to `unsigned char` internally.
+ * @param io The IO device to write to.
+ * @return The character written, or EOF if an error occurred.
+ */
 int io_putc(int ch, IO io);
+
+/** @brief Writes a string to an IO device.
+ *
+ * No newline is appended to the string when writing.
+ *
+ * @param str The string to write to the IO device.
+ * @param io The IO device to write to.
+ * @return Zero on success, EOF if an error occurred.
+ */
 int io_puts(const char *str, IO io);
 size_t io_read(void *ptr, size_t size, size_t count, IO io);
 int io_set_read_timeout(IO io, long long usecs);

@@ -486,7 +486,7 @@ int io_flush(IO io) {
                 }
 #elif WINDOWS_OS
                 DWORD written;
-                if (!WriteFile(io->ptr, io->data.sizes.ptr2, io->data.sizes.pos, &written, NULL) || written != io->data.sizes.pos) {
+                if (!WriteFile(io->ptr, io->data.sizes.ptr2, (DWORD) io->data.sizes.pos, &written, NULL) || written != io->data.sizes.pos) {
                     io->flags |= IO_FLAG_ERROR;
                     io->error = GetLastError();
                     return EOF;
@@ -1417,7 +1417,7 @@ static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, u
         }
     }
 
-    return state->bufferLength;
+    return (int) state->bufferLength;
 }
 
 static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsigned flags, unsigned prec, unsigned len, va_list_wrapper *args) {
@@ -1467,7 +1467,7 @@ static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsig
         }
     }
 
-    return state->bufferLength;
+    return (int) state->bufferLength;
 }
 
 /* fmt must be one of "diuox", returns UINT_MAX on failure, number of characters read on success */
@@ -1773,7 +1773,7 @@ done_with_flags:
                                     case 'X': fmt_prec = 1; break;
                                     case 'o':
                                         if (fmt_flags & PRINTF_FLAG_HASH) /* alternative implementation */
-                                            fmt_prec = state.bufferLength + 1;
+                                            fmt_prec = (unsigned) state.bufferLength + 1;
                                         else
                                             fmt_prec = 1;
                                         break;
@@ -1848,7 +1848,7 @@ done_with_flags:
                     if ((fmt_flags & PRINTF_FLAG_HAS_WIDTH) && fmt_width > precCount + addonCharCount)
                         fillCount = fmt_width - precCount - addonCharCount;
 
-                    written += fillCount + precCount + addonCharCount;
+                    written += (int) (fillCount + precCount + addonCharCount);
                     precCount -= state.bufferLength;
 
                     /* calculate fill character for field */
@@ -2428,9 +2428,6 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                     break;
                 }
                 case '[': {
-                    if (noWidth)
-                        fmt_width = 1;
-
                     if (fmt[1] == 0 || fmt[2] == 0)
                         goto cleanup;
 
@@ -2648,7 +2645,7 @@ int io_seek(IO io, long int offset, int origin) {
             else
                 seek = -1;
 
-            if (seek < 0)
+            if (seek)
                 return seek;
             break;
         }
@@ -3110,7 +3107,7 @@ size_t io_native_unbuffered_write(const void *ptr, size_t size, size_t count, IO
     } while (max);
 #elif WINDOWS_OS
     do {
-        DWORD amount = max > 0xffffffffu? 0xffffffffu: max;
+        DWORD amount = max > 0xffffffffu? 0xffffffffu: (DWORD) max;
         DWORD amountWritten = 0;
 
         if (!WriteFile(io->ptr, ptr, amount, &amountWritten, NULL) || amountWritten != amount) {
@@ -3381,7 +3378,7 @@ static int io_set_timeout(IO io, int type, long long usecs) {
 #if WINDOWS_OS
     if (!strcmp(desc, "tcp_socket") ||
         !strcmp(desc, "udp_socket")) {
-        DWORD timeout_ms = usecs / 1000;
+        DWORD timeout_ms = (DWORD) (usecs / 1000);
 
         if (usecs && !timeout_ms)
             timeout_ms = 1;

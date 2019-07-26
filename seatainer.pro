@@ -14,7 +14,7 @@ DEFINES += CC_TYPE_MISMATCH_ABORT \
            PLATFORMS_CONFIG
 
 win32 {
-    LIBS += -lWs2_32
+    LIBS += -lWs2_32 -ladvapi32
 }
 
 unix: !win32 {
@@ -43,7 +43,8 @@ SOURCES += \
     tinymalloc.c \
     IO/zlib_io.c \
     main.c \
-    seaerror.c
+    seaerror.c \
+    IO/limiter.c
 
 HEADERS += \
     ccdbllst.h \
@@ -68,7 +69,8 @@ HEADERS += \
     tinymalloc.h \
     platforms_config.h \
     IO/zlib_io.h \
-    seaerror.h
+    seaerror.h \
+    IO/limiter.h
 
 DISTFILES += \
     README.md \

@@ -41,7 +41,7 @@ static size_t hex_decode_read(void *ptr, size_t size, size_t count, void *userda
             return SIZE_MAX;
         }
 
-        ch = sptr - alpha;
+        ch = (int) (sptr - alpha);
 
         if (*nibble == 16)
             *nibble = ch;
@@ -94,9 +94,9 @@ static size_t hex_decode_write(const void *ptr, size_t size, size_t count, void 
             break;
 
         if (*nibble == 16)
-            *nibble = sptr - alpha;
+            *nibble = (int) (sptr - alpha);
         else {
-            if (io_putc((*nibble << 4) | (sptr - alpha), (IO) userdata) == EOF)
+            if (io_putc((*nibble << 4) | (int) (sptr - alpha), (IO) userdata) == EOF)
                 break;
             *nibble = 16;
         }

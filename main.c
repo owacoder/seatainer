@@ -534,6 +534,28 @@ void walk_dir(IO out, Directory directory) {
 
 int main()
 {
+    {
+        Url url = url_from_percent_encoded("http://www.google.com:80");
+        HttpState http = http_create_state_from_url(url, NULL, NULL);
+
+        printf("Connected.\n");
+        if (http_begin_request(http, "GET", url))
+            printf("Begin request failed.\n");
+        printf("Sent request.\n");
+        if (http_begin_response(http))
+            printf("Begin response failed.\n");
+        printf("Began response.\n");
+        if (io_copy(http_response_body(http), io_open_file(stdout)))
+            printf("Copy failed.\n");
+        printf("Retrieved response body.\n");
+        if (http_end_response(http))
+            printf("End request failed.\n");
+        printf("Request done.\n");
+
+        http_destroy_state(http);
+        return 0;
+    }
+
     Directory wdir = dir_open("/shared");
     walk_dir(io_open_file(stdout), wdir);
 

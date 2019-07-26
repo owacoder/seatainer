@@ -366,7 +366,7 @@ uint32_t utf8next(const char *utf8, const char **next) {
     codepoint = (unsigned char) *utf8 & (0xff >> bytesInCode);
 
     /* Obtain continuation bytes */
-    for (size_t i = 1; i < bytesInCode; ++i) {
+    for (int i = 1; i < bytesInCode; ++i) {
         if ((utf8[i] & 0xC0) != 0x80) /* Invalid continuation byte (note this handles a terminating NUL just fine) */
             return error;
 
@@ -427,6 +427,25 @@ char *strupper(char *str) {
         *ptr = toupper(*ptr & UCHAR_MAX);
 
     return str;
+}
+
+int strcmp_no_case(const char *lhs, const char *rhs) {
+    while (*lhs && *rhs) {
+        int l = tolower(*lhs++);
+        int r = tolower(*rhs++);
+
+        if (l < r)
+            return -1;
+        else if (r < l)
+            return 1;
+    }
+
+    if (*lhs)
+        return 1;
+    else if (*rhs)
+        return -1;
+
+    return 0;
 }
 
 char *strgather(char *strings[], size_t stringsCount) {

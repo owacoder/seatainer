@@ -407,7 +407,7 @@ int dirent_is_temporary(DirectoryEntry entry);
 
 int dirent_set_attributes(DirectoryEntry entry, unsigned long attributes);
 
-/* Obtain the UTC time of file traits */
+/* Obtain the local time of file traits */
 /* Returns 0 on success, -1 on failure (failure may occur because the requested trait doesn't exist for the platform) */
 int dirent_created_time(DirectoryEntry entry, time_t *t);
 int dirent_last_access_time(DirectoryEntry entry, time_t *t);

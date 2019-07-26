@@ -594,6 +594,7 @@ static int aes_flush(void *userdata, IO io) {
 static int aes_close(void *userdata, IO io) {
     UNUSED(io)
 
+    /* Clearing our private encryption data can't hurt :) */
     memset(userdata, 0, sizeof(struct AES_ctx));
 
     FREE(userdata);

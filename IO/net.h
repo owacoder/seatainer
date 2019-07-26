@@ -66,7 +66,22 @@ void io_net_destroy();
 IO io_open_tcp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err);
 IO io_open_udp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err);
 
-IO io_http_get(Url url, int *err);
+typedef struct HttpStateStruct *HttpState;
+typedef void (*HttpHeaderCallback)(const char *header, const char *value);
+
+HttpState http_create_state(IO http, HttpHeaderCallback responseHeaderCb);
+HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderCb, int *err);
+void http_destroy_state(HttpState state);
+
+int http_begin_request(HttpState state, const char *method, Url url);
+int http_add_header(HttpState state, const char *header, const char *value);
+int http_add_body(HttpState state, IO body, const char *mimeType);
+int http_add_body_cstr(HttpState state, const char *body, const char *mimeType);
+IO http_request_body(HttpState state, const char *mimeType);
+
+int http_begin_response(HttpState state);
+IO http_response_body(HttpState state);
+int http_end_response(HttpState state);
 #endif
 
 #ifdef __cplusplus
