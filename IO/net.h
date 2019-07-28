@@ -45,6 +45,7 @@ unsigned short url_get_port_number(Url url);
 const char *url_get_path(Url url);
 const char *url_get_query(Url url);
 const char *url_get_fragment(Url url);
+const char *url_get_path_and_query(Url url);
 const char *url_get_path_and_query_and_fragment(Url url);
 const char *url_get_percent_encoded(Url url);
 

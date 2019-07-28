@@ -321,6 +321,18 @@ const char *url_get_fragment(Url url) {
     return url->fragment;
 }
 
+const char *url_get_path_and_query(Url url) {
+    if (url->fragment)
+        url->fragment[-1] = 0;
+
+    if (url->query)
+        url->query[-1] = '?';
+
+    url->path[0] = url->path_first_char;
+
+    return url->path;
+}
+
 const char *url_get_path_and_query_and_fragment(Url url) {
     if (url->fragment)
         url->fragment[-1] = '#';
@@ -814,6 +826,182 @@ IO io_open_ssl_socket(const char *host, unsigned short port, enum NetAddressType
 
     return io_open_custom(&net_callbacks, &params, mode);
 }
+
+#if WINDOWS_OS
+int ssl_get_system_certificates(IO out, const char *section) {
+    HCERTSTORE hStore;
+    PCCERT_CONTEXT pCertContext = NULL;
+    int result = 0;
+
+    if (!(hStore = CertOpenStore(
+              CERT_STORE_PROV_SYSTEM_A,
+              0,
+              NULL,
+              CERT_SYSTEM_STORE_CURRENT_USER,
+              section)))
+        return GetLastError();
+
+    do
+    {
+        if (pCertContext = CertFindCertificateInStore(
+                  hStore,
+                  X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
+                  0,
+                  CERT_FIND_ANY,
+                  NULL,
+                  pCertContext))
+        {
+            SYSTEMTIME systemNow;
+            FILETIME fileNow;
+            ULARGE_INTEGER diff1, diff2;
+            const DWORD flags = CRYPT_STRING_BASE64HEADER;
+            DWORD len;
+
+            // Only accept currently valid certificates
+            GetSystemTime(&systemNow);
+
+            if (!SystemTimeToFileTime(
+                      &systemNow,
+                      &fileNow))
+                break;
+
+            diff1.LowPart = fileNow.dwLowDateTime;
+            diff1.HighPart = fileNow.dwHighDateTime;
+
+            diff2.LowPart = pCertContext->pCertInfo->NotBefore.dwLowDateTime;
+            diff2.HighPart = pCertContext->pCertInfo->NotBefore.dwHighDateTime;
+
+            if (MIN(diff1.QuadPart, diff2.QuadPart) < diff2.QuadPart)
+                continue;
+
+            diff2.LowPart = pCertContext->pCertInfo->NotAfter.dwLowDateTime;
+            diff2.HighPart = pCertContext->pCertInfo->NotAfter.dwHighDateTime;
+
+            if (MAX(diff1.QuadPart, diff2.QuadPart) > diff2.QuadPart)
+                continue;
+
+            // Get Base64 string length
+            if (!CryptBinaryToStringA(
+                      pCertContext->pbCertEncoded,
+                      pCertContext->cbCertEncoded,
+                      flags,
+                      NULL,
+                      &len))
+                break;
+
+            if (len)
+            {
+                PCHAR str = MALLOC(len);
+                if (str == NULL) {
+                    result = CC_ENOMEM;
+                    break;
+                }
+
+                if (!CryptBinaryToStringA(
+                          pCertContext->pbCertEncoded,
+                          pCertContext->cbCertEncoded,
+                          flags,
+                          str,
+                          &len))
+                {
+                    FREE(str);
+                    result = GetLastError();
+                    break;
+                }
+
+                if (io_write(str, 1, len, out) != out ||
+                        io_puts("\r\n", out)) {
+                    FREE(str);
+                    result = io_error(out);
+                    break;
+                }
+
+                FREE(str);
+            }
+        }
+    } while (pCertContext);
+
+    if (!pCertContext)
+        CertFreeCertificateContext(pCertContext);
+
+    CertCloseStore(
+              hStore,
+              CERT_CLOSE_STORE_FORCE_FLAG);
+
+    return result;
+}
+
+int ssl_load_system_certificates(SSL_CTX *ctx) {
+    char name[L_tmpnam];
+
+    tmpnam(name);
+
+    /* Write system certificates to temporary file */
+    IO tmp = io_open(name, "wb");
+    if (tmp == NULL)
+        return CC_ENOMEM;
+
+    int result = ssl_get_system_certificates(tmp, "CA");
+    if (result)
+        goto cleanup;
+
+    io_close(tmp);
+    tmp = NULL;
+
+    /* Then load into context and remove file */
+    if (!SSL_CTX_load_verify_locations(ctx, name, NULL))
+        goto cleanup;
+
+    remove(name);
+
+    return 0;
+
+cleanup:
+    io_close(tmp);
+    remove(name);
+    return result;
+}
+#else
+int ssl_load_system_certificates(SSL_CTX *ctx) {
+    const char *locations[] = {
+        "/etc/ssl/certs/ca-certificates.crt",   /* Debian, Ubuntu, Gentoo */
+        "/etc/pki/tls/certs/ca-bundle.crt",     /* Fedora/RHEL 6 */
+        "/etc/ssl/ca-bundle.pem",               /* OpenSUSE */
+        "/etc/pki/tls/cacert.pem",              /* OpenELEC */
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", /* CentOS/RHEL 7 */
+        NULL
+    };
+
+    const char *directories[] = {
+        "/etc/ssl/certs",                       /* SLES10/SLES11 */
+        "/system/etc/security/cacerts",         /* Android */
+        "/usr/local/share/certs",               /* FreeBSD */
+        "/etc/pki/tls/certs",                   /* Fedora/RHEL */
+        "/etc/openssl/certs",                   /* NetBSD */
+        NULL
+    };
+
+    const char **location = locations;
+    for (; *location; ++location) {
+        FILE *f = fopen(*location, "rb");
+        if (f == NULL)
+            continue;
+
+        fclose(f);
+
+        if (SSL_CTX_load_verify_locations(ctx, *location, NULL))
+            return 0;
+    }
+
+    const char **directory = directories;
+    for (; *directory; ++directory) {
+        if (SSL_CTX_load_verify_locations(ctx, NULL, *directory))
+            return 0;
+    }
+
+    return CC_EREAD;
+}
+#endif
 #endif
 
 struct HttpChunkedStruct {
@@ -1027,9 +1215,24 @@ HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderC
         return NULL;
     }
 
-    state->io = io_open_tcp_socket(url_get_host(url), url_get_port_number(url), NetAddressAny, "rwb", err);
+#ifdef CC_INCLUDE_SSL
+    if (!strcmp(url_get_scheme(url), "https")) {
+        state->io = io_open_ssl_socket(url_get_host(url), url_get_port_number(url), NetAddressAny, "rwb", NULL, err);
+    } else
+#endif
+    if (!strcmp(url_get_scheme(url), "http"))
+        state->io = io_open_tcp_socket(url_get_host(url), url_get_port_number(url), NetAddressAny, "rwb", err);
+    else {
+        FREE(state);
+        if (err)
+            *err = CC_EINVAL;
+        return NULL;
+    }
+
     if (state->io == NULL) {
         FREE(state);
+        if (err)
+            *err = CC_ENOMEM;
         return NULL;
     }
     state->ownsIO = 1;
@@ -1055,8 +1258,8 @@ int http_begin_request(HttpState state, const char *method, Url url) {
     io_close(state->body);
     state->body = NULL;
 
-    if (io_printf(state->io, "%s %s HTTP/1.1\r\n", method, url_get_path_and_query_and_fragment(url)[0]?
-                  url_get_path_and_query_and_fragment(url): "/") < 0 ||
+    if (io_printf(state->io, "%s %s HTTP/1.1\r\n", method, url_get_path_and_query(url)[0]?
+                  url_get_path_and_query(url): "/") < 0 ||
         io_printf(state->io, "Host: %s\r\n", url_get_host_and_port(url)) < 0)
         goto cleanup;
 
