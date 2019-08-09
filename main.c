@@ -650,7 +650,7 @@ int main()
 
     int err;
     const char *host = "www.google.com";
-    IO net = io_open_ssl_socket(host, 443, NetAddressAny, "rwb", NULL, &err);
+    IO net = io_open_tcp_socket(host, 443, NetAddressAny, "rwb", &err);
     IO stdio = io_open_file(stdout);
 
     io_printf(net, "GET /en HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", host);

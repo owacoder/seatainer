@@ -1235,6 +1235,7 @@ HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderC
             *err = CC_ENOMEM;
         return NULL;
     }
+
     state->ownsIO = 1;
     state->responseHeaderCb = responseHeaderCb;
 
