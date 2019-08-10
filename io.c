@@ -2030,6 +2030,64 @@ int io_puts(const char *str, IO io) {
     }
 }
 
+size_t io_put_uint16_le(IO io, uint16_t value) {
+    char buf[2];
+    buf[0] = value & 0xff;
+    buf[1] = value >> 8;
+    return io_write(buf, 2, 1, io);
+}
+
+size_t io_put_uint16_be(IO io, uint16_t value) {
+    char buf[2];
+    buf[0] = value >> 8;
+    buf[1] = value & 0xff;
+    return io_write(buf, 2, 1, io);
+}
+
+size_t io_put_uint32_le(IO io, uint32_t value) {
+    char buf[4];
+    buf[0] = (value      ) & 0xff;
+    buf[1] = (value >>  8) & 0xff;
+    buf[2] = (value >> 16) & 0xff;
+    buf[3] = (value >> 24) & 0xff;
+    return io_write(buf, 4, 1, io);
+}
+
+size_t io_put_uint32_be(IO io, uint32_t value) {
+    char buf[4];
+    buf[0] = (value >> 24) & 0xff;
+    buf[1] = (value >> 16) & 0xff;
+    buf[2] = (value >>  8) & 0xff;
+    buf[3] = (value      ) & 0xff;
+    return io_write(buf, 4, 1, io);
+}
+
+size_t io_put_uint64_le(IO io, uint64_t value) {
+    char buf[8];
+    buf[0] = (value      ) & 0xff;
+    buf[1] = (value >>  8) & 0xff;
+    buf[2] = (value >> 16) & 0xff;
+    buf[3] = (value >> 24) & 0xff;
+    buf[4] = (value >> 32) & 0xff;
+    buf[5] = (value >> 40) & 0xff;
+    buf[6] = (value >> 48) & 0xff;
+    buf[7] = (value >> 56) & 0xff;
+    return io_write(buf, 8, 1, io);
+}
+
+size_t io_put_uint64_be(IO io, uint64_t value) {
+    char buf[8];
+    buf[0] = (value >> 56) & 0xff;
+    buf[1] = (value >> 48) & 0xff;
+    buf[2] = (value >> 40) & 0xff;
+    buf[3] = (value >> 32) & 0xff;
+    buf[4] = (value >> 24) & 0xff;
+    buf[5] = (value >> 16) & 0xff;
+    buf[6] = (value >>  8) & 0xff;
+    buf[7] = (value      ) & 0xff;
+    return io_write(buf, 8, 1, io);
+}
+
 static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO io) {
     size_t max = size*count, totalRead = 0;
 

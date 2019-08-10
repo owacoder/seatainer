@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdint.h>
 
 #include "platforms.h"
 
@@ -502,6 +503,21 @@ int io_printf(IO io, const char *fmt, ...);
  * @return The character written, or EOF if an error occurred.
  */
 int io_putc(int ch, IO io);
+
+/** @brief Writes a value in binary format to an IO device.
+ *
+ * If the stream is opened as a text stream, the behavior is undefined.
+ *
+ * @param io The IO device to write to.
+ * @param value The value to write to @p io.
+ * @return 1 on success, 0 if an error occurred.
+ */
+size_t io_put_uint16_le(IO io, uint16_t value);
+size_t io_put_uint16_be(IO io, uint16_t value);
+size_t io_put_uint32_le(IO io, uint32_t value);
+size_t io_put_uint32_be(IO io, uint32_t value);
+size_t io_put_uint64_le(IO io, uint64_t value);
+size_t io_put_uint64_be(IO io, uint64_t value);
 
 /** @brief Writes a string to an IO device.
  *
