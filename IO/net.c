@@ -1282,8 +1282,9 @@ int http_add_header(HttpState state, const char *header, const char *value) {
             return CC_EINVAL;
         state->flags |= IO_HTTP_CHUNKED_BODY;
     } else if (!strcmp_no_case(header, "Content-Length")) {
-        if ((state->flags & IO_HTTP_CHUNKED_BODY) || sscanf(value, "%llu", &state->contentLength) != 1)
+        if ((state->flags & IO_HTTP_CHUNKED_BODY))
             return CC_EINVAL;
+        state->contentLength = strtoull(value, NULL, 10);
         state->flags |= IO_HTTP_DEFINED_BODY;
     }
 
@@ -1424,8 +1425,7 @@ static int http_read_headers(HttpState state) {
         if (!strcmp_no_case(header, "Transfer-Encoding") && strstr(value, "chunked"))
             state->flags |= IO_HTTP_CHUNKED_BODY;
         else if (!strcmp_no_case(header, "Content-Length")) {
-            if (sscanf(value, "%llu", &state->contentLength) != 1)
-                goto cleanup;
+            state->contentLength = strtoull(value, NULL, 10);
             state->flags |= IO_HTTP_DEFINED_BODY;
         }
 
