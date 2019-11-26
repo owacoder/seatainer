@@ -24,7 +24,7 @@ SRCFILES = ccdbllst.c \
            IO/zlib_io.c \
            IO/padding/bit.c \
            IO/padding/pkcs7.c \
-           io.c \
+           ccio.c \
            dir.c \
            main.c \
            utility.c \
@@ -46,7 +46,7 @@ HEADERFILES = ccdbllst.h \
               IO/zlib_io.h \
               IO/padding/bit.h \
               IO/padding/pkcs7.h \
-              io.h \
+              ccio.h \
               cclnklst.h \
               dir.h \
               platforms.h \

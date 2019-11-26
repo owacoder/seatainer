@@ -27,16 +27,16 @@ struct UrlStruct {
     /** Contains the path of the URL, percent-encoded. Will never be `NULL` but may be empty */
     char *path;
 
-    /** Contains the first character of the path. This is so the path can be reconstructed if the first character must be used as a NUL-terminator for `host` or `port` */
-    char path_first_char;
-
     /** Contains the query of the URL, percent-encoded. Will be `NULL` if no query is specified */
     char *query;
 
     /** Contains the fragment of the URL, percent-encoded. Will be `NULL` if no query is specified */
     char *fragment;
 
-    /** Contains the entire URL, percent-encoded. However, this buffer is pointed to by all the other URL sections (with the exception of `url`), and so will have NUL characters embedded in it. */
+    /** Contains the first character of the path. This is so the path can be reconstructed if the first character must be used as a NUL-terminator for `host` or `port` */
+    char path_first_char;
+
+    /** Contains the entire URL, percent-encoded. However, this buffer is pointed to by all the other URL sections, and so will have NUL characters embedded in it. */
     char url_buffer[];
 };
 
@@ -403,28 +403,56 @@ struct NetContext {
 };
 
 /* If this function returns CC_EPIPE, don't use the underlying file descriptor anymore */
-static int net_upgrade_to_ssl(void *userdata, IO io) {
+static int net_upgrade_to_ssl(const char *host, void *userdata, IO io) {
     struct NetContext *context = userdata;
 
+    /* Build a context, if no context is assigned by the user */
     if (context->ctx == NULL) {
         context->ownsCtx = 1;
         context->ctx = SSL_CTX_new(TLS_client_method());
         if (context->ctx == NULL)
             return CC_ENOMEM;
 
-        /* Only allow TLSv1.0, TLSv1.1, TLSv1.2, TLSv1.3 */
-        if (SSL_CTX_set_min_proto_version(context->ctx, TLS1_VERSION) != 1)
+        /* Only allow TLSv1.2 and TLSv1.3 */
+        if (SSL_CTX_set_min_proto_version(context->ctx, TLS1_2_VERSION) != 1)
             return CC_EPROTO;
+
+        /* Use system certificates */
+        if (ssl_load_system_certificates(context->ctx))
+            return CC_EREAD;
+
+        /* Make sure we verify the certificates */
+        SSL_CTX_set_verify(context->ctx, SSL_VERIFY_PEER, NULL);
     }
 
     context->socket = SSL_new(context->ctx);
     if (context->socket == NULL)
         return CC_ENOMEM;
 
+    /* Set up Server Name Indication for client */
+    /* See https://stackoverflow.com/questions/5113333/how-to-implement-server-name-indication-sni */
+    if (SSL_set_tlsext_host_name(context->socket, host) != 1)
+        return CC_EPROTO;
+
+    /* Set up automatic hostname verification (OpenSSL v1.0.2 or newer) */
+    /* See https://wiki.openssl.org/index.php/Hostname_validation */
+    X509_VERIFY_PARAM *x509_verify = SSL_get0_param(context->socket);
+
+    X509_VERIFY_PARAM_set_hostflags(x509_verify, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+    if (!X509_VERIFY_PARAM_set1_host(x509_verify, host, strlen(host)))
+        return CC_EPROTO;
+
+    /* Assign actual file descriptor to socket */
     if (SSL_set_fd(context->socket, context->fd) != 1)
         return CC_EBADF;
 
+    /* Actual connection attempt */
     int err = SSL_connect(context->socket);
+
+    /* Then ensure that the hostname verification went well. */
+    if (SSL_get_verify_result(context->socket) != X509_V_OK)
+        return CC_EPROTO;
+
     if (err == 1) {
         CC_SOCKET_TYPE(io) = CC_SSL_SOCKET;
         return 0;
@@ -452,7 +480,7 @@ struct SocketInitializationParams {
 #endif
 };
 
-void io_net_init() {
+void io_net_init(void) {
 #if !WINDOWS_OS
     signal(SIGPIPE, SIG_IGN);
 #endif
@@ -463,7 +491,7 @@ void io_net_init() {
 #endif
 }
 
-void io_net_destroy() {
+void io_net_destroy(void) {
 
 }
 
@@ -578,6 +606,7 @@ static size_t net_write(const void *ptr, size_t size, size_t count, void *userda
 static void *net_open(void *userdata, IO io) {
     UNUSED(io)
     struct SocketInitializationParams *params = userdata;
+    SOCKET sock = INVALID_SOCKET;
 
     struct NetContext *context = CALLOC(1, sizeof(*context));
     if (context == NULL) {
@@ -635,7 +664,6 @@ static void *net_open(void *userdata, IO io) {
         goto cleanup;
     }
 
-    SOCKET sock = INVALID_SOCKET;
     curAddr = result;
 
     for (; curAddr; curAddr = curAddr->ai_next) {
@@ -683,9 +711,11 @@ static void *net_open(void *userdata, IO io) {
             context->ownsCtx = 0;
 
             CC_SOCKET_TYPE(io) = CC_TCP_SOCKET; /* Downgrade specifier to TCP; it will be upgraded in net_upgrade_to_ssl() */
-            int result = net_upgrade_to_ssl(context, io);
+            int result = net_upgrade_to_ssl(params->host, context, io);
             if (result) {
-                *params->err = result;
+                printf("Error: %s\n", error_description(result));
+                if (params->err)
+                    *params->err = result;
                 goto cleanup;
             }
         }
@@ -1207,7 +1237,7 @@ HttpState http_create_state(IO http, HttpHeaderCallback responseHeaderCb) {
     return state;
 }
 
-HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderCb, int *err) {
+HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderCb, int *err, void *ssl_ctx) {
     HttpState state = CALLOC(1, sizeof(*state));
     if (state == NULL) {
         if (err)
@@ -1217,7 +1247,7 @@ HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderC
 
 #ifdef CC_INCLUDE_SSL
     if (!strcmp(url_get_scheme(url), "https")) {
-        state->io = io_open_ssl_socket(url_get_host(url), url_get_port_number(url), NetAddressAny, "rwb", NULL, err);
+        state->io = io_open_ssl_socket(url_get_host(url), url_get_port_number(url), NetAddressAny, "rwb", ssl_ctx, err);
     } else
 #endif
     if (!strcmp(url_get_scheme(url), "http"))
@@ -1231,8 +1261,6 @@ HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderC
 
     if (state->io == NULL) {
         FREE(state);
-        if (err)
-            *err = CC_ENOMEM;
         return NULL;
     }
 
@@ -1433,6 +1461,9 @@ static int http_read_headers(HttpState state) {
         if (state->responseHeaderCb)
             state->responseHeaderCb(header, value);
     }
+
+    FREE(io_underlying_buffer(headerString));
+    io_close(headerString);
 
     return 0;
 

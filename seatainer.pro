@@ -11,6 +11,7 @@ DEFINES += CC_TYPE_MISMATCH_ABORT \
            CC_BAD_PARAM_ABORT \
            CC_NO_SUCH_METHOD_ABORT \
            CC_INCLUDE_NETWORK \
+           CC_INCLUDE_SSL \
            PLATFORMS_CONFIG
 
 win32 {
@@ -29,7 +30,6 @@ SOURCES += \
     element.c \
     utility.c \
     cchash.c \
-    io.c \
     IO/crypto_rand.c \
     IO/hex.c \
     IO/md5.c \
@@ -44,7 +44,8 @@ SOURCES += \
     IO/zlib_io.c \
     main.c \
     seaerror.c \
-    IO/limiter.c
+    IO/limiter.c \
+    ccio.c
 
 HEADERS += \
     ccdbllst.h \
@@ -55,7 +56,6 @@ HEADERS += \
     utility.h \
     cchash.h \
     platforms.h \
-    io.h \
     IO/crypto_rand.h \
     IO/hex.h \
     IO/md5.h \
@@ -70,7 +70,8 @@ HEADERS += \
     platforms_config.h \
     IO/zlib_io.h \
     seaerror.h \
-    IO/limiter.h
+    IO/limiter.h \
+    ccio.h
 
 DISTFILES += \
     README.md \

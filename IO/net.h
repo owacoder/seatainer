@@ -1,7 +1,7 @@
 #ifndef NET_H
 #define NET_H
 
-#include "../io.h"
+#include "../ccio.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -61,8 +61,8 @@ enum NetAddressType {
     NetAddressIPv6
 };
 
-void io_net_init();
-void io_net_destroy();
+void io_net_init(void);
+void io_net_destroy(void);
 
 IO io_open_tcp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err);
 IO io_open_udp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err);
@@ -71,7 +71,7 @@ typedef struct HttpStateStruct *HttpState;
 typedef void (*HttpHeaderCallback)(const char *header, const char *value);
 
 HttpState http_create_state(IO http, HttpHeaderCallback responseHeaderCb);
-HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderCb, int *err);
+HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderCb, int *err, void *ssl_ctx);
 void http_destroy_state(HttpState state);
 
 int http_begin_request(HttpState state, const char *method, Url url);
@@ -86,8 +86,10 @@ int http_end_response(HttpState state);
 
 #ifdef CC_INCLUDE_SSL
 #include <openssl/ssl.h>
+#include <openssl/x509v3.h>
 
 IO io_open_ssl_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, SSL_CTX *ctx, int *err);
+int ssl_load_system_certificates(SSL_CTX *ctx);
 #endif
 #endif
 

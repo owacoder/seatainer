@@ -65,7 +65,7 @@ try_new_glob:
 
                     /* Pattern has specific char to match after star, so search for it (this is optional as an optimization) */
                     if (*positions[current_position].patternpos != '[' && *positions[current_position].patternpos != '?') {
-                        const char *str = strchr((char *) positions[current_position].strpos, *positions[current_position].patternpos);
+                        const char *str = (const char *) strchr(positions[current_position].strpos, *positions[current_position].patternpos);
                         if (str == NULL)
                             return -1; /* Since stars are minimal matchers, if the character afterward does not exist, the string must not match */
                         positions[current_position].strpos = str;
@@ -110,7 +110,7 @@ try_new_glob:
                         positions[current_position].patternpos = lastCharInSet + 1;
                     } else { /* Complex set, possibly negated */
                         int matched = negateSet; /* If matched is non-zero, the set matches */
-                        unsigned char strChr = *positions[current_position].strpos;
+                        unsigned char strChr = (unsigned char) *positions[current_position].strpos;
 
                         for (; positions[current_position].patternpos <= lastCharInSet; ++positions[current_position].patternpos) {
                             if (positions[current_position].patternpos[1] == '-') { /* Compute range */
@@ -167,7 +167,7 @@ stop_checking_glob_entry:
         } else { /* Nested glob, restart current glob at next string position */
             /* Pattern has specific char to match after star, so search for it (this is optional as an optimization) */
             if (*positions[current_position-1].patternpos != '[' && *positions[current_position-1].patternpos != '?') {
-                const char *str = strchr((char *) positions[current_position-1].strpos+1, *positions[current_position-1].patternpos);
+                const char *str = strchr(positions[current_position-1].strpos+1, *positions[current_position-1].patternpos);
                 if (str == NULL)
                     return -1; /* Since stars are minimal matchers, if the character afterward does not exist, the string must not match */
                 positions[current_position-1].strpos = str;
@@ -222,7 +222,7 @@ try_new_glob:
 
                     /* Pattern has specific char to match after star, so search for it (this is optional as an optimization) */
                     if (*positions[current_position].patternpos != '[' && *positions[current_position].patternpos != '?') {
-                        const char *str = utf8chr((char *) positions[current_position].strpos, utf8next(positions[current_position].patternpos, NULL));
+                        const char *str = utf8chr(positions[current_position].strpos, utf8next(positions[current_position].patternpos, NULL));
                         if (str == NULL)
                             return -1; /* Since stars are minimal matchers, if the character afterward does not exist, the string must not match */
                         positions[current_position].strpos = str;

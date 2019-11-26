@@ -7,7 +7,7 @@
 #ifndef CRYPTO_RAND_H
 #define CRYPTO_RAND_H
 
-#include "../io.h"
+#include "../ccio.h"
 
 #ifdef __cplusplus
 extern "C" {

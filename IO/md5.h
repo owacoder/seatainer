@@ -7,7 +7,7 @@
 #ifndef MD5_H
 #define MD5_H
 
-#include "../io.h"
+#include "../ccio.h"
 
 #ifdef __cplusplus
 extern "C" {

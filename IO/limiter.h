@@ -1,7 +1,7 @@
 #ifndef LIMITER_H
 #define LIMITER_H
 
-#include "../io.h"
+#include "../ccio.h"
 
 /** @brief Opens a device to limit IO to a specific subset of another device.
  *

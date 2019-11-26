@@ -134,7 +134,7 @@ static const char *limiter_what(void *userdata, IO io) {
     return "limiter";
 }
 
-struct InputOutputDeviceCallbacks limiter_callbacks = {
+static const struct InputOutputDeviceCallbacks limiter_callbacks = {
     .read = limiter_read,
     .write = limiter_write,
     .open = NULL,

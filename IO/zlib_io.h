@@ -1,7 +1,7 @@
 #ifndef ZLIB_IO_H
 #define ZLIB_IO_H
 
-#include "../io.h"
+#include "../ccio.h"
 
 #ifdef CC_INCLUDE_ZLIB
 #include <zlib.h>

@@ -5,7 +5,7 @@
 #include "ccvector.h"
 #include "cchash.h"
 #include "ccstring.h"
-#include "io.h"
+#include "ccio.h"
 #include "platforms.h"
 #include "utility.h"
 #include "seaerror.h"
@@ -535,8 +535,14 @@ void walk_dir(IO out, Directory directory) {
 int main()
 {
     {
-        Url url = url_from_percent_encoded("http://www.google.com:80");
-        HttpState http = http_create_state_from_url(url, NULL, NULL);
+        Url url = url_from_percent_encoded("https://google.com");
+        int err;
+        HttpState http = http_create_state_from_url(url, NULL, &err, NULL);
+
+        if (err) {
+            printf("Error: %s\n", error_description(err));
+            return 1;
+        }
 
         printf("Connected.\n");
         if (http_begin_request(http, "GET", url))

@@ -424,6 +424,19 @@ int io_eof(IO io);
  */
 int io_flush(IO io);
 
+/** @brief Resizes an IO device to the given size.
+ *
+ * All input or output past the given size is discarded, if the IO device is larger than `size`.
+ * If the IO device is smaller than `size`, the device is resized to `size` and the new data is filled with zeroes.
+ *
+ * This function will fail on read-only devices.
+ *
+ * @param io The IO device to truncate.
+ * @param size The size to set the IO device to.
+ * @return Zero on success, or EOF if the resize operation failed.
+ */
+int io_resize(IO io, long long size);
+
 /** @brief Gets the next character from the input stream.
  *
  * Continued calls to this function after EOF is reached will continue to return EOF and will not create an error.

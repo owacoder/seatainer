@@ -465,5 +465,10 @@ static const struct InputOutputDeviceCallbacks sha1_callbacks = {
 };
 
 IO io_open_sha1(IO io, const char *mode) {
-    return io_open_custom(&sha1_callbacks, io, mode);
+    IO result = io_open_custom(&sha1_callbacks, io, mode);
+
+    if (result != NULL && strchr(mode, '<') != NULL)
+        ((struct Sha1 *) io_userdata(result))->calculate = calculate_sha1;
+
+    return result;
 }
