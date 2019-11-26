@@ -245,6 +245,35 @@ struct InputOutputDeviceCallbacks {
     const char *(*what)(void *userdata, IO io);
 };
 
+/* Whether IO device is readable or not */
+#define IO_FLAG_READABLE ((unsigned) 0x01)
+/* Whether IO device is writable or not */
+#define IO_FLAG_WRITABLE ((unsigned) 0x02)
+/* Whether IO device is opened for update or not */
+#define IO_FLAG_UPDATE ((unsigned) 0x04)
+/* Whether IO device is opened for append or not */
+#define IO_FLAG_APPEND ((unsigned) 0x08)
+/* Whether IO device had an error */
+#define IO_FLAG_ERROR ((unsigned) 0x10)
+/* Whether IO device reached the end of input */
+#define IO_FLAG_EOF ((unsigned) 0x20)
+/* Whether IO device should fail if the file exists already */
+#define IO_FLAG_FAIL_IF_EXISTS ((unsigned) 0x40)
+/* Whether IO device is in use (used for static-storage IO device allocation) */
+#define IO_FLAG_IN_USE ((unsigned) 0x100)
+/* Whether IO device is dynamically allocated and should be freed */
+#define IO_FLAG_DYNAMIC ((unsigned) 0x200)
+/* Whether IO device owns its vbuf */
+#define IO_FLAG_OWNS_BUFFER ((unsigned) 0x400)
+/* Whether IO device was just read from */
+#define IO_FLAG_HAS_JUST_READ ((unsigned) 0x800)
+/* Whether IO device was just written to */
+#define IO_FLAG_HAS_JUST_WRITTEN ((unsigned) 0x1000)
+/* Whether IO device is opened for text or binary */
+#define IO_FLAG_BINARY ((unsigned) 0x2000)
+
+#define IO_FLAG_RESET (IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_UPDATE | IO_FLAG_APPEND | IO_FLAG_ERROR | IO_FLAG_EOF | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_BINARY)
+
 /* For Large File Support on Linux, the compile flag -D_FILE_OFFSET_BITS=64 must be used for
  * io_[seek/tell]64() functions to work with 64-bit offsets. io.c specifies these defines */
 
@@ -291,6 +320,13 @@ int io_readable(IO io);
  */
 int io_writable(IO io);
 
+/** @brief Returns the IO flags specified for a device. The flags are ORed together.
+ *
+ * @param io The IO device on which to get the flags.
+ * @return A bit vector containing the flags currently set on the device. There is no way to set the flags on an IO device after it's opened.
+ */
+unsigned io_flags(IO io);
+
 /** @brief Detect whether the last operation performed on an IO device was a read operation.
  *
  * @param io The IO device on which to check the last operation.
@@ -304,6 +340,24 @@ int io_just_read(IO io);
  * @return Non-zero if @p io was just written to, zero otherwise.
  */
 int io_just_wrote(IO io);
+
+/** @brief Detect whether an IO device is opened for update.
+ *
+ * Opening a stream for update does not clear the data that is already present, but allows writing.
+ *
+ * @param io The IO device to check the update status of.
+ * @return Non-zero if @p io is opened for update.
+ */
+int io_opened_for_update(IO io);
+
+/** @brief Detect whether an IO device is opened for append.
+ *
+ * Opening a stream for append does not clear the data that is already present, and positions the write point at the end.
+ *
+ * @param io The IO device to check the append status of.
+ * @return Non-zero if @p io is opened for append.
+ */
+int io_opened_for_append(IO io);
 
 /** @brief Detect whether an IO device is opened as a binary device.
  *

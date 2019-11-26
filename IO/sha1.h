@@ -18,8 +18,13 @@ extern "C" {
  * Open as "w" only: push data to the hash function and push the hash to the underlying IO device.
  * When the SHA1 IO device is closed, the hash will be written to the underlying IO device. If the write fails, the close fails as well.
  *
- * Open as "rw": push data to the hash function and read the hash back.
+ * Open as "rw": push data to the hash function and read the result back.
+ * Once data is read, a new hash is begun with the next write to the device. TODO: this means the empty hash can never be computed again. Fix?
+ * When the SHA1 IO device is closed, nothing will be written to the underlying IO device.
+ *
+ * Open as "rw+": push data to the hash function and read the intermediate hash back.
  * The hash of the currently submitted data can be obtained at any point by reading 16 bytes.
+ * There is no way to reset the device to start a new hash.
  * When the SHA1 IO device is closed, nothing will be written to the underlying IO device.
  *
  */

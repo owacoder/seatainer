@@ -344,6 +344,7 @@ void test_small_dll()
 #include "IO/sha1.h"
 #include "IO/net.h"
 #include "IO/tee.h"
+#include "IO/concat.h"
 #include "IO/zlib_io.h"
 #include "IO/padding/bit.h"
 #include "IO/padding/pkcs7.h"
@@ -534,6 +535,20 @@ void walk_dir(IO out, Directory directory) {
 
 int main()
 {
+    {
+        char buf1[10], buf2[10];
+
+        IO lhs = io_open_buffer(buf1, sizeof(buf1), "wb");
+        IO rhs = io_open_buffer(buf2, sizeof(buf2), "wb");
+        IO concat = io_open_concat(lhs, rhs, "wb");
+
+        io_puts("ABCDEFGHIJKLMNOPQRSTU", concat);
+
+        printf("%.10s%.10s\n%s\n", buf1, buf2, error_description(io_error(concat)));
+
+        return 0;
+    }
+
     {
         Url url = url_from_percent_encoded("https://google.com");
         int err;

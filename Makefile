@@ -15,8 +15,10 @@ SRCFILES = ccdbllst.c \
            cclnklst.c \
            element.c \
            IO/aes.c \
+           IO/concat.c \
            IO/crypto_rand.c \
            IO/hex.c \
+           IO/limiter.c \
            IO/md5.c \
            IO/sha1.c \
            IO/net.c \
@@ -37,8 +39,10 @@ HEADERFILES = ccdbllst.h \
               cchash.h \
               ccvector.h \
               IO/aes.h \
+              IO/concat.h \
               IO/crypto_rand.h \
               IO/hex.h \
+              IO/limiter.h \
               IO/md5.h \
               IO/sha1.h \
               IO/net.h \

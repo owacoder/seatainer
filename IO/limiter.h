@@ -1,3 +1,9 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2019
+ */
+
 #ifndef LIMITER_H
 #define LIMITER_H
 

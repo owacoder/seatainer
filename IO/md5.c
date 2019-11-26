@@ -48,6 +48,14 @@ struct Md5 {
     int read;
 };
 
+static void md5_init_state(struct Md5 *md5) {
+    md5->state[0] = 0x67452301;
+    md5->state[1] = 0xefcdab89;
+    md5->state[2] = 0x98badcfe;
+    md5->state[3] = 0x10325476;
+    md5->message_len = 0;
+}
+
 static void calculate_md5(struct Md5 *md5) {
     uint32_t wbuffer[16] = {0, 0, 0, 0,
                             0, 0, 0, 0,
@@ -123,10 +131,6 @@ static void *md5_open(void *userdata, IO io) {
         return NULL;
 
     result->io = userdata;
-    result->state[0] = 0x67452301;
-    result->state[1] = 0xefcdab89;
-    result->state[2] = 0x98badcfe;
-    result->state[3] = 0x10325476;
 
     return result;
 }
@@ -203,6 +207,9 @@ static size_t md5_write(const void *ptr, size_t size, size_t count, void *userda
     struct Md5 *md5 = userdata;
     size_t max = size*count;
     const unsigned char *cptr = ptr;
+
+    if (io_just_read(io) && !io_opened_for_update(io))
+        md5_init_state(md5);
 
     md5->message_len += 8 * max;
     md5->read = 0;

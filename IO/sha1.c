@@ -286,6 +286,15 @@ static void end_sha1(struct Sha1 *sha1) {
     sha1->calculate(sha1);
 }
 
+static void sha1_init_state(struct Sha1 *ctx) {
+    ctx->state[0] = 0x67452301;
+    ctx->state[1] = 0xefcdab89;
+    ctx->state[2] = 0x98badcfe;
+    ctx->state[3] = 0x10325476;
+    ctx->state[4] = 0xc3d2e1f0;
+    ctx->message_len = 0;
+}
+
 static void *sha1_open(void *userdata, IO io) {
     UNUSED(io)
 
@@ -295,11 +304,7 @@ static void *sha1_open(void *userdata, IO io) {
 
     result->io = userdata;
     result->calculate = calculate_sha1;
-    result->state[0] = 0x67452301;
-    result->state[1] = 0xefcdab89;
-    result->state[2] = 0x98badcfe;
-    result->state[3] = 0x10325476;
-    result->state[4] = 0xc3d2e1f0;
+    sha1_init_state(result);
 
 #ifdef SHA1_COMPILE_SUPPORTS_X86_INTRINSICS
 #if X86_CPU | AMD64_CPU
@@ -388,6 +393,9 @@ static size_t sha1_write(const void *ptr, size_t size, size_t count, void *userd
     size_t max = size*count;
     const unsigned char *cptr = ptr;
 
+    if (io_just_read(io) && !io_opened_for_update(io))
+        sha1_init_state(sha1);
+
     sha1->message_len += 8 * max;
     sha1->read = 0;
     while (max) {
@@ -406,6 +414,14 @@ static size_t sha1_write(const void *ptr, size_t size, size_t count, void *userd
     }
 
     return count;
+}
+
+static long sha1_tell(void *userdata, IO io) {
+    UNUSED(io)
+
+    struct Sha1 *sha1 = userdata;
+
+    return sha1->read;
 }
 
 static int sha1_seek(void *userdata, long offset, int origin, IO io) {
@@ -457,7 +473,7 @@ static const struct InputOutputDeviceCallbacks sha1_callbacks = {
     .flush = NULL,
     .clearerr = sha1_clearerr,
     .stateSwitch = NULL,
-    .tell = NULL,
+    .tell = sha1_tell,
     .tell64 = NULL,
     .seek = sha1_seek,
     .seek64 = NULL,

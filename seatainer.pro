@@ -44,7 +44,8 @@ SOURCES += \
     main.c \
     seaerror.c \
     IO/limiter.c \
-    ccio.c
+    ccio.c \
+    IO/concat.c
 
 HEADERS += \
     ccdbllst.h \
@@ -70,7 +71,8 @@ HEADERS += \
     IO/zlib_io.h \
     seaerror.h \
     IO/limiter.h \
-    ccio.h
+    ccio.h \
+    IO/concat.h
 
 DISTFILES += \
     README.md \

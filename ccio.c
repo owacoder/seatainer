@@ -93,50 +93,20 @@ struct InputOutputDevice {
     const struct InputOutputDeviceCallbacks *callbacks;
     struct IO_sizes sizes;
 
-    unsigned char raw[2 * sizeof(void *)];
-    enum IO_Type type;
-
+    unsigned char raw[3 * sizeof(void *)];
     unsigned long flags;
-
-    /** Stores the last platform-specific error code that occured while reading or writing */
-    int error;
 
     /** Stores the read timeout assigned to this IO device. Read timeouts are only relevant for sockets, or native file devices on Linux */
     long long read_timeout;
     long long write_timeout;
 
-    unsigned ungetAvail;
-    unsigned char ungetBuf[4];
+    enum IO_Type type;
+    /** Stores the last platform-specific error code that occured while reading or writing */
+    int error;
+
+    unsigned char ungetAvail;
+    unsigned char ungetBuf[7];
 };
-
-/* Whether IO device is readable or not */
-#define IO_FLAG_READABLE ((unsigned) 0x01)
-/* Whether IO device is writable or not */
-#define IO_FLAG_WRITABLE ((unsigned) 0x02)
-/* Whether IO device is opened for update or not */
-#define IO_FLAG_UPDATE ((unsigned) 0x04)
-/* Whether IO device is opened for append or not */
-#define IO_FLAG_APPEND ((unsigned) 0x08)
-/* Whether IO device had an error */
-#define IO_FLAG_ERROR ((unsigned) 0x10)
-/* Whether IO device reached the end of input */
-#define IO_FLAG_EOF ((unsigned) 0x20)
-/* Whether IO device should fail if the file exists already */
-#define IO_FLAG_FAIL_IF_EXISTS ((unsigned) 0x40)
-/* Whether IO device is in use (used for static-storage IO device allocation) */
-#define IO_FLAG_IN_USE ((unsigned) 0x100)
-/* Whether IO device is dynamically allocated and should be freed */
-#define IO_FLAG_DYNAMIC ((unsigned) 0x200)
-/* Whether IO device owns its vbuf */
-#define IO_FLAG_OWNS_BUFFER ((unsigned) 0x400)
-/* Whether IO device was just read from */
-#define IO_FLAG_HAS_JUST_READ ((unsigned) 0x800)
-/* Whether IO device was just written to */
-#define IO_FLAG_HAS_JUST_WRITTEN ((unsigned) 0x1000)
-/* Whether IO device is opened for text or binary */
-#define IO_FLAG_BINARY ((unsigned) 0x2000)
-
-#define IO_FLAG_RESET (IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_UPDATE | IO_FLAG_APPEND | IO_FLAG_ERROR | IO_FLAG_EOF | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_BINARY)
 
 #ifdef CC_IO_STATIC_INSTANCES
 #if CC_IO_STATIC_INSTANCES > 0
@@ -387,12 +357,24 @@ int io_writable(IO io) {
     return io->flags & IO_FLAG_WRITABLE;
 }
 
+unsigned io_flags(IO io) {
+    return io->flags;
+}
+
 int io_just_read(IO io) {
     return io->flags & IO_FLAG_HAS_JUST_READ;
 }
 
 int io_just_wrote(IO io) {
     return io->flags & IO_FLAG_HAS_JUST_WRITTEN;
+}
+
+int io_opened_for_update(IO io) {
+    return io->flags & IO_FLAG_UPDATE;
+}
+
+int io_opened_for_append(IO io) {
+    return io->flags & IO_FLAG_APPEND;
 }
 
 int io_binary(IO io) {
@@ -2234,6 +2216,8 @@ static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO
                 io->flags |= IO_FLAG_ERROR;
                 if (io->callbacks->read == NULL)
                     io->error = CC_ENOTSUP;
+                else if (io->error == 0)
+                    io->error = CC_EREAD;
             } else {
                 io->flags |= IO_FLAG_EOF;
             }
@@ -3309,8 +3293,11 @@ static size_t io_native_unbuffered_write(const void *ptr, size_t size, size_t co
         }
 
         size_t written = io->callbacks->write(ptr, size, count, io->ptr, io);
-        if (written != count)
+        if (written != count) {
             io->flags |= IO_FLAG_ERROR;
+            if (io->error == 0)
+                io->error = CC_EWRITE;
+        }
         return written;
     }
 
