@@ -1462,13 +1462,11 @@ static int http_read_headers(HttpState state) {
             state->responseHeaderCb(header, value);
     }
 
-    FREE(io_underlying_buffer(headerString));
     io_close(headerString);
 
     return 0;
 
 cleanup:
-    FREE(io_underlying_buffer(headerString));
     io_close(headerString);
     return io_error(state->io)? io_error(state->io): CC_EREAD;
 }

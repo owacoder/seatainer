@@ -56,8 +56,8 @@ struct InputOutputDevice {
      *      type == IO_NativeFile: Pointer to read/write buffer
      *      type == IO_CString: undefined
      *      type == IO_SizedBuffer: undefined
-     *      type == IO_MinimalBuffer: undefined
-     *      type == IO_DynamicBuffer: undefined
+     *      type == IO_MinimalBuffer: Equal to `ptr` if pointer can be freed, or NULL if ptr was grabbed by user
+     *      type == IO_DynamicBuffer: Equal to `ptr` if pointer can be freed, or NULL if ptr was grabbed by user
      *      type == IO_Custom: undefined
      *
      * `size` stores the following:
@@ -270,7 +270,7 @@ static int io_grow(IO io, size_t size) {
 
     char *new_data = NULL;
     while (1) {
-        new_data = REALLOC(io->ptr, growth);
+        new_data = REALLOC(io->sizes.ptr2, growth);
 
         if (new_data != NULL) /* Success! */
             break;
@@ -280,7 +280,7 @@ static int io_grow(IO io, size_t size) {
         growth = size;
     }
 
-    io->ptr = new_data;
+    io->sizes.ptr2 = io->ptr = new_data;
     io->sizes.capacity = growth;
 
     return 0;
@@ -325,6 +325,10 @@ static int io_close_without_destroying(IO io) {
             result = (CloseHandle(io->ptr) || result)? EOF: 0;
             break;
 #endif
+        case IO_MinimalBuffer:
+        case IO_DynamicBuffer:
+            FREE(io->sizes.ptr2);
+            break;
         case IO_Custom:
             if (io->callbacks->close == NULL)
                 return 0;
@@ -417,6 +421,20 @@ void io_ungrab_file(IO io) {
 
 void *io_userdata(IO io) {
     return io->ptr;
+}
+
+void io_grab_underlying_buffer(IO io) {
+    if (io->type == IO_MinimalBuffer || io->type == IO_DynamicBuffer)
+        io->sizes.ptr2 = io->ptr;
+}
+
+char *io_take_underlying_buffer(IO io) {
+    if (io->type == IO_MinimalBuffer || io->type == IO_DynamicBuffer) {
+        io->sizes.ptr2 = NULL;
+        return io->ptr;
+    }
+
+    return NULL;
 }
 
 char *io_underlying_buffer(IO io) {
@@ -589,23 +607,48 @@ int io_resize(IO io, long long int size) {
 
             return 0;
 #endif
-        case IO_Custom:
-            if (io->flags & IO_FLAG_HAS_JUST_WRITTEN) {
-                if (io_native_unbuffered_write(io->sizes.ptr2, 1, io->sizes.pos, io) != io->sizes.pos)
+        case IO_MinimalBuffer:
+            if (io->sizes.size > size) /* Truncating */ {
+                char *new_ptr = MALLOC(size);
+                if (new_ptr == NULL) {
+                    io->flags |= IO_FLAG_ERROR;
+                    io->error = CC_ENOMEM;
                     return EOF;
-            } else if ((io->flags & IO_FLAG_HAS_JUST_READ) && io->sizes.pos) {
-                if (io_seek64(io, -((long long) io->sizes.pos), SEEK_CUR) < 0)
+                }
+
+                memcpy(new_ptr, io->ptr, size);
+                FREE(io->sizes.ptr2);
+
+                io->sizes.size = io->sizes.pos = size;
+                io->sizes.ptr2 = io->ptr = new_ptr;
+            } else /* Extending */ {
+                if (io_grow(io, size)) {
+                    io->flags |= IO_FLAG_ERROR;
+                    io->error = CC_ENOMEM;
                     return EOF;
+                }
+
+                size -= io->sizes.size;
+                while (size--)
+                    if (io_putc(0, io) == EOF)
+                        return EOF;
             }
 
-            io->sizes.pos = 0;
+            return 0;
+        case IO_DynamicBuffer:
+            if (io->sizes.size > size) /* Truncating */ {
+                io->sizes.size = io->sizes.pos = size;
+            } else /* Extending */ {
+                if (io_grow(io, size)) {
+                    io->flags |= IO_FLAG_ERROR;
+                    io->error = CC_ENOMEM;
+                    return EOF;
+                }
 
-            if (io->callbacks->flush == NULL)
-                return 0;
-
-            if (io->callbacks->flush(io->ptr, io) != 0) {
-                io->flags |= IO_FLAG_ERROR;
-                return EOF;
+                size -= io->sizes.size;
+                while (size--)
+                    if (io_putc(0, io) == EOF)
+                        return EOF;
             }
 
             return 0;
@@ -1027,7 +1070,7 @@ static IO io_open_dynamic_buffer_internal(enum IO_Type type, const char *mode) {
     if (io == NULL)
         return NULL;
 
-    io->ptr = NULL;
+    io->sizes.ptr2 = io->ptr = NULL;
     io->sizes.size = io->sizes.pos = io->sizes.capacity = 0;
 
     io->flags |= io_flags_for_mode(mode);

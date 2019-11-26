@@ -345,10 +345,33 @@ void io_ungrab_file(IO io);
  */
 void *io_userdata(IO io);
 
+/** @brief Retakes the ownership of the dynamically-allocated buffer.
+ *
+ * This function can be used to give back ownership of the underlying buffer to the IO device,
+ * where it was previously taken by `io_take_underlying_buffer()`
+ *
+ * @param io The device to operate on.
+ */
+void io_grab_underlying_buffer(IO io);
+
 /** @brief If the device is a dynamically-allocated buffer, returns a pointer to that buffer, NULL otherwise.
  *
  * This function only returns a non-NULL pointer for IO_MinimalBuffer and IO_DynamicBuffer.
  * The pointer returned by this function is not freed when the IO device is destroyed, and must be done manually.
+ * Ownership of the buffer is transferred to the caller, but may be returned with the `io_grab_underlying_buffer()` function.
+ *
+ * The returned pointer will never be invalidated, but the pointer must not be freed before the device is closed, or an error may occur.
+ *
+ * @param io The device to get the buffer from.
+ * @return The underlying buffer that was allocated to store data by the IO device.
+ */
+char *io_take_underlying_buffer(IO io);
+
+/** @brief If the device is a dynamically-allocated buffer, returns a pointer to that buffer, NULL otherwise.
+ *
+ * This function only returns a non-NULL pointer for IO_MinimalBuffer and IO_DynamicBuffer.
+ * The pointer returned by this function is freed when the IO device is destroyed, if the device has ownership of it.
+ * Ownership of the buffer is not transferred to the caller, but may be with the `io_take_underlying_buffer()` function.
  *
  * @param io The device to get the buffer from.
  * @return The underlying buffer that was allocated to store data by the IO device.
