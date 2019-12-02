@@ -124,7 +124,7 @@ static const unsigned char Rcon[] = {
 
 static void AddOne(unsigned char *ctr) {
     uint8_t carry = 1;
-    for (int i = 15; i >= 0; --i) {
+    for (int i = 15; i >= 8; --i) {
         int temp = ctr[i] + carry;
         ctr[i] = temp;
         carry = temp >> 8;
@@ -329,6 +329,16 @@ static void AESEncode(struct AES_ctx *ctx) {
             ctx->buffer = ctx->state;
             break;
         }
+        case AES_CTR: {
+            unsigned char temp[16];
+            memcpy(temp, ctx->previous, 16);
+            ctx->buffer = temp;
+            AESEncodeInternal(ctx);
+            memxor(ctx->state, temp, 16);
+            ctx->buffer = ctx->state;
+            AddOne(ctx->previous);
+            break;
+        }
     }
 }
 
@@ -389,6 +399,16 @@ static void AESDecode(struct AES_ctx *ctx) {
             AESEncodeInternal(ctx); /* sic, not decoding */
             memxor(ctx->state, ctx->previous, 16);
             ctx->buffer = ctx->state;
+            break;
+        }
+        case AES_CTR: {
+            unsigned char temp[16];
+            memcpy(temp, ctx->previous, 16);
+            ctx->buffer = temp;
+            AESEncodeInternal(ctx); /* sic, not decoding */
+            memxor(ctx->state, temp, 16);
+            ctx->buffer = ctx->state;
+            AddOne(ctx->previous);
             break;
         }
     }
@@ -460,6 +480,15 @@ static void AESEncode_x86(struct AES_ctx *ctx) {
             ctx->buffer = ctx->state;
             break;
         }
+        case AES_CTR: {
+            __m128i previous = _mm_loadu_si128((__m128i *) ctx->previous);
+            state = _mm_xor_si128(AESEncodeInternal_x86(ctx, previous), state);
+            _mm_storeu_si128((__m128i *) ctx->previous, previous);
+            _mm_storeu_si128((__m128i *) ctx->state, state);
+            ctx->buffer = ctx->state;
+            AddOne(ctx->previous);
+            break;
+        }
     }
 }
 
@@ -511,6 +540,15 @@ static void AESDecode_x86(struct AES_ctx *ctx) {
             _mm_storeu_si128((__m128i *) ctx->previous, previous);
             _mm_storeu_si128((__m128i *) ctx->state, state);
             ctx->buffer = ctx->state;
+            break;
+        }
+        case AES_CTR: {
+            __m128i previous = _mm_loadu_si128((__m128i *) ctx->previous);
+            state = _mm_xor_si128(AESEncodeInternal_x86(ctx, previous), state);
+            _mm_storeu_si128((__m128i *) ctx->previous, previous);
+            _mm_storeu_si128((__m128i *) ctx->state, state);
+            ctx->buffer = ctx->state;
+            AddOne(ctx->previous);
             break;
         }
     }
@@ -781,7 +819,7 @@ static const struct InputOutputDeviceCallbacks aes_callbacks = {
  *  @param mode contains the standard IO device mode specifiers (i.e. "r", "w", "rw"), but has special behavior for each. Must not be `NULL`. See the notes for more info.
  *  @return A new IO device filter that encrypts AES data, or `NULL` if a failure occured.
  */
-IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode) {
+IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, const unsigned char iv[16], const char *mode) {
     struct AES_ctx *ctx = CALLOC(1, sizeof(struct AES_ctx));
     if (ctx == NULL)
         return NULL;
@@ -842,7 +880,7 @@ IO io_open_aes_encrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, cons
  *  @param mode contains the standard IO device mode specifiers (i.e. "r", "w", "rw"), but has special behavior for each. Must not be `NULL`. See the notes for more info.
  *  @return A new IO device filter that decrypts AES data, or `NULL` if a failure occured.
  */
-IO io_open_aes_decrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, unsigned char iv[16], const char *mode) {
+IO io_open_aes_decrypt(IO io, enum AES_Type type, enum AES_Mode cipherMode, const unsigned char *key, const unsigned char iv[16], const char *mode) {
     struct AES_ctx *ctx = CALLOC(1, sizeof(struct AES_ctx));
     if (ctx == NULL)
         return NULL;

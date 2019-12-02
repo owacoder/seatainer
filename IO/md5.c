@@ -231,6 +231,15 @@ static size_t md5_write(const void *ptr, size_t size, size_t count, void *userda
     return count;
 }
 
+static int md5_state_switch(void *userdata, IO io) {
+    UNUSED(io)
+
+    struct Md5 *md5 = userdata;
+    md5_init_state(md5);
+
+    return 0;
+}
+
 static void md5_clearerr(void *userdata, IO io) {
     UNUSED(io)
 
@@ -288,7 +297,7 @@ static const struct InputOutputDeviceCallbacks md5_callbacks = {
     .close = md5_close,
     .flush = NULL,
     .clearerr = md5_clearerr,
-    .stateSwitch = NULL,
+    .stateSwitch = md5_state_switch,
     .tell = md5_tell,
     .tell64 = NULL,
     .seek = md5_seek,

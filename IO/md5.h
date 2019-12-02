@@ -19,7 +19,8 @@ extern "C" {
  * When the MD5 IO device is closed, the hash will be written to the underlying IO device. If the write fails, the close fails as well.
  *
  * Open as "rw": push data to the hash function and read the result back.
- * Once data is read, a new hash is begun with the next write to the device. TODO: this means the empty hash can never be computed again. Fix?
+ * Once data is read, a new hash is begun with the next write to the device.
+ * A new hash can also be initiated by requesting a state switch with `io_seek(io, 0, SEEK_CUR)`.
  * When the MD5 IO device is closed, nothing will be written to the underlying IO device.
  *
  * Open as "rw+": push data to the hash function and read the intermediate hash back.

@@ -536,6 +536,27 @@ void walk_dir(IO out, Directory directory) {
 int main()
 {
     {
+        const unsigned char key[] = "\x2b\x7e\x15\x16\x28\xae\xd2\xa6\xab\xf7\x15\x88\x09\xcf\x4f\x3c";
+        const unsigned char iv[] = "\xf0\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xfb\xfc\xfd\xfe\xff";
+
+        IO input = io_open_cstring("\x6b\xc1\xbe\xe2\x2e\x40\x9f\x96\xe9\x3d\x7e\x11\x73\x93\x17\x2a"
+                                   "\xae\x2d\x8a\x57\x1e\x03\xac\x9c\x9e\xb7\x6f\xac\x45\xaf\x8e\x51"
+                                   "\x30\xc8\x1c\x46\xa3\x5c\xe4\x11\xe5\xfb\xc1\x19\x1a\x0a\x52\xef\x10", "rb");
+        IO input_padding = io_open_pkcs7_padding_encode(input, 16, "rb");
+        IO input_aes = io_open_aes_encrypt(input_padding, AES_128, AES_PCBC, key, iv, "rb<");
+
+        IO output = io_open_hex_encode(io_open_file(stdout), "wb");
+        IO output_padding = io_open_pkcs7_padding_decode(output, 16, "wb");
+        IO output_aes = io_open_aes_decrypt(output_padding, AES_128, AES_PCBC, key, iv, "wb");
+
+        io_copy(input_aes, output_aes);
+
+        printf("\n%d\n", io_close(output_padding));
+
+        return 0;
+    }
+
+    {
         char buf1[10], buf2[10];
 
         IO lhs = io_open_buffer(buf1, sizeof(buf1), "wb");

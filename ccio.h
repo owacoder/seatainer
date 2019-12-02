@@ -45,7 +45,7 @@ struct InputOutputDevice;
  *
  * The C Standard Library seek() rules apply to this library as well. You must have a call to `io_seek()`, `io_seek64()`, or `io_rewind()` before switching between reading and writing.
  * The call `io_seek(device, 0, SEEK_CUR)` will only ever fail if an internal buffer failed to flush, even if the stream does not support seeking.
- *  A call to `io_rewind()` also works for non-seekable streams, but has no way of reporting buffer-flush errors directly, although the error flag on the device will still be set.
+ * A call to `io_rewind()` also works for non-seekable streams, but has no way of reporting buffer-flush errors directly, although the error flag on the device will still be set.
  */
 typedef struct InputOutputDevice *IO;
 
@@ -662,6 +662,7 @@ int io_ungetc(int chr, IO io);
 #include <string>
 #include <cstring>
 #include <memory>
+#include "seaerror.h"
 
 typedef IO_Pos IOPosition;
 
@@ -697,17 +698,10 @@ class IODevice {
     size_t references; /* How many other IODevice objects rely on this object being valid */
 
 protected:
-#if WINDOWS_OS
-    static const int AlreadyOpen = ERROR_ALREADY_INITIALIZED;
-    static const int CannotClose = ERROR_ACCESS_DENIED;
-    static const int GenericError = ERROR_DEVICE_NOT_AVAILABLE;
-    static const int NoMemory = ERROR_OUTOFMEMORY;
-#else
-    static const int AlreadyOpen = EPERM;
-    static const int CannotClose = EPERM;
-    static const int GenericError = EIO;
-    static const int NoMemory = ENOMEM;
-#endif
+    static const int AlreadyOpen = CC_EPERM;
+    static const int CannotClose = CC_EPERM;
+    static const int GenericError = CC_EIO;
+    static const int NoMemory = CC_ENOMEM;
 
     IODevice() : references(0), m_io(NULL) {}
 
@@ -758,13 +752,7 @@ public:
     bool isInWriteMode() const {return m_io? io_just_wrote(m_io): false;}
 
     /* Returns true if the error flag is set (this flag is sticky until cleared) */
-    int error() const {return m_io? io_error(m_io):
-#if WINDOWS_OS
-                                    ERROR_INVALID_HANDLE
-#else
-                                    ENODEV
-#endif
-                                    ;}
+    int error() const {return m_io? io_error(m_io): CC_ENODEV;}
 
     /* Returns human-readable description of what went wrong */
     static std::string errorDescription(int error) {

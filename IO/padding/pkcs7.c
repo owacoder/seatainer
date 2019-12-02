@@ -51,9 +51,35 @@ int pkcs7_padding_encode_close(void *userdata, IO io) {
 int pkcs7_padding_decode_close(void *userdata, IO io) {
     UNUSED(io)
 
+    struct Pkcs7PaddingDecode *padding = userdata;
+    int err = 0;
+
+    if (io_just_wrote(io) && padding->buffer_avail) {
+        int padding_char = padding->buffer[padding->buffer_avail - 1];
+
+        if (padding_char > padding->buffer_avail ||
+                padding->buffer_avail != padding->block_size) /* Bad padding, specifies value greater than block size */
+            err = CC_EBADMSG;
+
+        if (!err) {
+            /* Ensure that all padding actually is set to the correct value */
+            for (size_t i = padding->buffer_avail - padding_char; i < padding->buffer_avail; ++i)
+                if (padding->buffer[i] != padding_char) {
+                    err = CC_EBADMSG;
+                    break;
+                }
+
+            padding->buffer_avail -= padding_char;
+
+            if (io_write(padding->buffer, 1, padding->buffer_avail, padding->io) != padding->buffer_avail) {
+                err = io_error(padding->io);
+            }
+        }
+    }
+
     FREE(userdata);
 
-    return 0;
+    return err;
 }
 
 size_t pkcs7_padding_encode_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {
@@ -170,6 +196,34 @@ size_t pkcs7_padding_encode_write(const void *ptr, size_t size, size_t count, vo
     return written;
 }
 
+size_t pkcs7_padding_decode_write(const void *ptr, size_t size, size_t count, void *userdata, IO io) {
+    struct Pkcs7PaddingDecode *padding = userdata;
+
+    size_t max = size*count, written = 0;
+    const unsigned char *cptr = ptr;
+
+    while (max) {
+        if (padding->buffer_avail == padding->block_size) { /* Only flush block if there is guaranteed to be more data coming */
+            size_t wrote = io_write(padding->buffer, 1, padding->block_size, padding->io);
+            written += wrote;
+            if (wrote != padding->block_size) {
+                io_set_error(io, io_error(padding->io));
+                return written / size;
+            }
+            padding->buffer_avail = 0;
+        }
+
+        size_t amount_added = MIN(max, padding->block_size - padding->buffer_avail);
+        memcpy(padding->buffer + padding->buffer_avail, cptr, amount_added);
+
+        padding->buffer_avail += amount_added;
+        cptr += amount_added;
+        max -= amount_added;
+    }
+
+    return count;
+}
+
 int pkcs7_padding_encode_flush(void *userdata, IO io) {
     struct Pkcs7Padding *padding = userdata;
 
@@ -237,7 +291,7 @@ static const struct InputOutputDeviceCallbacks pkcs7_padding_decode_callbacks = 
     .open = NULL,
     .close = pkcs7_padding_decode_close,
     .read = pkcs7_padding_decode_read,
-    .write = NULL,
+    .write = pkcs7_padding_decode_write,
     .flush = pkcs7_padding_decode_flush,
     .clearerr = pkcs7_padding_decode_clearerr,
     .stateSwitch = NULL,

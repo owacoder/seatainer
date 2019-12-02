@@ -416,6 +416,15 @@ static size_t sha1_write(const void *ptr, size_t size, size_t count, void *userd
     return count;
 }
 
+static int sha1_state_switch(void *userdata, IO io) {
+    UNUSED(io)
+
+    struct Sha1 *sha1 = userdata;
+    sha1_init_state(sha1);
+
+    return 0;
+}
+
 static long sha1_tell(void *userdata, IO io) {
     UNUSED(io)
 
@@ -472,7 +481,7 @@ static const struct InputOutputDeviceCallbacks sha1_callbacks = {
     .close = sha1_close,
     .flush = NULL,
     .clearerr = sha1_clearerr,
-    .stateSwitch = NULL,
+    .stateSwitch = sha1_state_switch,
     .tell = sha1_tell,
     .tell64 = NULL,
     .seek = sha1_seek,
