@@ -230,21 +230,47 @@ int path_set_current_working_dir(Path path);
 int glob(const char *str, const char *pattern);
 int utf8glob(const char *str, const char *pattern);
 
+enum DirectorySort {
+    DirSortNone = 0x00,
+    DirSortByName = 0x01,
+    DirSortByTime = 0x02,
+    DirSortBySize = 0x04,
+    DirSortReversed = 0x10,
+    DirSortFoldersBeforeFiles = 0x20
+};
+
+enum DirectoryFilter {
+    DirFilterNone = 0x00,
+    DirFilterNoSymlinks = 0x008,
+    DirFilterShowHidden = 0x100,
+    DirFilterShowSystem = 0x200,
+    DirFilterShowAll = DirFilterShowHidden | DirFilterShowSystem,
+    DirFilterNoDot = 0x2000,
+    DirFilterNoDotDot = 0x4000,
+    DirFilterNoDotOrDotDot = DirFilterNoDot | DirFilterNoDotDot,
+};
+
+#define DIR_SORT_TYPE_MASK 0xF
+
 /** @brief Opens a directory for access.
  *
  * @param dir A UTF-8 string containing the name of the directory to open.
+ * @param filter The specified filter to use when reading directory contents.
+ * @param sort The specified sort flags to use when reading directory contents.
  * @return A new directory object, or NULL on allocation failure.
  */
-Directory dir_open(const char *dir);
+Directory dir_open(const char *dir, enum DirectoryFilter filter, enum DirectorySort sort);
 
 /** @brief Opens a directory for access.
  *
  * Same as dir_open(), but uses ANSI functions on Windows if mode contains "@ncp", for [n]ative [c]ode [p]age.
  *
  * @param dir A UTF-8 string containing the name of the directory to open.
+ * @param filter The specified filter to use when reading directory contents.
+ * @param sort The specified sort flags to use when reading directory contents.
  * @return A new directory object, or NULL on allocation failure.
  */
-Directory dir_open_with_mode(const char *dir, const char *mode);
+Directory dir_open_with_mode(const char *dir, const char *mode, enum DirectoryFilter filter, enum DirectorySort sort);
 
 /** @brief Returns path that open directory points to.
  *

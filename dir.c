@@ -7,6 +7,7 @@
 #include "dir.h"
 
 #include "seaerror.h"
+#include "ccio.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -768,6 +769,104 @@ int path_set_current_working_dir(Path path) {
     return path_set_current_working_dir_cstr(path_data(path));
 }
 
+struct SortedDirStruct {
+    DirectoryEntry *entries;
+    unsigned int next;
+    unsigned int count;
+    unsigned int capacity;
+    unsigned int in_use;
+};
+
+static int sorted_dir_add_entry(struct SortedDirStruct *s, DirectoryEntry entry) {
+    if (s->count == s->capacity) {
+        size_t amount = MAX(16, s->count + (s->count >> 1));
+        DirectoryEntry *d = REALLOC(s->entries, amount * sizeof(*d));
+        if (d == NULL)
+            return CC_ENOMEM;
+
+        s->entries = d;
+        s->capacity = amount;
+    }
+
+    s->entries[s->count++] = entry;
+    return 0;
+}
+
+#if WINDOWS_OS
+#define DIR_QSORT(base, count, size, comparator, thunk) qsort_s((base), (count), (size), (comparator), (thunk))
+#else
+#define DIR_QSORT(base, count, size, comparator, thunk) qsort_r((base), (count), (size), (comparator), (thunk))
+#endif
+
+#ifdef WINDOWS_OS
+static int sorted_dir_compare_names(void *thunk, const void *a, const void *b) {
+#else
+static int sorted_dir_compare_names(const void *a, const void *b, void *thunk) {
+#endif
+    DirectoryEntry lhs = *((DirectoryEntry *) a);
+    DirectoryEntry rhs = *((DirectoryEntry *) b);
+
+    enum DirectorySort sort = *((enum DirectorySort *) thunk);
+
+    if (sort & DirSortFoldersBeforeFiles) {
+        int cmp = !!dirent_is_directory(rhs) - !!dirent_is_directory(lhs);
+
+        if (cmp)
+            return cmp;
+    }
+
+#if WINDOWS_OS
+    int result = strcmp_no_case(dirent_name(lhs), dirent_name(rhs));
+#else
+    int result = strcmp(dirent_name(lhs), dirent_name(rhs));
+#endif
+
+    return (sort & DirSortReversed)? -result: result;
+}
+
+#ifdef WINDOWS_OS
+static int sorted_dir_compare_sizes(void *thunk, const void *a, const void *b) {
+#else
+static int sorted_dir_compare_sizes(const void *a, const void *b, void *thunk) {
+#endif
+    DirectoryEntry lhs = *((DirectoryEntry *) a);
+    DirectoryEntry rhs = *((DirectoryEntry *) b);
+
+    enum DirectorySort sort = *((enum DirectorySort *) thunk);
+
+    if (sort & DirSortFoldersBeforeFiles) {
+        int cmp = !!dirent_is_directory(rhs) - !!dirent_is_directory(lhs);
+
+        if (cmp)
+            return cmp;
+    }
+
+#if WINDOWS_OS
+    long long result = dirent_size(lhs) - dirent_size(rhs);
+#else
+    long long result = dirent_size(lhs) - dirent_size(rhs);
+#endif
+
+    return (sort & DirSortReversed)? -SIGN(result): SIGN(result);
+}
+
+static void sorted_dir_sort(struct SortedDirStruct *s, enum DirectorySort sort) {
+    switch (sort & DIR_SORT_TYPE_MASK) {
+        default: break;
+        case DirSortByName: DIR_QSORT(s->entries, s->count, sizeof(*s->entries), sorted_dir_compare_names, &sort); break;
+        case DirSortBySize: DIR_QSORT(s->entries, s->count, sizeof(*s->entries), sorted_dir_compare_sizes, &sort); break;
+    }
+}
+
+static void sorted_dir_free(struct SortedDirStruct *s) {
+    if (s->entries) {
+        for (size_t i = 0; i < s->count; ++i)
+            dirent_close(s->entries[i]);
+    }
+
+    FREE(s->entries);
+}
+
 #if LINUX_OS
 struct DirEntryStruct {
     Directory parent; /* Points to parent DirStruct, doesn't have ownership */
@@ -785,6 +884,8 @@ struct DirStruct {
     DIR *handle;
     struct DirEntryStruct findData, lastFoundData;
     int error; /* Zero if no error occured while opening the directory, platform specific otherwise */
+    enum DirectoryFilter filter;
+    struct SortedDirStruct sorted;
     size_t path_len;
     char path[]; /* Owned copy of path, plus capacity for directory separator, 256-byte name, and NUL-terminator */
 };
@@ -820,6 +921,8 @@ struct DirStruct {
     HANDLE findFirstHandle;
     struct DirEntryStruct findData, lastFoundData;
     int error; /* Zero if no error occured while opening the directory, platform specific otherwise */
+    enum DirectoryFilter filter;
+    struct SortedDirStruct sorted;
     size_t path_len;
     char path[MAX_PATH + 1]; /* Owned copy of path */
 };
@@ -835,18 +938,37 @@ void filetime_to_time_t(FILETIME *time, time_t *t) {
 
     *t = (time_t) large.QuadPart;
 }
+#else
+struct DirStruct {
+    int error; /* Zero if no error occured while opening the directory, platform specific otherwise */
+    enum DirectoryFilter filter;
+    struct SortedDirStruct sorted;
+}
 #endif
 
-Directory dir_open(const char *dir) {
-    return dir_open_with_mode(dir, "");
+static int dir_entry_present_with_filter(DirectoryEntry entry, enum DirectoryFilter filter) {
+    if (((filter & DirFilterNoDot) && !strcmp(dirent_name(entry), ".")) ||
+        ((filter & DirFilterNoDotDot) && !strcmp(dirent_name(entry), "..")) ||
+        ((filter & DirFilterNoSymlinks) && dirent_is_symlink(entry)) ||
+        (!(filter & DirFilterShowHidden) && dirent_is_hidden(entry)) ||
+        (!(filter & DirFilterShowSystem) && dirent_is_system(entry)))
+        return 0;
+
+    return 1;
 }
 
-Directory dir_open_with_mode(const char *dir, const char *mode) {
+Directory dir_open(const char *dir, enum DirectoryFilter filter, enum DirectorySort sort) {
+    return dir_open_with_mode(dir, "", filter, sort);
+}
+
+Directory dir_open_with_mode(const char *dir, const char *mode, enum DirectoryFilter filter, enum DirectorySort sort) {
+    Directory result = NULL;
+
 #if LINUX_OS
     UNUSED(mode)
 
     size_t len = strlen(dir);
-    Directory result = CALLOC(1, sizeof(*result) + len + 258);
+    result = CALLOC(1, sizeof(*result) + len + 258);
     if (result == NULL)
         return NULL;
 
@@ -874,8 +996,6 @@ Directory dir_open_with_mode(const char *dir, const char *mode) {
     } else {
         result->error = errno;
     }
-
-    return result;
 #elif WINDOWS_OS
     char name[MAX_PATH + 3];
     size_t len = strlen(dir);
@@ -890,7 +1010,7 @@ Directory dir_open_with_mode(const char *dir, const char *mode) {
         name[len++] = '\\';
     name[len] = 0;
 
-    Directory result = CALLOC(1, sizeof(*result));
+    result = CALLOC(1, sizeof(*result));
     if (result == NULL)
         return NULL;
 
@@ -923,14 +1043,47 @@ Directory dir_open_with_mode(const char *dir, const char *mode) {
 
     if (result->findFirstHandle == INVALID_HANDLE_VALUE)
         result->error = GetLastError();
-
-    return result;
 #else
     UNUSED(dir)
     UNUSED(mode)
 
     return NULL;
 #endif
+
+    result->filter = filter;
+    if (sort != DirSortNone && result && result->error == 0) {
+        DirectoryEntry entry;
+        struct SortedDirStruct sorted;
+
+        memset(&sorted, 0, sizeof(sorted));
+        sorted.in_use = 1;
+
+        while ((entry = dir_next(result)) != NULL) {
+            if (!dir_entry_present_with_filter(entry, filter))
+                continue;
+
+            DirectoryEntry copy = dirent_copy(entry);
+            if (!copy || sorted_dir_add_entry(&sorted, copy)) {
+                sorted_dir_free(&sorted);
+                dirent_close(copy);
+                result->error = CC_ENOMEM;
+                return result;
+            }
+        }
+
+        for (size_t i = 0; i < sorted.count; ++i)
+            printf("Unsorted %s\n", dirent_name(sorted.entries[i]));
+
+        sorted_dir_sort(&sorted, sort);
+
+        for (size_t i = 0; i < sorted.count; ++i)
+            printf("Sorted %s\n", dirent_name(sorted.entries[i]));
+
+        result->sorted = sorted;
+        result->filter = DirFilterNone; /* Since we already filtered, don't do it again */
+    }
+
+    return result;
 }
 
 int dir_error(Directory dir) {
@@ -941,7 +1094,14 @@ void dir_clearerr(Directory dir) {
     dir->error = 0;
 }
 
-DirectoryEntry dir_next(Directory dir) {
+static DirectoryEntry dir_next_internal(Directory dir) {
+    if (dir->sorted.in_use) {
+        if (dir->sorted.entries == NULL || dir->sorted.next == dir->sorted.count)
+            return NULL;
+
+        return dir->sorted.entries[dir->sorted.next++];
+    }
+
 #if LINUX_OS
     if (dir->handle == NULL)
         return NULL;
@@ -984,12 +1144,30 @@ DirectoryEntry dir_next(Directory dir) {
 #endif
 }
 
+DirectoryEntry dir_next(Directory dir) {
+    DirectoryEntry entry;
+
+    while ((entry = dir_next_internal(dir)) != NULL) {
+        if (!dir_entry_present_with_filter(entry, dir->filter))
+            continue;
+
+        return entry;
+    }
+
+    return entry;
+}
+
 const char *dir_path(Directory dir) {
     dir->path[dir->path_len] = 0;
     return dir->path;
 }
 
 void dir_close(Directory dir) {
+    if (dir == NULL)
+        return;
+
+    sorted_dir_free(&dir->sorted);
+
 #if LINUX_OS
     if (dir->handle != NULL)
         closedir(dir->handle);
@@ -1043,8 +1221,8 @@ DirectoryEntry dirent_open_with_mode(const char *path, const char *mode) {
         if (name_len > MAX_PATH - 1)
             goto cleanup;
 
+        dir->findFirstHandle = FindFirstFileA(dir->path, &entry->fdata.data);
         strcpy(entry->fdata.data.cFileName, name);
-        dir->findFirstHandle = FindFirstFileA(dirent_fullname(entry), &entry->fdata.data);
 
         entry->is_wide = 0;
     } else {
@@ -1059,8 +1237,8 @@ DirectoryEntry dirent_open_with_mode(const char *path, const char *mode) {
             goto cleanup;
         }
 
-        wcscpy(entry->fdata.wdata.cFileName, wideName);
         dir->findFirstHandle = FindFirstFileW(wide, &entry->fdata.wdata);
+        wcscpy(entry->fdata.wdata.cFileName, wideName);
 
         FREE(wide);
         FREE(wideName);
@@ -1098,7 +1276,7 @@ DirectoryEntry dirent_copy(DirectoryEntry entry) {
 }
 
 void dirent_close(DirectoryEntry entry) {
-    if (entry->ownedDir) {
+    if (entry && entry->ownedDir) {
         dir_close(entry->parent);
         FREE(entry);
     }
@@ -1270,7 +1448,7 @@ int dirent_is_subdirectory(DirectoryEntry entry) {
 int dirent_is_directory(DirectoryEntry entry) {
 #if WINDOWS_OS
     if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
-        return 0;
+        return !strcmp(dirent_name(entry), ".") || !strcmp(dirent_name(entry), "..");
     else if (entry->is_wide) {
         return entry->fdata.wdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
     } else {
@@ -1278,7 +1456,7 @@ int dirent_is_directory(DirectoryEntry entry) {
     }
 #else
     if (dirFillExtData(entry))
-        return 0;
+        return !strcmp(dirent_name(entry), ".") || !strcmp(dirent_name(entry), "..");
 
     return S_ISDIR(entry->extData.st_mode);
 #endif

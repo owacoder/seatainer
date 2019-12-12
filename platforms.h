@@ -115,6 +115,10 @@
 # define MIN(x, y) ((x) < (y)? (x): (y))
 #endif
 
+#ifndef SIGN
+# define SIGN(x) ((0 < (x)) - ((x) < 0))
+#endif
+
 /* Compiler */
 #ifdef __clang__
 # define CLANG_COMPILER 1

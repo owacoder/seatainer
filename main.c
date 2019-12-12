@@ -453,7 +453,7 @@ static void search_helper(IO out, Directory directory, const char *fileglob, int
             io_printf(out, "%s\n", dirent_fullname(entry));
 
         if (dirent_is_subdirectory(entry) && searchSubDirs) {
-            Directory nextDirectory = dir_open(dirent_fullname(entry));
+            Directory nextDirectory = dir_open(dirent_fullname(entry), DirFilterShowAll, DirSortNone);
             if (nextDirectory) {
                 search_helper(out, nextDirectory, fileglob, searchSubDirs);
                 dir_close(nextDirectory);
@@ -463,7 +463,7 @@ static void search_helper(IO out, Directory directory, const char *fileglob, int
 }
 
 void search(IO out, const char *path, const char *fileglob, int searchSubDirs) {
-    search_helper(out, dir_open(path), fileglob, searchSubDirs);
+    search_helper(out, dir_open(path, DirFilterShowAll, DirSortNone), fileglob, searchSubDirs);
 }
 
 void walk(Directory directory, unsigned long long *items, unsigned long long *size) {
@@ -480,7 +480,7 @@ void walk(Directory directory, unsigned long long *items, unsigned long long *si
         printf("path: %s\n", dirent_fullname(entry));
 
         if (dirent_is_subdirectory(entry)) {
-            Directory nextDirectory = dir_open(dirent_fullname(entry));
+            Directory nextDirectory = dir_open(dirent_fullname(entry), DirFilterNone, DirSortNone);
             if (nextDirectory) {
                 walk(nextDirectory, items, size);
                 dir_close(nextDirectory);
@@ -535,6 +535,21 @@ void walk_dir(IO out, Directory directory) {
 
 int main()
 {
+    {
+        Directory dir = dir_open("E:/Programming", DirFilterShowAll | DirFilterNoDotOrDotDot, DirSortNone);
+        DirectoryEntry entry;
+
+        while ((entry = dir_next(dir)) != NULL) {
+            if (dirent_is_subdirectory(entry))
+                printf("%s/: %lld\n", dirent_name(entry), dirent_size(entry));
+            else
+                printf("%s: %lld\n", dirent_name(entry), dirent_size(entry));
+        }
+
+        dir_close(dir);
+        return 0;
+    }
+
     {
         const unsigned char key[] = "\x2b\x7e\x15\x16\x28\xae\xd2\xa6\xab\xf7\x15\x88\x09\xcf\x4f\x3c";
         const unsigned char iv[] = "\xf0\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xfb\xfc\xfd\xfe\xff";
