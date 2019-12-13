@@ -434,11 +434,11 @@ int dirent_is_temporary(DirectoryEntry entry);
 int dirent_set_attributes(DirectoryEntry entry, unsigned long attributes);
 
 /* Obtain the local time of file traits */
-/* Returns 0 on success, -1 on failure (failure may occur because the requested trait doesn't exist for the platform) */
-int dirent_created_time(DirectoryEntry entry, time_t *t);
-int dirent_last_access_time(DirectoryEntry entry, time_t *t);
-int dirent_last_modification_time(DirectoryEntry entry, time_t *t);
-int dirent_last_status_update_time(DirectoryEntry entry, time_t *t);
+/* err is 0 on success, -1 on failure (failure may occur because the requested trait doesn't exist for the platform) */
+time_t dirent_created_time(DirectoryEntry entry, int *err);
+time_t dirent_last_access_time(DirectoryEntry entry, int *err);
+time_t dirent_last_modification_time(DirectoryEntry entry, int *err);
+time_t dirent_last_status_update_time(DirectoryEntry entry, int *err);
 
 #ifdef __cplusplus
 }

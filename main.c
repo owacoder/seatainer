@@ -519,16 +519,17 @@ void walk_dir(IO out, Directory directory) {
         size_t name_len = strlen(dirent_name(entry));
         io_printf(out, "%s%-*c  %10lld bytes\n", dirent_name(entry), 40 - (int) name_len, dirent_is_directory(entry)? path_separator(): ' ', dirent_size(entry));
 
-        if (dirent_created_time(entry, &time) == 0)
+        int err;
+        if (time = dirent_created_time(entry, &err), err == 0)
             io_printf(out, "  Created: %s", asctime(localtime(&time)));
 
-        if (dirent_last_modification_time(entry, &time) == 0)
+        if (time = dirent_last_modification_time(entry, &err), err == 0)
             io_printf(out, "  Modified: %s", asctime(localtime(&time)));
 
-        if (dirent_last_status_update_time(entry, &time) == 0)
+        if (time = dirent_last_status_update_time(entry, &err), err == 0)
             io_printf(out, "  Updated: %s", asctime(localtime(&time)));
 
-        if (dirent_last_access_time(entry, &time) == 0)
+        if (time = dirent_last_access_time(entry, &err), err == 0)
             io_printf(out, "  Accessed: %s", asctime(localtime(&time)));
     }
 }
@@ -536,10 +537,16 @@ void walk_dir(IO out, Directory directory) {
 int main()
 {
     {
-        Directory dir = dir_open("E:/Programming", DirFilterShowAll | DirFilterNoDotOrDotDot, DirSortNone);
+        Directory dir = dir_open("E:/Programming", DirFilterShowAll, DirSortByTime | DirSortFoldersBeforeFiles);
         DirectoryEntry entry;
 
         while ((entry = dir_next(dir)) != NULL) {
+            time_t temp = dirent_last_modification_time(entry, NULL);
+            char *timeStr = asctime(gmtime(&temp));
+
+            timeStr[strlen(timeStr)-1] = 0;
+            printf("%s: ", timeStr);
+
             if (dirent_is_subdirectory(entry))
                 printf("%s/: %lld\n", dirent_name(entry), dirent_size(entry));
             else

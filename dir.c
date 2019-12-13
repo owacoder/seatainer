@@ -841,11 +841,36 @@ static int sorted_dir_compare_sizes(const void *a, const void *b, void *thunk) {
             return cmp;
     }
 
-#if WINDOWS_OS
     long long result = dirent_size(lhs) - dirent_size(rhs);
+
+    return (sort & DirSortReversed)? -SIGN(result): SIGN(result);
+}
+
+#ifdef WINDOWS_OS
+static int sorted_dir_compare_times(void *thunk, const void *a, const void *b) {
 #else
-    long long result = dirent_size(lhs) - dirent_size(rhs);
+static int sorted_dir_compare_times(const void *a, const void *b, void *thunk) {
 #endif
+    DirectoryEntry lhs = *((DirectoryEntry *) a);
+    DirectoryEntry rhs = *((DirectoryEntry *) b);
+
+    enum DirectorySort sort = *((enum DirectorySort *) thunk);
+
+    if (sort & DirSortFoldersBeforeFiles) {
+        int cmp = !!dirent_is_directory(rhs) - !!dirent_is_directory(lhs);
+
+        if (cmp)
+            return cmp;
+    }
+
+    time_t lhsTime = dirent_last_modification_time(lhs, NULL);
+    time_t rhsTime = dirent_last_modification_time(rhs, NULL);
+    int result = 0;
+
+    if (lhsTime < rhsTime)
+        result = -1;
+    else if (rhsTime < lhsTime)
+        result = 1;
 
     return (sort & DirSortReversed)? -SIGN(result): SIGN(result);
 }
@@ -855,6 +880,7 @@ static void sorted_dir_sort(struct SortedDirStruct *s, enum DirectorySort sort) 
         default: break;
         case DirSortByName: DIR_QSORT(s->entries, s->count, sizeof(*s->entries), sorted_dir_compare_names, &sort); break;
         case DirSortBySize: DIR_QSORT(s->entries, s->count, sizeof(*s->entries), sorted_dir_compare_sizes, &sort); break;
+        case DirSortByTime: DIR_QSORT(s->entries, s->count, sizeof(*s->entries), sorted_dir_compare_times, &sort); break;
     }
 }
 
@@ -1721,94 +1747,112 @@ cleanup:
 #endif
 }
 
-int dirent_created_time(DirectoryEntry entry, time_t *t) {
+time_t dirent_created_time(DirectoryEntry entry, int *err) {
 #if WINDOWS_OS
     if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
         entry->parent->error = CC_EBADF;
-        return -1;
+        if (err) *err = -1;
+        return 0;
     }
 
     FILETIME time = entry->is_wide? entry->fdata.wdata.ftCreationTime: entry->fdata.data.ftCreationTime;
+    time_t t;
 
-    filetime_to_time_t(&time, t);
+    filetime_to_time_t(&time, &t);
+    if (err) *err = 0;
 
-    return 0;
+    return t;
 #else
     UNUSED(entry)
-    UNUSED(t)
+    UNUSED(err)
 
-    return -1;
+    entry->parent->error = CC_ENOTSUP;
+    if (err) *err = -1;
+    return 0;
 #endif
 }
 
-int dirent_last_access_time(DirectoryEntry entry, time_t *t) {
+time_t dirent_last_access_time(DirectoryEntry entry, int *err) {
 #if LINUX_OS
-    if (dirFillExtData(entry))
-        return -1;
+    if (dirFillExtData(entry)) {
+        if (err) *err = -1;
+        return 0;
+    }
 
-    *t = entry->extData.st_atime;
-
-    return 0;
+    if (err) *err = 0;
+    return entry->extData.st_atime;
 #elif WINDOWS_OS
     if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
         entry->parent->error = CC_EBADF;
-        return -1;
+        if (err) *err = -1;
+        return 0;
     }
 
     FILETIME time = entry->is_wide? entry->fdata.wdata.ftLastAccessTime: entry->fdata.data.ftLastAccessTime;
+    time_t t;
 
-    filetime_to_time_t(&time, t);
+    filetime_to_time_t(&time, &t);
+    if (err) *err = 0;
 
-    return 0;
+    return t;
 #else
     UNUSED(entry)
-    UNUSED(t)
+    UNUSED(err)
 
-    return -1;
+    entry->parent->error = CC_ENOTSUP;
+    if (err) *err = -1;
+    return 0;
 #endif
 }
 
-int dirent_last_modification_time(DirectoryEntry entry, time_t *t) {
+time_t dirent_last_modification_time(DirectoryEntry entry, int *err) {
 #if LINUX_OS
-    if (dirFillExtData(entry))
-        return -1;
+    if (dirFillExtData(entry)) {
+        if (err) *err = -1;
+        return 0;
+    }
 
-    *t = entry->extData.st_mtime;
-
-    return 0;
+    if (err) *err = 0;
+    return entry->extData.st_mtime;
 #elif WINDOWS_OS
     if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
         entry->parent->error = CC_EBADF;
+        if (err) *err = -1;
         return 0;
     }
 
     FILETIME time = entry->is_wide? entry->fdata.wdata.ftLastWriteTime: entry->fdata.data.ftLastWriteTime;
+    time_t t;
 
-    filetime_to_time_t(&time, t);
+    filetime_to_time_t(&time, &t);
+    if (err) *err = 0;
 
-    return 0;
+    return t;
 #else
     UNUSED(entry)
-    UNUSED(t)
+    UNUSED(err)
 
     entry->parent->error = CC_ENOTSUP;
-    return -1;
+    if (err) *err = -1;
+    return 0;
 #endif
 }
 
-int dirent_last_status_update_time(DirectoryEntry entry, time_t *t) {
+time_t dirent_last_status_update_time(DirectoryEntry entry, int *err) {
 #if LINUX_OS
-    if (dirFillExtData(entry))
-        return -1;
+    if (dirFillExtData(entry)) {
+        if (err) *err = -1;
+        return 0;
+    }
 
-    *t = entry->extData.st_ctime;
-
-    return 0;
+    if (err) *err = 0;
+    return entry->extData.st_ctime;
 #else
     UNUSED(entry)
-    UNUSED(t)
+    UNUSED(err)
 
     entry->parent->error = CC_ENOTSUP;
-    return -1;
+    if (err) *err = -1;
+    return 0;
 #endif
 }
