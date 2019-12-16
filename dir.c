@@ -792,6 +792,7 @@ static int sorted_dir_add_entry(struct SortedDirStruct *s, DirectoryEntry entry)
     return 0;
 }
 
+/* See https://stackoverflow.com/a/46042467 */
 #if WINDOWS_OS
 #define DIR_QSORT(base, count, size, comparator, thunk) qsort_s((base), (count), (size), (comparator), (thunk))
 #else
@@ -846,7 +847,7 @@ static int sorted_dir_compare_sizes(const void *a, const void *b, void *thunk) {
     return (sort & DirSortReversed)? -SIGN(result): SIGN(result);
 }
 
-#ifdef WINDOWS_OS
+#if WINDOWS_OS
 static int sorted_dir_compare_times(void *thunk, const void *a, const void *b) {
 #else
 static int sorted_dir_compare_times(const void *a, const void *b, void *thunk) {

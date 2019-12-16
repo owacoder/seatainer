@@ -1036,10 +1036,10 @@ void cc_el_pretty_print(FILE *out, HElementData data, unsigned flags)
     {
         default: fputs("<?>", out); break;
         case El_Char: fprintf(out, "%c (%d)", *cc_el_get_char(data), *cc_el_get_char(data)); break;
-        case El_SignedChar: fprintf(out, "%c (%hd)", *cc_el_get_signed_char(data), *cc_el_get_signed_char(data)); break;
-        case El_UnsignedChar: fprintf(out, "%c (%hd)", *cc_el_get_unsigned_char(data), *cc_el_get_unsigned_char(data)); break;
-        case El_SignedShort: fprintf(out, "%hhd (%#hhx)", *cc_el_get_signed_short(data), *cc_el_get_signed_short(data)); break;
-        case El_UnsignedShort: fprintf(out, "%hhd (%#hhx)", *cc_el_get_unsigned_short(data), *cc_el_get_unsigned_short(data)); break;
+        case El_SignedChar: fprintf(out, "%c (%hhd)", *cc_el_get_signed_char(data), *cc_el_get_signed_char(data)); break;
+        case El_UnsignedChar: fprintf(out, "%c (%hhd)", *cc_el_get_unsigned_char(data), *cc_el_get_unsigned_char(data)); break;
+        case El_SignedShort: fprintf(out, "%hd (%#hx)", *cc_el_get_signed_short(data), *cc_el_get_signed_short(data)); break;
+        case El_UnsignedShort: fprintf(out, "%hd (%#hx)", *cc_el_get_unsigned_short(data), *cc_el_get_unsigned_short(data)); break;
         case El_SignedInt: fprintf(out, "%d (%#x)", *cc_el_get_signed_int(data), *cc_el_get_signed_int(data)); break;
         case El_UnsignedInt: fprintf(out, "%d (%#x)", *cc_el_get_unsigned_int(data), *cc_el_get_unsigned_int(data)); break;
         case El_SignedLong: fprintf(out, "%ld (%lx)", *cc_el_get_signed_long(data), *cc_el_get_signed_long(data)); break;

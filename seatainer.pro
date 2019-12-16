@@ -3,7 +3,7 @@ CONFIG += console
 CONFIG -= app_bundle
 CONFIG -= qt
 
-QMAKE_CFLAGS += -msse4.1 -msha -maes -nostdlib
+QMAKE_CFLAGS += -msse4.1 -msha -maes -nostdlib -std=gnu99
 QMAKE_CXXFLAGS += -std=c++11
 
 DEFINES += CC_TYPE_MISMATCH_ABORT \
@@ -45,7 +45,8 @@ SOURCES += \
     seaerror.c \
     IO/limiter.c \
     ccio.c \
-    IO/concat.c
+    IO/concat.c \
+    process.c
 
 HEADERS += \
     ccdbllst.h \
@@ -72,7 +73,8 @@ HEADERS += \
     seaerror.h \
     IO/limiter.h \
     ccio.h \
-    IO/concat.h
+    IO/concat.h \
+    process.h
 
 DISTFILES += \
     README.md \

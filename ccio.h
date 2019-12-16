@@ -535,15 +535,16 @@ char *io_gets(char *str, int num, IO io);
 IO io_open(const char *filename, const char *mode);
 /* If `mode` contains "@ncp" on Windows, the [n]ative [c]ode [p]age is used, instead of UTF-8 */
 IO io_open_native(const char *filename, const char *mode);
+
 #if WINDOWS_OS
-#define IO_NATIVE_FILE_HANDLE HANDLE
+typedef HANDLE IONativeFileHandle;
 #define IO_INVALID_FILE_HANDLE INVALID_HANDLE_VALUE
 #else
-#define IO_NATIVE_FILE_HANDLE int
+typedef int IONativeFileHandle;
 #define IO_INVALID_FILE_HANDLE (-1)
 #endif
 
-IO io_open_native_file(IO_NATIVE_FILE_HANDLE descriptor, const char *mode);
+IO io_open_native_file(IONativeFileHandle descriptor, const char *mode);
 IO io_open_file(FILE *file);
 IO io_open_empty(void); /* No input is read (i.e. the first read returns EOF) and all writes fail to this device */
 IO io_open_cstring(const char *str, const char *mode);
@@ -1129,11 +1130,11 @@ protected:
 
 public:
     FileIO() {}
-    FileIO(IO_NATIVE_FILE_HANDLE native, const char *mode = "rwb") {tryOpen(open(native, mode));}
+    FileIO(IONativeFileHandle native, const char *mode = "rwb") {tryOpen(open(native, mode));}
     FileIO(FILE *file) {tryOpen(open(file));}
     FileIO(const char *filename, const char *mode = "rb", bool native = true) {tryOpen(open(filename, mode, native));}
 
-    int open(IO_NATIVE_FILE_HANDLE native, const char *mode = "rwb") {
+    int open(IONativeFileHandle native, const char *mode = "rwb") {
         if (isOpen())
             return AlreadyOpen;
 
@@ -1160,9 +1161,9 @@ public:
 
     std::string filename() const {return name;}
 
-    IO_NATIVE_FILE_HANDLE handle() const {
+    IONativeFileHandle handle() const {
         if (m_io && (io_type(m_io) == IO_NativeFile || io_type(m_io) == IO_OwnNativeFile))
-            return (IO_NATIVE_FILE_HANDLE) (uintmax_t) io_userdata(m_io);
+            return (IONativeFileHandle) (uintmax_t) io_userdata(m_io);
 
         return IO_INVALID_FILE_HANDLE;
     }

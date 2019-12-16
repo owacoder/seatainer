@@ -778,10 +778,8 @@ static int net_close(void *userdata, IO io) {
     int closeResult = close(context->fd);
 #endif
 
-#ifdef CC_INCLUDE_SSL
     if (result == 0)
         result = closeResult;
-#endif
 
     FREE(context);
     return result;
@@ -1238,6 +1236,8 @@ HttpState http_create_state(IO http, HttpHeaderCallback responseHeaderCb) {
 }
 
 HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderCb, int *err, void *ssl_ctx) {
+    UNUSED(ssl_ctx)
+
     HttpState state = CALLOC(1, sizeof(*state));
     if (state == NULL) {
         if (err)

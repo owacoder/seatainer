@@ -28,6 +28,7 @@ SRCFILES = ccdbllst.c \
            IO/padding/pkcs7.c \
            ccio.c \
            dir.c \
+           process.c \
            main.c \
            utility.c \
            seaerror.c \
@@ -53,6 +54,7 @@ HEADERFILES = ccdbllst.h \
               ccio.h \
               cclnklst.h \
               dir.h \
+              process.h \
               platforms.h \
               utility.h \
               seaerror.h \

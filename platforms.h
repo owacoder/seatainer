@@ -212,12 +212,13 @@
 #  define SOCKET_ERROR (-1)
 #  define SOCKET int
 
-#  include <sys/types.h>
 #  include <sys/socket.h>
 #  include <netinet/in.h>
 #  include <netdb.h>
-#  include <unistd.h>
 # endif /* CC_INCLUDE_NETWORK */
+# include <sys/types.h>
+# include <fcntl.h>
+# include <unistd.h>
 #else
 # define IS_POSIX_COMPLIANT_OS 0
 #endif

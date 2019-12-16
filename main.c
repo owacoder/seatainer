@@ -534,10 +534,30 @@ void walk_dir(IO out, Directory directory) {
     }
 }
 
+#include "process.h"
+#include <unistd.h>
+
 int main()
 {
     {
-        Directory dir = dir_open("E:/Programming", DirFilterShowAll, DirSortByTime | DirSortFoldersBeforeFiles);
+        int exit = 0;
+        ProcessNativeHandle handle = 0;
+        int success = process_start_daemon("mousepad", NULL, &handle);
+
+        printf("Handle %d\n", handle);
+        if (success == 0) {
+            printf("Result code: %d\n", exit);
+        } else {
+            printf("Error occurred: %s\n", error_description(success));
+        }
+
+        sleep(4);
+
+        return 0;
+    }
+
+    {
+        Directory dir = dir_open("/shared/Programming", DirFilterShowAll, DirSortByTime | DirSortFoldersBeforeFiles);
         DirectoryEntry entry;
 
         while ((entry = dir_next(dir)) != NULL) {

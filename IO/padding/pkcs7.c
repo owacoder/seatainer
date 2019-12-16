@@ -55,7 +55,7 @@ int pkcs7_padding_decode_close(void *userdata, IO io) {
     int err = 0;
 
     if (io_just_wrote(io) && padding->buffer_avail) {
-        int padding_char = padding->buffer[padding->buffer_avail - 1];
+        unsigned padding_char = padding->buffer[padding->buffer_avail - 1];
 
         if (padding_char > padding->buffer_avail ||
                 padding->buffer_avail != padding->block_size) /* Bad padding, specifies value greater than block size */

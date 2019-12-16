@@ -135,8 +135,10 @@ static IO io_static_alloc(enum IO_Type type) {
         }
     }
 
-    if (io == NULL)
+    if (io == NULL) {
+        atomic_set(&io_static_alloc_lock, 0);
         return NULL;
+    }
 
     io->type = type;
     io->flags = IO_FLAG_IN_USE;
@@ -590,7 +592,7 @@ int io_resize(IO io, long long int size) {
             return 0;
 #endif
         case IO_MinimalBuffer:
-            if (io->sizes.size > size) /* Truncating */ {
+            if (io->sizes.size > (unsigned long long) size) /* Truncating */ {
                 char *new_ptr = MALLOC(size);
                 if (new_ptr == NULL) {
                     io->flags |= IO_FLAG_ERROR;
@@ -618,7 +620,7 @@ int io_resize(IO io, long long int size) {
 
             return 0;
         case IO_DynamicBuffer:
-            if (io->sizes.size > size) /* Truncating */ {
+            if (io->sizes.size > (unsigned long long) size) /* Truncating */ {
                 io->sizes.size = io->sizes.pos = size;
             } else /* Extending */ {
                 if (io_grow(io, size)) {
@@ -1497,9 +1499,9 @@ static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, u
         {
             int val = va_arg(args->args, int);
 
-            if (len == PRINTF_LEN_H)
+            if (len == PRINTF_LEN_HH)
                 val = (signed char) val;
-            else if (len == PRINTF_LEN_HH)
+            else if (len == PRINTF_LEN_H)
                 val = (signed short) val;
 
             PRINTF_D(int, val, flags, prec, len, state);
@@ -1547,9 +1549,9 @@ static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsig
         {
             unsigned val = va_arg(args->args, unsigned int);
 
-            if (len == PRINTF_LEN_H)
+            if (len == PRINTF_LEN_HH)
                 val = (unsigned char) val;
-            else if (len == PRINTF_LEN_HH)
+            else if (len == PRINTF_LEN_H)
                 val = (unsigned short) val;
 
             PRINTF_U(unsigned, fmt, val, flags, prec, len, state);
@@ -1852,8 +1854,8 @@ done_with_flags:
                         case 'n':
                             switch (fmt_len) {
                                 case PRINTF_LEN_NONE: *(va_arg(args_copy.args, int *)) = written; break;
-                                case PRINTF_LEN_H: *(va_arg(args_copy.args, signed char *)) = (signed char) written; break;
-                                case PRINTF_LEN_HH: *(va_arg(args_copy.args, short *)) = (short) written; break;
+                                case PRINTF_LEN_HH: *(va_arg(args_copy.args, signed char *)) = (signed char) written; break;
+                                case PRINTF_LEN_H: *(va_arg(args_copy.args, short *)) = (short) written; break;
                                 case PRINTF_LEN_L: *(va_arg(args_copy.args, long *)) = written; break;
                                 case PRINTF_LEN_LL: *(va_arg(args_copy.args, long long *)) = written; break;
                                 case PRINTF_LEN_J: *(va_arg(args_copy.args, intmax_t *)) = written; break;

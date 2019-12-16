@@ -199,6 +199,7 @@ static uint8_t xtime(uint8_t v) {
     return (uint8_t) ((v << 1) ^ (((v >> 7) & 1) * 0x1b));
 }
 
+#if 0
 static uint8_t GF2(uint8_t b) {
     return xtime(b);
 }
@@ -206,6 +207,7 @@ static uint8_t GF2(uint8_t b) {
 static uint8_t GF3(uint8_t b) {
     return xtime(b) ^ b;
 }
+#endif
 
 static uint8_t GF(uint8_t a, uint8_t b) {
     uint8_t result = (a & 1) * b;
