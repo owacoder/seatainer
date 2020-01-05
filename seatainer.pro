@@ -46,7 +46,8 @@ SOURCES += \
     IO/limiter.c \
     ccio.c \
     IO/concat.c \
-    process.c
+    process.c \
+    IO/sha256.c
 
 HEADERS += \
     ccdbllst.h \
@@ -74,7 +75,8 @@ HEADERS += \
     IO/limiter.h \
     ccio.h \
     IO/concat.h \
-    process.h
+    process.h \
+    IO/sha256.h
 
 DISTFILES += \
     README.md \

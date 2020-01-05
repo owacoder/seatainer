@@ -153,6 +153,12 @@ int process_start_sync(const char *process, const char * const args[], int *exit
             return CC_EINTR;
         }
     }
+#elif WINDOWS_OS
+    PWSTR proc = utf8_to_wide_alloc(process);
+    if (proc == NULL)
+        return CC_ENOMEM;
+
+    BOOL success = CreateProcessW(proc, commandline, NULL, NULL, FALSE, 0, NULL, NULL, )
 #else
     UNUSED(process)
     UNUSED(args)

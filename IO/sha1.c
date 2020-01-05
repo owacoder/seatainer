@@ -27,10 +27,7 @@ struct Sha1 {
 };
 
 static void calculate_sha1(struct Sha1 *sha1) {
-    uint32_t wbuffer[80] = {0, 0, 0, 0,
-                            0, 0, 0, 0,
-                            0, 0, 0, 0,
-                            0, 0, 0, 0};
+    uint32_t wbuffer[80];
     uint32_t mstate[5] = {sha1->state[0], sha1->state[1], sha1->state[2], sha1->state[3], sha1->state[4]};
 
     for (size_t i = 0; i < 16; ++i)
@@ -347,10 +344,8 @@ static size_t sha1_read(void *ptr, size_t size, size_t count, void *userdata, IO
         return 0;
 
     struct Sha1 temp_sha1;
-    struct Sha1 *sha1 = userdata;
-    size_t max = size*count;
-    if (max > SHA1_HASH_BYTES)
-        max = SHA1_HASH_BYTES - sha1->read;
+    struct Sha1 *sha1 = userdata, *usersha1 = userdata;
+    size_t max = MIN(size*count, (size_t) (SHA1_HASH_BYTES - sha1->read));
 
     if (!io_writable(io) && sha1->message_len == 0) /* Using as pull parser; read entire input then hash (if hash was already calculated, message length is non-zero) */ {
         do {
@@ -378,9 +373,9 @@ static size_t sha1_read(void *ptr, size_t size, size_t count, void *userdata, IO
     u32cpy_be(&state[16], sha1->state[4]);
 
     memcpy(ptr, state + sha1->read, max);
-    sha1->read += max;
+    usersha1->read += max;
 
-    return max;
+    return max / size;
 }
 
 static size_t sha1_write(const void *ptr, size_t size, size_t count, void *userdata, IO io) {

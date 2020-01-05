@@ -342,6 +342,7 @@ void test_small_dll()
 #include "IO/hex.h"
 #include "IO/md5.h"
 #include "IO/sha1.h"
+#include "IO/sha256.h"
 #include "IO/net.h"
 #include "IO/tee.h"
 #include "IO/concat.h"
@@ -539,6 +540,14 @@ void walk_dir(IO out, Directory directory) {
 
 int main()
 {
+    {
+        IO sha256 = io_open_sha256(io_open_cstring("The", "r"), "r");
+        io_copy(sha256, io_open_hex_encode(io_open_file(stdout), "w"));
+        io_copy(sha256, io_open_file(stdout));
+
+        return 0;
+    }
+
     {
         int exit = 0;
         ProcessNativeHandle handle = 0;

@@ -21,6 +21,7 @@ SRCFILES = ccdbllst.c \
            IO/limiter.c \
            IO/md5.c \
            IO/sha1.c \
+           IO/sha256.c \
            IO/net.c \
            IO/tee.c \
            IO/zlib_io.c \
@@ -46,6 +47,7 @@ HEADERFILES = ccdbllst.h \
               IO/limiter.h \
               IO/md5.h \
               IO/sha1.h \
+              IO/sha256.h \
               IO/net.h \
               IO/tee.h \
               IO/zlib_io.h \
