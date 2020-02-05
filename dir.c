@@ -1746,6 +1746,8 @@ cleanup:
     FREE(wide);
     return entry->parent->error = GetLastError();
 #endif
+
+    /* TODO: Linux attributes */
 }
 
 time_t dirent_created_time(DirectoryEntry entry, int *err) {

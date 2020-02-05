@@ -9,7 +9,7 @@
 #include <limits.h>
 #include <stdlib.h>
 
-#if defined(__SSE2__) && defined(__AES__)
+#if (defined(__SSE2__) && defined(__AES__))
 #define AES_COMPILE_SUPPORTS_X86_INTRINSICS
 #endif
 

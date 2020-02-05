@@ -536,31 +536,39 @@ void walk_dir(IO out, Directory directory) {
 }
 
 #include "process.h"
-#include <unistd.h>
+#include <stdlib.h>
 
 int main()
 {
     {
-        IO sha256 = io_open_sha256(io_open_cstring("The", "r"), "r");
-        io_copy(sha256, io_open_hex_encode(io_open_file(stdout), "w"));
-        io_copy(sha256, io_open_file(stdout));
+        Process p = process_start("C:\\Windows\\system32\\cmd.exe", NULL);
+
+        printf("Start error: %s\n", error_description(process_error(p)));
+
+        process_close_stdin(p);
+        io_copy(process_stdout(p), io_open_file(stdout));
+
+        thread_sleep(4000);
+
+        printf("Stop error: %s\n", error_description(process_destroy(p)));
 
         return 0;
-    }
 
-    {
         int exit = 0;
-        ProcessNativeHandle handle = 0;
-        int success = process_start_daemon("mousepad", NULL, &handle);
+        ProcessNativeHandle handle;
+        int success = process_start_async("C:\\Windows\\system32\\cmd.exe", NULL, &handle);
 
-        printf("Handle %d\n", handle);
+        // printf("Handle %d\n", handle);
+        if (success == 0)
+            success = process_native_kill_normal(handle);
+
         if (success == 0) {
             printf("Result code: %d\n", exit);
         } else {
             printf("Error occurred: %s\n", error_description(success));
         }
 
-        sleep(4);
+        thread_sleep(4000);
 
         return 0;
     }

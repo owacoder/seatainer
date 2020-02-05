@@ -236,7 +236,7 @@
 # define ALPHA_CPU 0
 #endif
 
-#if (defined(__amd64__) | defined(__amd64) | defined(__x86_64__) | defined(__x86_64) | defined(_M_AMD64))
+#if (defined(__amd64__) | defined(__amd64) | defined(__x86_64__) | defined(__x86_64) | defined(_M_AMD64) | defined(_M_X64))
 # define AMD64_CPU 1
 #else
 # define AMD64_CPU 0
@@ -351,6 +351,23 @@
 #if X86_CPU | AMD64_CPU
 # if MSVC_COMPILER
 #  include <intrin.h>
+#  if AMD64_CPU
+#   define __SSE2__ 1
+#   define __SSE__ 1
+#  elif _M_IX86_FP == 2
+#   define __SSE2__ 1
+#   define __SSE__ 1
+#  elif _M_IX86_FP == 1
+#   define __SSE__ 1
+#  endif
+#  ifdef __SSE2__
+#   define __SSE3__ 1
+#   define __SSSE3__ 1
+#   define __SSE4_1__ 1
+#   define __SSE4_2__ 1
+#   define __AES__ 1
+#   define __SHA__ 1
+#  endif
 # elif GCC_COMPILER | CLANG_COMPILER
 #  include <cpuid.h>
 #  include <x86intrin.h>

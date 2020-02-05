@@ -50,6 +50,12 @@ int memswap(void *p, void *q, size_t size);
 
 int memxor(void *dst, void *src, size_t size);
 
+/** @brief Sleeps for @p milliseconds milliseconds.
+ *
+ * @param milliseconds The number of milliseconds to sleep for.
+ */
+void thread_sleep(unsigned long milliseconds);
+
 #define UTF8_MAX (0x10ffff)
 #define UTF8_MASK (0x1fffff)
 
@@ -133,7 +139,7 @@ int strcmp_no_case(const char *lhs, const char *rhs);
  * @param stringsCount The number of entries in the strings array.
  * @result A newly allocated string that contains the concatenated strings, or `NULL` if out of memory.
  */
-char *strgather(char *strings[], size_t stringsCount);
+char *strgather(const char *strings[], size_t stringsCount);
 
 /* Performs a Pearson hash on the specified data, with a pseudo-random shuffle of hash bytes */
 unsigned pearson_hash(const char *data, size_t size);

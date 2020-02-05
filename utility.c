@@ -276,6 +276,14 @@ int memxor(void *dst, void *src, size_t size) {
     return 0;
 }
 
+void thread_sleep(unsigned long milliseconds) {
+#if LINUX_OS
+    usleep(milliseconds * 1000);
+#elif WINDOWS_OS
+    Sleep(milliseconds);
+#endif
+}
+
 int utf8size(uint32_t codepoint) {
     if (codepoint < 0x80) return 1;
     else if (codepoint < 0x800) return 2;
@@ -448,7 +456,7 @@ int strcmp_no_case(const char *lhs, const char *rhs) {
     return 0;
 }
 
-char *strgather(char *strings[], size_t stringsCount) {
+char *strgather(const char *strings[], size_t stringsCount) {
     size_t totalLen = 0;
     
     for (size_t i = 0; i < stringsCount; ++i) {
@@ -846,6 +854,9 @@ size_t safe_multiply(size_t u, size_t v) {
 
 #if WINDOWS_OS
 int str_is_codepage_safe(LPCSTR utf8) {
+    if (utf8 == NULL)
+        return 1;
+
     for (; *utf8; ++utf8)
         if ((unsigned char) *utf8 >= 0x80)
             return 0;
@@ -854,6 +865,9 @@ int str_is_codepage_safe(LPCSTR utf8) {
 }
 
 LPWSTR utf8_to_wide_alloc(LPCSTR utf8) {
+    if (utf8 == NULL)
+        return NULL;
+
     int chars = MultiByteToWideChar(CP_UTF8, MB_PRECOMPOSED, utf8, -1, NULL, 0);
 
     LPWSTR result = MALLOC(sizeof(*result) * chars);
@@ -866,6 +880,9 @@ LPWSTR utf8_to_wide_alloc(LPCSTR utf8) {
 }
 
 LPSTR wide_to_utf8_alloc(LPCWSTR wide) {
+    if (wide == NULL)
+        return NULL;
+
     int bytes = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
 
     LPSTR result = MALLOC(bytes);
