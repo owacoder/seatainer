@@ -349,6 +349,9 @@ void test_small_dll()
 #include "IO/zlib_io.h"
 #include "IO/padding/bit.h"
 #include "IO/padding/pkcs7.h"
+#include "IO/repeat.h"
+#include "IO/limiter.h"
+#include "IO/buffer.h"
 
 void test_io() {
     test_hex();
@@ -540,6 +543,31 @@ void walk_dir(IO out, Directory directory) {
 
 int main()
 {
+    {
+        IO buffer = io_open_thread_buffer();
+        IO repeat = io_open_repeat(io_open_cstring("string", "rb"), "rb");
+
+        while (1) {
+            io_putc(io_getc(repeat), buffer);
+            io_putc(io_getc(repeat), buffer);
+            io_seek(buffer, 0, SEEK_CUR);
+            io_getc(buffer);
+            io_seek(buffer, 0, SEEK_CUR);
+        }
+
+        return 0;
+    }
+
+    {
+        IO str = io_open_cstring("keyword", "r");
+        IO rep = io_open_repeat(str, "r");
+
+        //io_copy(io_open_limiter(rep, 0, 500, "rb"), io_open_file(stdout));
+        io_copy(rep, io_open_limiter(io_open_file(stdout), 0, 500, "wb"));
+
+        return 0;
+    }
+
     {
         Process p = process_start("C:\\Windows\\system32\\cmd.exe", NULL);
 

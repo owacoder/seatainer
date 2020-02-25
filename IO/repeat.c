@@ -5,52 +5,40 @@
  */
 
 #include "repeat.h"
+#include "../seaerror.h"
+
 #include <string.h>
 
-/* TODO: implement repeating device */
-
 static void *repeat_open(void *userdata, IO io) {
-    memcpy(io_tempdata(io), userdata, sizeof(void *));
+    UNUSED(io)
 
-    return io;
+    return userdata;
 }
 
 static size_t repeat_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {
     IO underlyingIO = userdata;
-    const char *cptr = ptr;
+    char *cptr = ptr;
     size_t max = size*count;
+    size_t read;
+    int at_end = 0;
 
-    size_t read = io_read(cptr, 1, max, underlyingIO);
-}
+    while (1) {
+        read = io_read(cptr, 1, max, underlyingIO);
+        io_set_error(io, io_error(underlyingIO));
 
-static int repeat_flush(void *userdata, IO io) {
-    UNUSED(userdata)
+        cptr += read;
+        max -= read;
 
-    struct RepeatInitializationParams *params = (struct RepeatInitializationParams *) io_tempdata(io);
+        if (max == 0 || io_error(io) || (at_end && read == 0)) /* Everything was read, an error occurred, or the stream is empty */
+            return (size*count - max) / size;
 
-    /*
-    io_flush(params->out1);
-    io_flush(params->out2);
+        if (io_seek(underlyingIO, 0, SEEK_SET)) {
+            io_set_error(io, CC_ESPIPE);
+            return (size*count - max) / size;
+        }
 
-    if (io_error(params->out1))
-        io_set_error(io, io_error(params->out1));
-    else if (io_error(params->out2))
-        io_set_error(io, io_error(params->out2));
-    else
-        return 0;
-        */
-
-    return EOF;
-}
-
-static void repeat_clearerr(void *userdata, IO io) {
-    UNUSED(userdata)
-
-    struct RepeatInitializationParams *params = (struct RepeatInitializationParams *) io_tempdata(io);
-
-    /*
-    io_clearerr(params->out1);
-    io_clearerr(params->out2);*/
+        at_end = 1;
+    }
 }
 
 static const char *repeat_what(void *userdata, IO io) {
@@ -65,8 +53,8 @@ static const struct InputOutputDeviceCallbacks repeat_callbacks = {
     .close = NULL,
     .read = repeat_read,
     .write = NULL,
-    .flush = repeat_flush,
-    .clearerr = repeat_clearerr,
+    .flush = NULL,
+    .clearerr = NULL,
     .stateSwitch = NULL,
     .seek = NULL,
     .seek64 = NULL,

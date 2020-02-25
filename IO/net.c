@@ -2,8 +2,6 @@
 #include "../utility.h"
 #include "../seaerror.h"
 
-#include "../seaerror.h"
-
 #include <string.h>
 #include <limits.h>
 #include <ctype.h>

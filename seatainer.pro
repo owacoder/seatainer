@@ -48,7 +48,8 @@ SOURCES += \
     IO/concat.c \
     process.c \
     IO/sha256.c \
-    IO/repeat.c
+    IO/repeat.c \
+    IO/buffer.c
 
 HEADERS += \
     ccdbllst.h \
@@ -78,7 +79,8 @@ HEADERS += \
     IO/concat.h \
     process.h \
     IO/sha256.h \
-    IO/repeat.h
+    IO/repeat.h \
+    IO/buffer.h
 
 DISTFILES += \
     README.md \

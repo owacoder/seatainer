@@ -17,7 +17,7 @@ static size_t limiter_read(void *buf, size_t size, size_t count, void *userdata,
     struct Limiter *limiter = userdata;
 
     size_t max = size*count;
-    long long available = limiter->length - io_tell64(io);
+    long long available = limiter->length - limiter->pos;
     if (available <= 0) /* Overshot end of limited sequence, EOF */
         return 0;
 
@@ -29,7 +29,7 @@ static size_t limiter_read(void *buf, size_t size, size_t count, void *userdata,
     size_t read = io_read(buf, 1, max, limiter->io) / size;
     io_set_error(io, io_error(limiter->io));
 
-    limiter->pos += read;
+    limiter->pos += read * size;
     return read;
 }
 
@@ -37,7 +37,7 @@ static size_t limiter_write(const void *buf, size_t size, size_t count, void *us
     struct Limiter *limiter = userdata;
 
     size_t max = size*count;
-    long long available = limiter->length - io_tell64(io);
+    long long available = limiter->length - limiter->pos;
     if (available <= 0) /* No space to write */ {
         io_set_error(io, CC_ENOBUFS);
         return 0;
@@ -54,7 +54,7 @@ static size_t limiter_write(const void *buf, size_t size, size_t count, void *us
     if (!io_error(io) && written < max)
         io_set_error(io, CC_ENOBUFS);
 
-    limiter->pos += written;
+    limiter->pos += written * size;
     return written;
 }
 
@@ -90,14 +90,7 @@ static long long limiter_tell64(void *userdata, IO io) {
 
     struct Limiter *limiter = userdata;
 
-    long long pos = io_tell64(limiter->io);
-    if (pos >= 0) {
-        limiter->pos = pos -= limiter->offset;
-    } else {
-        pos = limiter->pos;
-    }
-
-    return pos;
+    return limiter->pos + limiter->offset;
 }
 
 static int limiter_seek64(void *userdata, long long int offset, int origin, IO io) {

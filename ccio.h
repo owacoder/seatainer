@@ -39,7 +39,7 @@ struct InputOutputDevice;
  *   - `x` - Make opening the device fail if the file already exists. Only relevant for file devices.
  *   - `t` - Open device in text mode. On Linux, the stream is left unchanged. On Windows, CRLF is converted to LF when reading, and vice versa when writing.
  *   - `b` - Open device in binary mode. This is the opposite of `t`. If both are specified, the last in the mode string is used.
- *   - `<` - Disable hardware acceleration. Currently only implemented for AES IO.
+ *   - `<` - Disable hardware acceleration. Currently only implemented for AES and SHA IO.
  *   - `g` - Grab ownership of handle when opening a native file descriptor.
  *   - `@ncp` - If specified in this order, the [n]ative [c]ode [p]age is used on Windows to open files instead of UTF-8.
  *
@@ -138,7 +138,7 @@ struct InputOutputDeviceCallbacks {
      *
      * Read callbacks function identically to the `fread()` standard C library call, except for the return value.
      * If a read callback returns `SIZE_MAX`, or sets an error, then a read error occured.
-     * The callback must set the `io` parameter's error code with `io_set_error()`.
+     * The callback may set the `io` parameter's error code with `io_set_error()`, but this is not required. If no error is specified, a generic read error is set if `SIZE_MAX` is returned.
      * If no error is returned, and the return value is less than the requested number of objects, EOF is assumed to have been reached.
      */
     IO_ReadCallback read;

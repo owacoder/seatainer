@@ -9,7 +9,7 @@
 
 #include <string.h>
 
-/* io_tempdata() guaranconcats that we'll be able to store at least three pointers, so casting tempdata to this struct is always safe */
+/* io_tempdata() guarantees that we'll be able to store at least three pointers, so casting tempdata to this struct is always safe */
 struct ConcatInitializationParams {
     IO lhs, rhs;
     char use_lhs;
