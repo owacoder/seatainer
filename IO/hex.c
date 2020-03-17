@@ -238,6 +238,7 @@ static const struct InputOutputDeviceCallbacks hex_encode_callbacks = {
     .tell64 = hex_encode_tell64,
     .seek = NULL,
     .seek64 = hex_encode_seek64,
+    .flags = NULL,
     .what = hex_encode_what
 };
 
@@ -253,6 +254,7 @@ static const struct InputOutputDeviceCallbacks hex_decode_callbacks = {
     .tell64 = hex_decode_tell64,
     .seek = NULL,
     .seek64 = hex_decode_seek64,
+    .flags = NULL,
     .what = hex_decode_what
 };
 

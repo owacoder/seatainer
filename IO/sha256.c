@@ -495,6 +495,7 @@ static const struct InputOutputDeviceCallbacks sha256_callbacks = {
     .tell64 = NULL,
     .seek = sha256_seek,
     .seek64 = NULL,
+    .flags = NULL,
     .what = sha256_what
 };
 

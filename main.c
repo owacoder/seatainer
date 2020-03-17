@@ -545,14 +545,24 @@ int main()
 {
     {
         IO buffer = io_open_thread_buffer();
-        IO repeat = io_open_repeat(io_open_cstring("string", "rb"), "rb");
+        IO repeat = io_open_repeat(io_open_cstring("SomeData", "rb"), "rb");
+
+        size_t iteration = 0;
+        IO out = io_open_file(stdout);
 
         while (1) {
-            io_putc(io_getc(repeat), buffer);
-            io_putc(io_getc(repeat), buffer);
-            io_seek(buffer, 0, SEEK_CUR);
-            io_getc(buffer);
-            io_seek(buffer, 0, SEEK_CUR);
+            ++iteration;
+            if (io_putc(io_getc(repeat), buffer) == EOF)
+                printf("\nError\n");
+            if (io_putc(io_getc(repeat), buffer) == EOF)
+                printf("\nError\n");
+
+            if (iteration % 300 == 0) {
+                io_copy(buffer, out);
+                io_clearerr(buffer);
+            } else {
+                putc(io_getc(buffer), stdout);
+            }
         }
 
         return 0;

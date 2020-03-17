@@ -60,6 +60,7 @@ static const struct InputOutputDeviceCallbacks repeat_callbacks = {
     .seek64 = NULL,
     .tell = NULL,
     .tell64 = NULL,
+    .flags = NULL,
     .what = repeat_what
 };
 

@@ -217,6 +217,7 @@ static const struct InputOutputDeviceCallbacks zlib_callbacks = {
     .seek64 = NULL,
     .tell = NULL,
     .tell64 = NULL,
+    .flags = NULL,
     .what = zlib_what
 };
 

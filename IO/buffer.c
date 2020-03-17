@@ -10,51 +10,66 @@
 
 struct Buffer {
     char *data;
-    size_t capacity, pos, endpos;
+    size_t capacity, pos, endpos; /* pos points to first character in buffer, endpos points past last character in buffer, if equal, buffer is empty */
 };
 
-static size_t buffer_size_available(struct Buffer *buf) {
+static size_t buffer_size_used(struct Buffer *buf) {
     if (buf->pos <= buf->endpos)
-        return buf->capacity - buf->endpos + buf->pos; /* Space available at end and beginning */
+        return buf->endpos - buf->pos;
+    else /* buf->pos > buf->endpos */
+        return buf->capacity - (buf->pos - buf->endpos);
+}
+
+static size_t buffer_size_empty(struct Buffer *buf) {
+    return buf->capacity - buffer_size_used(buf);
+}
+
+static size_t buffer_contiguous_space_available_at_end(struct Buffer *buf) {
+    if (buf->pos <= buf->endpos)
+        return buf->capacity - buf->endpos;
     else
-        return buf->pos - buf->endpos; /* Space available in middle */
+        return buf->pos - buf->endpos;
+}
+
+static size_t buffer_contiguous_space_used_at_end(struct Buffer *buf) {
+    if (buf->pos <= buf->endpos)
+        return buf->endpos - buf->pos;
+    else
+        return buf->capacity - buf->pos;
 }
 
 static int buffer_grow(struct Buffer *buf, size_t size_of_data_to_append) {
-    if (buffer_size_available(buf) < size_of_data_to_append + 1) {
-        size_t new_size = MAX(buf->capacity + (buf->capacity >> 1), buf->capacity - buffer_size_available(buf) + size_of_data_to_append + 1);
+    size_of_data_to_append += 1;
+
+    if (buffer_size_empty(buf) < size_of_data_to_append) {
+        const size_t currently_used = buffer_size_used(buf);
+        const size_t new_size = MAX(buf->capacity + (buf->capacity >> 1), currently_used + size_of_data_to_append);
 
         if (buf->pos != 0) { /* If data is not aligned to beginning already */
             char *new_data = MALLOC(new_size);
             if (new_data == NULL)
                 return CC_ENOMEM;
 
-            if (buf->pos > buf->endpos) {
-                size_t initial_size = buf->capacity - buf->pos;
-                memcpy(new_data, buf->data + buf->pos, initial_size);
-                memcpy(new_data + initial_size, buf->data, buf->endpos);
-
-                FREE(buf->data);
-                buf->data = new_data;
-                buf->capacity = new_size;
-                buf->endpos += initial_size;
-                buf->pos = 0;
-            } else {
-                memcpy(new_data, buf->data + buf->pos, buf->endpos - buf->pos);
-
-                FREE(buf->data);
-                buf->data = new_data;
-                buf->capacity = new_size;
-                buf->endpos -= buf->pos;
-                buf->pos = 0;
+            if (buf->pos <= buf->endpos) {
+                memcpy(new_data, buf->data + buf->pos, currently_used);
+            } else if (buf->pos > buf->endpos) {
+                const size_t offset = buf->capacity - buf->pos;
+                memcpy(new_data, buf->data + buf->pos, offset);
+                memcpy(new_data + offset, buf->data, buf->endpos);
             }
-        } else { /* Data already aligned to beginning */
+
+            FREE(buf->data);
+            buf->data = new_data;
+            buf->capacity = new_size;
+            buf->pos = 0;
+            buf->endpos = currently_used;
+        } else { /* Data already aligned to start of buffer */
             char *new_data = REALLOC(buf->data, new_size);
             if (new_data == NULL)
                 return CC_ENOMEM;
 
-            buf->data = new_data;
             buf->capacity = new_size;
+            buf->data = new_data;
         }
     }
 
@@ -64,57 +79,49 @@ static int buffer_grow(struct Buffer *buf, size_t size_of_data_to_append) {
 /* Buffer must have at least `size` available space for data before this function is called */
 static void buffer_append(struct Buffer *buf, const void *data, size_t size) {
     const char *cptr = data;
+    const size_t contiguous_to_end = buffer_contiguous_space_available_at_end(buf);
 
-    if (buf->pos < buf->endpos) { /* Space available at both ends */
-        size_t available_at_end = buf->capacity - buf->endpos;
-        size_t amount_to_copy = MIN(available_at_end, size);
-
-        memcpy(buf->data + buf->endpos, cptr, amount_to_copy);
-
-        if (amount_to_copy < size) {
-            buf->endpos = size - amount_to_copy;
-            memcpy(buf->data, cptr + amount_to_copy, buf->endpos);
-        } else
-            buf->endpos += amount_to_copy;
-    } else { /* Space available in the middle */
+    if (contiguous_to_end >= size) {
         memcpy(buf->data + buf->endpos, cptr, size);
         buf->endpos += size;
+        buf->endpos %= buf->capacity;
+    } else {
+        memcpy(buf->data + buf->endpos, cptr, contiguous_to_end);
+        size -= contiguous_to_end;
+
+        memcpy(buf->data, cptr + contiguous_to_end, size);
+        buf->endpos = size;
     }
 }
 
-static size_t buffer_read(void *buf, size_t size, size_t count, void *userdata, IO io) {
+static size_t buffer_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {
+    UNUSED(io)
+
     struct Buffer *buffer = userdata;
 
-    char *cptr = buf;
+    char *cptr = ptr;
     size_t max = size*count;
+    size_t available = buffer_size_used(buffer);
+    const size_t contiguous = buffer_contiguous_space_used_at_end(buffer);
 
-    if (buffer->pos > buffer->endpos) {
-        size_t remaining_to_end = buffer->capacity - buffer->pos;
-        size_t initial_size = MIN(remaining_to_end, max);
+    if (available < max)
+        max = available / size * size;
 
-        memcpy(cptr, buffer->data + buffer->pos, initial_size);
-        buffer->pos += initial_size;
-        max -= initial_size;
-
-        if (max) {
-            size_t remaining = MIN(buffer->endpos, max);
-            memcpy(cptr + initial_size, buffer->data, remaining);
-            buffer->pos = (buffer->pos + remaining) % buffer->capacity;
-            initial_size += remaining;
-        }
-
-        return initial_size / size;
+    if (max <= contiguous) {
+        memcpy(cptr, buffer->data + buffer->pos, max);
+        buffer->pos += max;
+        buffer->pos %= buffer->capacity;
     } else {
-        size_t initial_size = MIN(buffer->endpos - buffer->pos, max);
+        memcpy(cptr, buffer->data + buffer->pos, contiguous);
+        memcpy(cptr + contiguous, buffer->data, max - contiguous);
 
-        memcpy(cptr, buffer->data + buffer->pos, initial_size);
-        buffer->pos += initial_size / size * size;
-
-        return initial_size / size;
+        buffer->pos = max - contiguous;
     }
+
+    return max / size;
 }
 
-static size_t buffer_write(const void *buf, size_t size, size_t count, void *userdata, IO io) {
+static size_t buffer_write(const void *ptr, size_t size, size_t count, void *userdata, IO io) {
     struct Buffer *buffer = userdata;
 
     size_t max = size*count;
@@ -124,7 +131,7 @@ static size_t buffer_write(const void *buf, size_t size, size_t count, void *use
     if (error)
         return 0;
 
-    buffer_append(buffer, buf, max);
+    buffer_append(buffer, ptr, max);
     return count;
 }
 
@@ -143,6 +150,13 @@ static const char *buffer_what(void *userdata, IO io) {
     return "thread_buffer";
 }
 
+static unsigned long buffer_flags(void *userdata, IO io) {
+    UNUSED(userdata)
+    UNUSED(io)
+
+    return IO_FLAG_SUPPORTS_NO_STATE_SWITCH;
+}
+
 static const struct InputOutputDeviceCallbacks buffer_callbacks = {
     .read = buffer_read,
     .write = buffer_write,
@@ -155,6 +169,7 @@ static const struct InputOutputDeviceCallbacks buffer_callbacks = {
     .tell64 = NULL,
     .seek = NULL,
     .seek64 = NULL,
+    .flags = buffer_flags,
     .what = buffer_what
 };
 

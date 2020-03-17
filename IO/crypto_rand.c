@@ -95,6 +95,7 @@ static const struct InputOutputDeviceCallbacks crypto_rand_callbacks = {
     .tell64 = NULL,
     .seek = NULL,
     .seek64 = NULL,
+    .flags = NULL,
     .what = crypto_rand_what
 };
 

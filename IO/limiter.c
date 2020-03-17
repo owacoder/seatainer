@@ -145,6 +145,7 @@ static const struct InputOutputDeviceCallbacks limiter_callbacks = {
     .tell64 = limiter_tell64,
     .seek = NULL,
     .seek64 = limiter_seek64,
+    .flags = NULL,
     .what = limiter_what
 };
 

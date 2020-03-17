@@ -132,6 +132,7 @@ static const struct InputOutputDeviceCallbacks bit_padding_encode_callbacks = {
     .seek64 = NULL,
     .tell = NULL,
     .tell64 = NULL,
+    .flags = NULL,
     .what = bit_padding_encode_what
 };
 

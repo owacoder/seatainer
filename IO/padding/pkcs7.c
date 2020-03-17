@@ -284,6 +284,7 @@ static const struct InputOutputDeviceCallbacks pkcs7_padding_encode_callbacks = 
     .seek64 = NULL,
     .tell = NULL,
     .tell64 = NULL,
+    .flags = NULL,
     .what = pkcs7_padding_encode_what
 };
 
@@ -299,6 +300,7 @@ static const struct InputOutputDeviceCallbacks pkcs7_padding_decode_callbacks = 
     .seek64 = NULL,
     .tell = NULL,
     .tell64 = NULL,
+    .flags = NULL,
     .what = pkcs7_padding_decode_what
 };
 

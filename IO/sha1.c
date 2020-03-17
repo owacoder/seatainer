@@ -481,6 +481,7 @@ static const struct InputOutputDeviceCallbacks sha1_callbacks = {
     .tell64 = NULL,
     .seek = sha1_seek,
     .seek64 = NULL,
+    .flags = NULL,
     .what = sha1_what
 };
 

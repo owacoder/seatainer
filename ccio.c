@@ -717,7 +717,8 @@ int io_getc_internal(IO io) {
 }
 
 int io_getc(IO io) {
-    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_ERROR)))
+    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_READABLE | IO_FLAG_ERROR):
+                                                   (IO_FLAG_READABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_WRITTEN)) & io->flags) != IO_FLAG_READABLE)
     {
         io->flags |= IO_FLAG_ERROR;
         io->error = CC_EREAD;
@@ -769,7 +770,8 @@ char *io_gets(char *str, int num, IO io) {
     char *oldstr = str;
     int oldnum = num;
 
-    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_ERROR)))
+    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_READABLE | IO_FLAG_ERROR):
+                                                   (IO_FLAG_READABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_WRITTEN)) & io->flags) != IO_FLAG_READABLE)
     {
         io->flags |= IO_FLAG_ERROR;
         io->error = CC_EREAD;
@@ -1095,6 +1097,9 @@ IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdat
         io_destroy(io);
         return NULL;
     }
+
+    if (custom->flags != NULL)
+        io->flags |= custom->flags(userdata, io);
 
     return io;
 }
@@ -2073,7 +2078,8 @@ int io_putc_internal(int ch, IO io) {
 }
 
 int io_putc(int ch, IO io) {
-    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_ERROR)))
+    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_WRITABLE | IO_FLAG_ERROR):
+                                                   (IO_FLAG_WRITABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ)) & io->flags) != IO_FLAG_WRITABLE)
     {
         io->flags |= IO_FLAG_ERROR;
         io->error = CC_EWRITE;
@@ -2095,7 +2101,8 @@ int io_putc(int ch, IO io) {
 }
 
 int io_puts(const char *str, IO io) {
-    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_ERROR)))
+    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_WRITABLE | IO_FLAG_ERROR):
+                                                   (IO_FLAG_WRITABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ)) & io->flags) != IO_FLAG_WRITABLE)
     {
         io->flags |= IO_FLAG_ERROR;
         io->error = CC_EWRITE;
@@ -2268,26 +2275,6 @@ static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO
 }
 
 static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
-    const size_t total = safe_multiply(size, count);
-
-    if (total == 0) {
-        if (size && count) {
-            io->flags |= IO_FLAG_ERROR;
-            io->error = CC_EINVAL;
-        }
-        return 0;
-    }
-
-    /* Not readable or not switched over to reading yet */
-    if (!(io->flags & IO_FLAG_READABLE) || (io->flags & (IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_ERROR))) {
-        io->flags |= IO_FLAG_ERROR;
-        if (0 == (io->flags & IO_FLAG_ERROR)) /* Don't overwrite error code if already present */
-            io->error = CC_EREAD;
-        return 0;
-    }
-
-    io->flags |= IO_FLAG_HAS_JUST_READ;
-
     if (io->flags & IO_FLAG_EOF)
         return 0;
 
@@ -2299,7 +2286,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
         case IO_OwnNativeFile:
         case IO_Custom:
         {
-            size_t max = total;
+            size_t max = size*count;
             unsigned char *cptr = ptr;
 
             if (io->sizes.ptr2 == NULL) /* No buffering */
@@ -2349,7 +2336,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
         {
             unsigned char *cptr = ptr;
             size_t blocks = 0;
-            size_t i = io->ungetAvail, max = total;
+            size_t i = io->ungetAvail, max = size*count;
             size_t start_pos = io->sizes.pos;
 
             /* search for 0 character in C-string */
@@ -2381,7 +2368,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
         case IO_DynamicBuffer:
         {
             unsigned char *cptr = ptr;
-            size_t max = total, blocks = 0;
+            size_t max = size*count, blocks = 0;
             size_t avail = io->sizes.size - io->sizes.pos;
 
             if (io->sizes.pos > io->sizes.size)
@@ -2410,9 +2397,6 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
 }
 
 size_t io_read(void *ptr, size_t size, size_t count, IO io) {
-    if (io->flags & IO_FLAG_BINARY)
-        return io_read_internal(ptr, size, count, io);
-
     const size_t total = safe_multiply(size, count);
 
     if (total == 0) {
@@ -2421,6 +2405,21 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
             io->error = CC_EINVAL;
         }
         return 0;
+    }
+
+    if (io->flags & IO_FLAG_BINARY) {
+        /* Not readable or not switched over to reading yet */
+        if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_READABLE | IO_FLAG_ERROR):
+                                                       (IO_FLAG_READABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_WRITTEN)) & io->flags) != IO_FLAG_READABLE) {
+            io->flags |= IO_FLAG_ERROR;
+            if (0 == (io->flags & IO_FLAG_ERROR)) /* Don't overwrite error code if already present */
+                io->error = CC_EREAD;
+            return 0;
+        }
+
+        io->flags |= IO_FLAG_HAS_JUST_READ;
+
+        return io_read_internal(ptr, size, count, io);
     }
 
     size_t max = total;
@@ -3339,26 +3338,6 @@ static size_t io_native_unbuffered_write(const void *ptr, size_t size, size_t co
 }
 
 static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO io) {
-    const size_t total = safe_multiply(size, count);
-
-    if (total == 0) {
-        if (size && count) {
-            io->flags |= IO_FLAG_ERROR;
-            io->error = CC_EINVAL;
-        }
-        return 0;
-    }
-
-    /* Not writable or not switched over to writing yet */
-    if (!(io->flags & IO_FLAG_WRITABLE) || (io->flags & (IO_FLAG_HAS_JUST_READ | IO_FLAG_ERROR))) {
-        io->flags |= IO_FLAG_ERROR;
-        if (0 == (io->flags & IO_FLAG_ERROR))
-            io->error = CC_EWRITE;
-        return 0;
-    }
-
-    io->flags |= IO_FLAG_HAS_JUST_WRITTEN;
-
     switch (io->type) {
         default:
             io->flags |= IO_FLAG_ERROR;
@@ -3478,9 +3457,6 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
 }
 
 size_t io_write(const void *ptr, size_t size, size_t count, IO io) {
-    if (io->flags & IO_FLAG_BINARY)
-        return io_write_internal(ptr, size, count, io);
-
     const size_t total = safe_multiply(size, count);
 
     if (total == 0) {
@@ -3489,6 +3465,21 @@ size_t io_write(const void *ptr, size_t size, size_t count, IO io) {
             io->error = CC_EINVAL;
         }
         return 0;
+    }
+
+    if (io->flags & IO_FLAG_BINARY) {
+        /* Not writable or not switched over to writing yet */
+        if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_WRITABLE | IO_FLAG_ERROR):
+                                                       (IO_FLAG_WRITABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ)) & io->flags) != IO_FLAG_WRITABLE) {
+            io->flags |= IO_FLAG_ERROR;
+            if (0 == (io->flags & IO_FLAG_ERROR))
+                io->error = CC_EWRITE;
+            return 0;
+        }
+
+        io->flags |= IO_FLAG_HAS_JUST_WRITTEN;
+
+        return io_write_internal(ptr, size, count, io);
     }
 
     size_t max = total;

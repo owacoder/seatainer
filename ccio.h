@@ -223,6 +223,14 @@ struct InputOutputDeviceCallbacks {
     int (*seek)(void *userdata, long int offset, int origin, IO io);
     int (*seek64)(void *userdata, long long int offset, int origin, IO io);
 
+    /** @brief Returns a constant integer specifying flags that this IO device type supports
+     *
+     * @param userdata The userdata stored in @p io.
+     * @param io The IO device that flags are being requested for.
+     * @return An unsigned integer specifying which operations this IO device type supports
+     */
+    unsigned long (*flags)(void *userdata, IO io);
+
     /** @brief Returns a constant (non-allocated) string with a machine-friendly description of the device type
      *
      * For example, the native types return the following:
@@ -273,6 +281,9 @@ struct InputOutputDeviceCallbacks {
 #define IO_FLAG_BINARY ((unsigned) 0x2000)
 
 #define IO_FLAG_RESET (IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_UPDATE | IO_FLAG_APPEND | IO_FLAG_ERROR | IO_FLAG_EOF | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_BINARY)
+
+/* Flags for devices to specify support for various modes of operation */
+#define IO_FLAG_SUPPORTS_NO_STATE_SWITCH ((unsigned) 0x10000)
 
 /* For Large File Support on Linux, the compile flag -D_FILE_OFFSET_BITS=64 must be used for
  * io_[seek/tell]64() functions to work with 64-bit offsets. io.c specifies these defines */

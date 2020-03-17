@@ -783,6 +783,13 @@ static int net_close(void *userdata, IO io) {
     return result;
 }
 
+static unsigned long net_flags(void *userdata, IO io) {
+    UNUSED(userdata)
+    UNUSED(io)
+
+    return IO_FLAG_SUPPORTS_NO_STATE_SWITCH;
+}
+
 static const char *net_what(void *userdata, IO io) {
     UNUSED(userdata)
 
@@ -806,6 +813,7 @@ static const struct InputOutputDeviceCallbacks net_callbacks = {
     .tell64 = NULL,
     .seek = NULL,
     .seek64 = NULL,
+    .flags = net_flags,
     .what = net_what
 };
 
@@ -1033,6 +1041,9 @@ int ssl_load_system_certificates(SSL_CTX *ctx) {
 struct HttpChunkedStruct {
     IO io;
 
+    /** @brief Total number of bytes read so far */
+    unsigned long long totalBytes;
+
     /** @brief Length of last chunk that was read. ULONG_LONG_MAX means no chunk has been read yet. */
     unsigned long long chunkLength;
 
@@ -1055,6 +1066,7 @@ static size_t http_chunked_read(void *buf, size_t size, size_t count, void *user
             io_set_error(io, io_error(chunked->io));
 
             chunked->chunkAvail -= read;
+            chunked->totalBytes += read;
             max -= read;
             cbuf += read;
         } else if (chunked->chunkAvail) {
@@ -1069,6 +1081,7 @@ static size_t http_chunked_read(void *buf, size_t size, size_t count, void *user
             }
 
             chunked->chunkAvail -= read;
+            chunked->totalBytes += read;
             max -= read;
             cbuf += read;
 
@@ -1177,6 +1190,12 @@ cleanup:
     return io_error(io);
 }
 
+static signed long long http_chunked_tell64(void *userdata, IO io) {
+    struct HttpChunkedStruct *chunked = userdata;
+
+    return chunked->totalBytes;
+}
+
 static const char *http_chunked_what(void *userdata, IO io) {
     UNUSED(userdata)
     UNUSED(io)
@@ -1193,9 +1212,10 @@ static const struct InputOutputDeviceCallbacks http_chunked_callbacks = {
     .clearerr = http_chunked_clearerr,
     .stateSwitch = NULL,
     .tell = NULL,
-    .tell64 = NULL,
+    .tell64 = http_chunked_tell64,
     .seek = NULL,
     .seek64 = NULL,
+    .flags = NULL,
     .what = http_chunked_what
 };
 

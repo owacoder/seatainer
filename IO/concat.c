@@ -197,6 +197,7 @@ static const struct InputOutputDeviceCallbacks concat_callbacks = {
     .seek64 = concat_seek64,
     .tell = NULL,
     .tell64 = concat_tell64,
+    .flags = NULL,
     .what = concat_what
 };
 

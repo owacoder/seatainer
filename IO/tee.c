@@ -82,6 +82,7 @@ static const struct InputOutputDeviceCallbacks tee_callbacks = {
     .seek64 = NULL,
     .tell = NULL,
     .tell64 = NULL,
+    .flags = NULL,
     .what = tee_what
 };
 

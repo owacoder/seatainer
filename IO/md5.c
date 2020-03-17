@@ -302,6 +302,7 @@ static const struct InputOutputDeviceCallbacks md5_callbacks = {
     .tell64 = NULL,
     .seek = md5_seek,
     .seek64 = NULL,
+    .flags = NULL,
     .what = md5_what
 };
 
