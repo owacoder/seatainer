@@ -638,7 +638,7 @@ Process process_start(const char *process, const char *args[]) {
     if (proc == NULL || commandline == NULL || wcommandline == NULL)
         goto out_of_memory;
 
-    BOOL success = CreateProcessW(proc, wcommandline, NULL, NULL, FALSE, 0, NULL, NULL, &startupinfo, &procinfo);
+    BOOL success = CreateProcessW(proc, wcommandline, NULL, NULL, TRUE, 0, NULL, NULL, &startupinfo, &procinfo);
 
     if (success) {
         if (proclist_add(&proclist, procinfo))
@@ -648,6 +648,10 @@ Process process_start(const char *process, const char *args[]) {
     FREE(proc);
     FREE(commandline);
     FREE(wcommandline);
+
+    CloseHandle(startupinfo.hStdInput);
+    CloseHandle(startupinfo.hStdOutput);
+    CloseHandle(startupinfo.hStdError);
 
     p->info = procinfo;
     p->error = success? 0: GetLastError();
@@ -689,10 +693,26 @@ error: {
     return p;
 }
 
+int process_native_exists(ProcessNativeHandle handle) {
+#if WINDOWS_OS
+    DWORD exitCode;
+    if (GetExitCodeProcess(handle.hProcess, &exitCode))
+        return exitCode == STILL_ACTIVE;
+#endif
+
+    return 0;
+}
+
 int process_native_kill_normal(ProcessNativeHandle handle) {
 #if LINUX_OS
 
 #elif WINDOWS_OS
+    if (!process_native_exists(handle)) {
+        CloseHandle(handle.hProcess);
+        CloseHandle(handle.hThread);
+        return 0;
+    }
+
     HWND process_window = process_top_level_window(handle);
 
     if (process_window != NULL) {
@@ -722,6 +742,12 @@ int process_native_kill_terminate(ProcessNativeHandle handle) {
 #if LINUX_OS
 
 #elif WINDOWS_OS
+    if (!process_native_exists(handle)) {
+        CloseHandle(handle.hProcess);
+        CloseHandle(handle.hThread);
+        return 0;
+    }
+
     if (!TerminateProcess(handle.hProcess, 0))
         return GetLastError();
 
@@ -752,6 +778,8 @@ int process_destroy(Process p) {
 
     if (process_native_kill_normal(p->info))
         error = process_native_kill_terminate(p->info);
+
+    proclist_remove(&proclist, p->info);
 
     FREE(p);
 

@@ -543,6 +543,7 @@ void walk_dir(IO out, Directory directory) {
 
 int main()
 {
+#if 0
     {
         IO buffer = io_open_thread_buffer();
         IO repeat = io_open_repeat(io_open_cstring("SomeData", "rb"), "rb");
@@ -577,16 +578,17 @@ int main()
 
         return 0;
     }
+#endif
 
     {
-        Process p = process_start("C:\\Windows\\system32\\cmd.exe", NULL);
+        Process p = process_start("E:\\Test_Data\\CmdTest.exe", NULL);
 
         printf("Start error: %s\n", error_description(process_error(p)));
 
         process_close_stdin(p);
         io_copy(process_stdout(p), io_open_file(stdout));
-
-        thread_sleep(4000);
+        printf("EOF: %d\n", io_eof(process_stdout(p)));
+        printf("Read error: %s\n", error_description(io_error(process_stdout(p))));
 
         printf("Stop error: %s\n", error_description(process_destroy(p)));
 
