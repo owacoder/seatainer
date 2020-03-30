@@ -15,36 +15,21 @@ struct ProcessListStruct {
     size_t capacity;
 };
 
+struct ProcessStruct {
+    ProcessNativeHandle info;
+    int fdStdin, fdStdout, fdStderr;
+    IO ioStdin, ioStdout, ioStderr;
+    int error;
+};
+
 typedef struct ProcessListStruct *ProcessList;
 
 static struct ProcessListStruct proclist; /* Contains list of all child processes not run synchronously (daemons are not included in this list) */
-static Atomic proclist_lock;
-
-static int proclist_add(ProcessList lst, pid_t proc) {
-    /* Spinlock until lock is 0 */
-    while (atomic_cmpxchg(&proclist_lock, 1, 0) != 0);
-
-    printf("proclist add %d\n", proc);
-    if (lst->count == lst->capacity) {
-        size_t amount = MAX(8, lst->count + (lst->count >> 1));
-        pid_t *d = REALLOC(lst->processes, amount * sizeof(*d));
-        if (d == NULL) {
-            atomic_set(&proclist_lock, 0);
-            return CC_ENOMEM;
-        }
-
-        lst->processes = d;
-        lst->capacity = amount;
-    }
-
-    lst->processes[lst->count++] = proc;
-    atomic_set(&proclist_lock, 0);
-    return 0;
-}
+static Spinlock proclist_lock;
+static Atomic proclist_purge;
 
 static void proclist_remove(ProcessList lst, pid_t proc) {
-    /* Spinlock until lock is 0 */
-    while (atomic_cmpxchg(&proclist_lock, 1, 0) != 0);
+    spinlock_lock(&proclist_lock);
 
     printf("proclist remove %d\n", proc);
     for (size_t i = 0; i < lst->count; ++i) {
@@ -58,7 +43,46 @@ static void proclist_remove(ProcessList lst, pid_t proc) {
         }
     }
 
-    atomic_set(&proclist_lock, 0);
+    spinlock_unlock(&proclist_lock);
+}
+
+static int proclist_add(ProcessList lst, pid_t proc) {
+    /* Purge zombie processes */
+    if (atomic_cmpxchg(&proclist_purge, 1, 0) != 0) {
+        siginfo_t info;
+
+        while (1) {
+            info.si_pid = 0;
+
+            if (waitid(P_ALL, 0, &info, WNOHANG | WEXITED) == -1 || info.si_pid == 0)
+                break;
+
+            printf("Return code %d reaped\n", info.si_status);
+            proclist_remove(&proclist, info.si_pid); /* TODO: not reentrant due to spinlock */
+        }
+    }
+
+    spinlock_lock(&proclist_lock);
+
+    /* Add new process */
+    printf("proclist add %d\n", proc);
+    if (lst->count == lst->capacity) {
+        size_t amount = MAX(8, lst->count + (lst->count >> 1));
+        pid_t *d = REALLOC(lst->processes, amount * sizeof(*d));
+        if (d == NULL) {
+            spinlock_unlock(&proclist_lock);
+            return CC_ENOMEM;
+        }
+
+        lst->processes = d;
+        lst->capacity = amount;
+    }
+
+    lst->processes[lst->count++] = proc;
+
+    spinlock_unlock(&proclist_lock);
+
+    return 0;
 }
 
 static void proclist_at_exit(void) {
@@ -73,25 +97,15 @@ static void proclist_at_exit(void) {
 }
 
 static void sigchld(void) { /* SIGCHLD handler only handles zombie processes */
-    siginfo_t info;
-
-    while (1) {
-        info.si_pid = 0;
-
-        if (waitid(P_ALL, 0, &info, WNOHANG | WEXITED) == -1 || info.si_pid == 0)
-            return;
-
-        printf("Return code %d reaped\n", info.si_status);
-        proclist_remove(&proclist, info.si_pid);
-    }
+    atomic_set(&proclist_purge, 1);
 }
 
 static void register_proc_funcs(void) {
     static Atomic registered = 0;
 
     if (!atomic_set(&registered, 1)) {
-        signal(SIGCHLD, sigchld);
         atexit(proclist_at_exit);
+        signal(SIGCHLD, sigchld);
     }
 }
 #elif WINDOWS_OS
@@ -119,15 +133,14 @@ static struct ProcessListStruct proclist; /* Contains list of all child processe
 static Atomic proclist_lock;
 
 static int proclist_add(ProcessList lst, PROCESS_INFORMATION proc) {
-    /* Spinlock until lock is 0 */
-    while (atomic_cmpxchg(&proclist_lock, 1, 0) != 0);
+    spinlock_lock(&proclist_lock);
 
     printf("proclist add %d\n", proc.dwProcessId);
     if (lst->count == lst->capacity) {
         size_t amount = MAX(8, lst->count + (lst->count >> 1));
         PROCESS_INFORMATION *d = REALLOC(lst->processes, amount * sizeof(*d));
         if (d == NULL) {
-            atomic_set(&proclist_lock, 0);
+            spinlock_unlock(&proclist_lock);
             return CC_ENOMEM;
         }
 
@@ -136,13 +149,14 @@ static int proclist_add(ProcessList lst, PROCESS_INFORMATION proc) {
     }
 
     lst->processes[lst->count++] = proc;
-    atomic_set(&proclist_lock, 0);
+
+    spinlock_unlock(&proclist_lock);
+
     return 0;
 }
 
 static void proclist_remove(ProcessList lst, PROCESS_INFORMATION proc) {
-    /* Spinlock until lock is 0 */
-    while (atomic_cmpxchg(&proclist_lock, 1, 0) != 0);
+    spinlock_lock(&proclist_lock);
 
     printf("proclist remove %d\n", proc.dwProcessId);
     for (size_t i = 0; i < lst->count; ++i) {
@@ -156,7 +170,7 @@ static void proclist_remove(ProcessList lst, PROCESS_INFORMATION proc) {
         }
     }
 
-    atomic_set(&proclist_lock, 0);
+    spinlock_unlock(&proclist_lock);
 }
 
 static void proclist_at_exit(void) {
@@ -164,7 +178,7 @@ static void proclist_at_exit(void) {
 
     for (size_t i = 0; i < proclist.count; ++i) {
         if (process_native_kill_normal(proclist.processes[i]))
-            process_native_kill_terminate(proclist.processes[i]);
+            process_native_kill_immediate(proclist.processes[i]);
         CloseHandle(proclist.processes[i].hProcess);
         CloseHandle(proclist.processes[i].hThread);
     }
@@ -411,7 +425,7 @@ error: {
         FREE(commandline);
         FREE(wcommandline);
         proclist_remove(&proclist, procinfo);
-        process_native_kill_terminate(procinfo);
+        process_native_kill_immediate(procinfo);
         CloseHandle(procinfo.hProcess);
         CloseHandle(procinfo.hThread);
         return error_code;
@@ -443,8 +457,7 @@ int process_start_async(const char *process, const char * const args[], ProcessN
         close(pipefd[0]);
         close(pipefd[1]);
         return errno;
-    }
-    else if (child == 0) {
+    } else if (child == 0) {
         close(pipefd[0]); /* Close read end */
 
         execvp(process, (char * const *) (args? args: temp_args));
@@ -463,8 +476,10 @@ int process_start_async(const char *process, const char * const args[], ProcessN
             error = 0;
         close(pipefd[0]);
 
-        if (!error && proclist_add(&proclist, child))
+        if (!error && proclist_add(&proclist, child)) {
+            process_native_kill_immediate(child);
             error = CC_ENOMEM;
+        }
 
         if (!error && handle)
             *handle = child;
@@ -512,7 +527,7 @@ error: {
         FREE(commandline);
         FREE(wcommandline);
         proclist_remove(&proclist, procinfo);
-        process_native_kill_terminate(procinfo);
+        process_native_kill_immediate(procinfo);
         CloseHandle(procinfo.hProcess);
         CloseHandle(procinfo.hThread);
         return error_code;
@@ -544,8 +559,7 @@ int process_start_daemon(const char *process, const char * const args[], Process
         close(pipefd[0]);
         close(pipefd[1]);
         return errno;
-    }
-    else if (child == 0) {
+    } else if (child == 0) {
         child = fork();
 
         if (child == 0) {
@@ -603,11 +617,97 @@ Process process_start(const char *process, const char *args[]) {
     const char * const temp_args[] = {process, NULL};
 
     Process p = CALLOC(1, sizeof(*p));
+    p->fdStdin = p->fdStdout = p->fdStderr = -1;
     if (p == NULL)
         return NULL;
 
-#if LINUX_OS
+    register_proc_funcs();
 
+#if LINUX_OS
+    int pipefd[2] = {-1, -1};
+    int stdinfd[2] = {-1, -1};
+    int stdoutfd[2] = {-1, -1};
+    int stderrfd[2] = {-1, -1};
+
+    /* TODO: what if stdin, stdout, and stderr were already closed? */
+
+    if (pipe2(pipefd, O_CLOEXEC) != 0 ||
+        pipe2(stdinfd, O_CLOEXEC) != 0 ||
+        pipe2(stdoutfd, O_CLOEXEC) != 0 ||
+        pipe2(stderrfd, O_CLOEXEC))
+        goto error_handler;
+
+    pid_t child = fork();
+    if (child == -1) {
+        goto error_handler;
+    } else if (child == 0) {
+        close(pipefd[0]); /* Close read end of process pipe */
+        close(stdinfd[1]); /* Close write end of stdin */
+        close(stdoutfd[0]); /* Close read end of stdout */
+        close(stderrfd[0]); /* Close read end of stderr */
+
+        if (dup2(stdinfd[0], STDIN_FILENO) < 0 ||
+            dup2(stdoutfd[1], STDOUT_FILENO) < 0 ||
+            dup2(stderrfd[1], STDERR_FILENO) < 0) {
+            /* An error occurred */
+        } else {
+            execvp(process, (char * const *) (args? args: temp_args));
+        }
+
+        int error = errno;
+        write(pipefd[1], &error, sizeof(int));
+        close(pipefd[1]);
+        close(stdinfd[0]);
+        close(stdoutfd[1]);
+        close(stderrfd[1]);
+        exit(0);
+    } else {
+        close(stdinfd[0]); stdinfd[0] = -1; /* Close read end of stdin */
+        close(stdoutfd[1]); stdoutfd[1] = -1; /* Close write end of stdout */
+        close(stderrfd[1]); stderrfd[1] = -1; /* Close write end of stderr */
+
+        int error = 0;
+        close(pipefd[1]); /* Close write end */
+        int amount_read = read(pipefd[0], &error, sizeof(int));
+        if (amount_read < 0)
+            error = errno;
+        else if (amount_read == 0) /* Reached EOF on reading from pipe, this means the exec in the child succeeded. */
+            error = 0;
+        close(pipefd[0]);
+
+        pipefd[0] = pipefd[1] = -1; /* Reset in case we go in the error handler. */
+
+        if (!error && proclist_add(&proclist, child)) {
+            process_native_kill_immediate(child);
+            error = CC_ENOMEM;
+        }
+
+        if (error) {
+            errno = error;
+            goto error_handler;
+        } else {
+            p->info = child;
+            p->fdStdin = stdinfd[1];
+            p->fdStdout = stdoutfd[0];
+            p->fdStderr = stderrfd[0];
+        }
+
+        return p;
+    }
+
+error_handler: {
+        p->error = errno;
+        if (pipefd[0] >= 0) close(pipefd[0]);
+        if (pipefd[1] >= 0) close(pipefd[1]);
+        if (stdinfd[0] >= 0) close(stdinfd[0]);
+        if (stdinfd[1] >= 0) close(stdinfd[1]);
+        if (stdoutfd[0] >= 0) close(stdoutfd[0]);
+        if (stdoutfd[1] >= 0) close(stdoutfd[1]);
+        if (stderrfd[0] >= 0) close(stderrfd[0]);
+        if (stderrfd[1] >= 0) close(stderrfd[1]);
+        process_native_kill_immediate(p->info);
+        return p;
+    }
 #elif WINDOWS_OS
     PWSTR proc = utf8_to_wide_alloc(process);
     char *commandline = process_arglist_to_string(args? args: temp_args);
@@ -678,7 +778,7 @@ error: {
         FREE(commandline);
         FREE(wcommandline);
         proclist_remove(&proclist, procinfo);
-        process_native_kill_terminate(procinfo);
+        process_native_kill_immediate(procinfo);
         CloseHandle(procinfo.hProcess);
         CloseHandle(procinfo.hThread);
         return p;
@@ -694,7 +794,12 @@ error: {
 }
 
 int process_native_exists(ProcessNativeHandle handle) {
-#if WINDOWS_OS
+#if LINUX_OS
+    if (kill(handle, 0) == 0)
+        return 1;
+
+    return 0;
+#elif WINDOWS_OS
     DWORD exitCode;
     if (GetExitCodeProcess(handle.hProcess, &exitCode))
         return exitCode == STILL_ACTIVE;
@@ -704,15 +809,15 @@ int process_native_exists(ProcessNativeHandle handle) {
 }
 
 int process_native_kill_normal(ProcessNativeHandle handle) {
-#if LINUX_OS
-
-#elif WINDOWS_OS
-    if (!process_native_exists(handle)) {
-        CloseHandle(handle.hProcess);
-        CloseHandle(handle.hThread);
+    if (!process_native_exists(handle))
         return 0;
-    }
 
+#if LINUX_OS
+    if (handle > 0)
+        return kill(handle, SIGTERM);
+
+    return CC_EINVAL;
+#elif WINDOWS_OS
     HWND process_window = process_top_level_window(handle);
 
     if (process_window != NULL) {
@@ -738,26 +843,32 @@ int process_native_kill_normal(ProcessNativeHandle handle) {
 #endif
 }
 
-int process_native_kill_terminate(ProcessNativeHandle handle) {
-#if LINUX_OS
-
-#elif WINDOWS_OS
-    if (!process_native_exists(handle)) {
-        CloseHandle(handle.hProcess);
-        CloseHandle(handle.hThread);
+int process_native_kill_immediate(ProcessNativeHandle handle) {
+    if (!process_native_exists(handle))
         return 0;
-    }
 
+#if LINUX_OS
+    if (handle > 0)
+        return kill(handle, SIGKILL);
+
+    return CC_EINVAL;
+#elif WINDOWS_OS
     if (!TerminateProcess(handle.hProcess, 0))
         return GetLastError();
-
-    CloseHandle(handle.hProcess);
-    CloseHandle(handle.hThread);
 
     return 0;
 #else
     UNUSED(handle)
     return CC_ENOTSUP;
+#endif
+}
+
+void process_native_close(ProcessNativeHandle handle) {
+#if WINDOWS_OS
+    CloseHandle(handle.hProcess);
+    CloseHandle(handle.hThread);
+#else
+    UNUSED(handle)
 #endif
 }
 
@@ -777,9 +888,10 @@ int process_destroy(Process p) {
     io_close(p->ioStderr);
 
     if (process_native_kill_normal(p->info))
-        error = process_native_kill_terminate(p->info);
+        error = process_native_kill_immediate(p->info);
 
     proclist_remove(&proclist, p->info);
+    process_native_close(p->info);
 
     FREE(p);
 
@@ -792,49 +904,69 @@ int process_destroy(Process p) {
 }
 
 IO process_stdin(Process p) {
-#if WINDOWS_OS
+#if LINUX_OS
+    if (!p->ioStdin && p->fdStdin >= 0)
+        return p->ioStdin = io_open_native_file(p->fdStdin, "wb");
+
+    return p->ioStdin;
+#elif WINDOWS_OS
     if (!p->ioStdin && p->hStdin)
         return p->ioStdin = io_open_native_file(p->hStdin, "wb");
 
     return p->ioStdin;
-#elif
+#else
     return NULL;
 #endif
 }
 
-int process_close_stdin(Process p) {
-#if WINDOWS_OS
+void process_close_stdin(Process p) {
+#if LINUX_OS
+    if (p->fdStdin >= 0) {
+        io_close(p->ioStdin);
+        p->ioStdin = NULL;
+        close(p->fdStdin);
+        p->fdStdin = -1;
+    }
+#elif WINDOWS_OS
     if (p->hStdin) {
         io_close(p->ioStdin);
         p->ioStdin = NULL;
         CloseHandle(p->hStdin);
         p->hStdin = NULL;
     }
-
-    return 0;
 #else
-    return 0;
+    UNUSED(p)
 #endif
 }
 
 IO process_stdout(Process p) {
-#if WINDOWS_OS
+#if LINUX_OS
+    if (!p->ioStdout && p->fdStdout >= 0)
+        return p->ioStdout = io_open_native_file(p->fdStdout, "rb");
+
+    return p->ioStdout;
+#elif WINDOWS_OS
     if (!p->ioStdout && p->hStdout)
         return p->ioStdout = io_open_native_file(p->hStdout, "rb");
 
     return p->ioStdout;
-#elif
+#else
     return NULL;
 #endif
 }
 
 IO process_stderr(Process p) {
-#if WINDOWS_OS
+#if LINUX_OS
+    if (!p->ioStderr && p->fdStderr >= 0)
+        return p->ioStderr = io_open_native_file(p->fdStderr, "rb");
+
+    return p->ioStderr;
+#elif WINDOWS_OS
     if (!p->ioStderr && p->hStderr)
         return p->ioStderr = io_open_native_file(p->hStderr, "rb");
 
     return p->ioStderr;
-#elif
+#else
     return NULL;
 #endif
 }

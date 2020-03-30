@@ -12,7 +12,7 @@
 /** @brief Opens a device to buffer information, even between threads.
  *
  * This device is useful to buffer data that needs to be written immediately but read at a later time, possibly from a different thread.
- * All data written to the buffer will be readable from the device. Simultaneous read and write calls are individually atomic.
+ * All data written to the buffer will be readable from the device. Simultaneous read and write calls are individually atomic. (TODO)
  * Reading from the device when no data is available will not block until data is available.
  *
  * No mode option is specified because the mode must be "rwb".

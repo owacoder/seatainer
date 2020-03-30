@@ -18,7 +18,7 @@ win32 {
 }
 
 unix: !win32 {
-    LIBS += -lz -lssl -lcrypto
+    LIBS += -lz -lssl -lcrypto -lpthread
 }
 
 SOURCES += \

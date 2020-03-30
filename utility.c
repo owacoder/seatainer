@@ -12,6 +12,10 @@
 #include <ctype.h>
 #include <stdlib.h>
 
+#if LINUX_OS
+#include <pthread.h>
+#endif
+
 #if WINDOWS_OS
 #include <windows.h>
 #include <winnt.h>
@@ -101,6 +105,16 @@ int atomic_clear_bit(volatile Atomic *location, unsigned bit)
 int atomic_flip_bit(volatile Atomic *location, unsigned bit)
 {
     ATOMIC_CMPXCHG(old ^ ((Atomic) 1 << bit));
+}
+
+static Atomic atomic_lock_acquire(const volatile Atomic *location)
+{
+    return atomic_cmpxchg(location, 1, 0);
+}
+
+static void atomic_lock_release(volatile Atomic *location)
+{
+    atomic_set(location, 0);
 }
 
 AtomicPointer atomicp_set(volatile AtomicPointer *location, AtomicPointer value)
@@ -208,6 +222,16 @@ int atomic_flip_bit(volatile Atomic *location, unsigned bit)
     ATOMIC_CMPXCHG(old ^ ((Atomic) 1 << bit));
 }
 
+static Atomic atomic_lock_acquire(volatile Atomic *location)
+{
+    return __sync_lock_test_and_set(location, 1);
+}
+
+static void atomic_lock_release(volatile Atomic *location)
+{
+    __sync_lock_release(location);
+}
+
 AtomicPointer atomicp_set(volatile AtomicPointer *location, AtomicPointer value)
 {
     ATOMICP_CMPXCHG(value);
@@ -233,6 +257,96 @@ AtomicPointer atomicp_cmpxchg(volatile AtomicPointer *location, AtomicPointer va
     return __sync_val_compare_and_swap(location, compare, value);
 }
 #endif
+
+void spinlock_init(volatile Spinlock *spinlock) {
+    atomic_set((volatile Atomic *) spinlock, 0);
+}
+
+void spinlock_lock(volatile Spinlock *spinlock) {
+    while (atomic_lock_acquire((volatile Atomic *) spinlock)) {
+#if X86_CPU | AMD64_CPU
+        /* Special implementation for x86/amd64, see https://wiki.osdev.org/Spinlock */
+        while (*spinlock)
+            __builtin_ia32_pause();
+#endif
+    }
+}
+
+int spinlock_try_lock(volatile Spinlock *spinlock) {
+    return !atomic_lock_acquire((volatile Atomic *) spinlock);
+}
+
+void spinlock_unlock(volatile Spinlock *spinlock) {
+    atomic_lock_release((volatile Atomic *) spinlock);
+}
+
+Mutex *mutex_create() {
+#if LINUX_OS
+    pthread_mutex_t *mutex = MALLOC(sizeof(pthread_mutex_t));
+    if (mutex == NULL)
+        return NULL;
+
+    if (pthread_mutex_init(mutex, NULL) != 0) {
+        FREE(mutex);
+        return NULL;
+    }
+
+    return (Mutex *) mutex;
+#elif WINDOWS_OS
+    CRITICAL_SECTION *mutex = MALLOC(sizeof(CRITICAL_SECTION));
+    if (mutex == NULL)
+        return NULL;
+
+    if (InitializeCriticalSectionAndSpinCount(mutex, 0x400) == 0) {
+        FREE(mutex);
+        return NULL;
+    }
+
+    return (Mutex *) mutex;
+#else
+    return CALLOC(sizeof(Spinlock), 1);
+#endif
+}
+
+void mutex_lock(Mutex *mutex) {
+#if LINUX_OS
+    pthread_mutex_lock((pthread_mutex_t *) mutex);
+#elif WINDOWS_OS
+    EnterCriticalSection((CRITICAL_SECTION *) mutex);
+#else
+    return spinlock_lock((Spinlock *) mutex);
+#endif
+}
+
+int mutex_try_lock(Mutex *mutex) {
+#if LINUX_OS
+    return pthread_mutex_trylock((pthread_mutex_t *) mutex) == 0;
+#elif WINDOWS_OS
+    return TryEnterCriticalSection((CRITICAL_SECTION *) mutex);
+#else
+    return spinlock_try_lock((Spinlock *) mutex);
+#endif
+}
+
+void mutex_unlock(Mutex *mutex) {
+#if LINUX_OS
+    pthread_mutex_unlock((pthread_mutex_t *) mutex);
+#elif WINDOWS_OS
+    LeaveCriticalSection((CRITICAL_SECTION *) mutex);
+#else
+    return spinlock_unlock((Spinlock *) mutex);
+#endif
+}
+
+void mutex_destroy(Mutex *mutex) {
+#if LINUX_OS
+    pthread_mutex_destroy((pthread_mutex_t *) mutex);
+#elif WINDOWS_OS
+    DeleteCriticalSection((CRITICAL_SECTION *) mutex);
+#endif
+
+    FREE(mutex);
+}
 
 /**
  * @brief Swaps a number of bytes in @p p and @p q.

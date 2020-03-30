@@ -59,7 +59,8 @@ int process_start_async(const char *process, const char * const args[], ProcessN
 int process_start_daemon(const char *process, const char * const args[], ProcessNativeHandle *handle);
 
 int process_native_kill_normal(ProcessNativeHandle handle);
-int process_native_kill_terminate(ProcessNativeHandle handle);
+int process_native_kill_immediate(ProcessNativeHandle handle);
+void process_native_close(ProcessNativeHandle handle);
 
 Process process_start(const char *process, const char *args[]);
 int process_error(Process p);
@@ -70,7 +71,7 @@ void process_wait_for_finish(Process p);
 char *process_arglist_to_string(const char * const args[]);
 
 IO process_stdin(Process p); /* writable */
-int process_close_stdin(Process p);
+void process_close_stdin(Process p);
 IO process_stdout(Process p); /* readable */
 IO process_stderr(Process p); /* readable */
 

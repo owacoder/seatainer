@@ -120,13 +120,12 @@ THREAD_STATIC struct InputOutputDevice io_devices[CC_IO_STATIC_INSTANCES];
 THREAD_STATIC enum IO_OpenHint io_device_open_hint;
 THREAD_STATIC enum IO_OpenHint io_device_open_permanent_hint;
 
-THREAD_STATIC Atomic io_static_alloc_lock; /* 1 if lock is held, 0 otherwise */
+THREAD_STATIC Spinlock io_static_alloc_lock; /* 1 if lock is held, 0 otherwise */
 
 static IO io_static_alloc(enum IO_Type type) {
     IO io = NULL;
 
-    /* Spinlock until lock is 0 */
-    while (atomic_cmpxchg(&io_static_alloc_lock, 1, 0) != 0);
+    spinlock_lock(&io_static_alloc_lock);
 
     for (int i = 0; i < CC_IO_STATIC_INSTANCES; ++i) {
         if ((io_devices[i].flags & IO_FLAG_IN_USE) == 0) {
@@ -136,7 +135,7 @@ static IO io_static_alloc(enum IO_Type type) {
     }
 
     if (io == NULL) {
-        atomic_set(&io_static_alloc_lock, 0);
+        spinlock_unlock(&io_static_alloc_lock);
         return NULL;
     }
 
@@ -148,7 +147,7 @@ static IO io_static_alloc(enum IO_Type type) {
 
     io_hint_next_open(io_device_open_permanent_hint, 0);
 
-    atomic_set(&io_static_alloc_lock, 0);
+    spinlock_unlock(&io_static_alloc_lock);
 
     return io;
 }
@@ -3579,7 +3578,8 @@ static int io_set_timeout(IO io, int type, long long usecs) {
 
 #if WINDOWS_OS
     if (!strcmp(desc, "tcp_socket") ||
-        !strcmp(desc, "udp_socket")) {
+        !strcmp(desc, "udp_socket") ||
+        !strcmp(desc, "ssl_socket")) {
         DWORD timeout_ms = (DWORD) (usecs / 1000);
 
         if (usecs && !timeout_ms)
@@ -3602,7 +3602,8 @@ static int io_set_timeout(IO io, int type, long long usecs) {
     if (io->type == IO_NativeFile ||
         io->type == IO_OwnNativeFile ||
         !strcmp(desc, "tcp_socket") ||
-        !strcmp(desc, "udp_socket")) {
+        !strcmp(desc, "udp_socket") ||
+        !strcmp(desc, "ssl_socket")) {
         struct timeval timeout_us;
         timeout_us.tv_sec = 0;
         timeout_us.tv_usec = usecs;

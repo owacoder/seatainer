@@ -20,7 +20,7 @@ extern "C" {
 typedef LONG Atomic;
 typedef LPVOID AtomicPointer;
 #elif LINUX_OS
-typedef long Atomic;
+typedef uint32_t Atomic;
 typedef void *AtomicPointer;
 #endif
 
@@ -45,6 +45,94 @@ AtomicPointer atomicp_load(volatile const AtomicPointer *location);
 AtomicPointer atomicp_add(volatile AtomicPointer *location, intptr_t value);
 AtomicPointer atomicp_sub(volatile AtomicPointer *location, intptr_t value);
 AtomicPointer atomicp_cmpxchg(volatile AtomicPointer *location, AtomicPointer value, AtomicPointer compare);
+
+/** @brief Spinlock type
+ *
+ * This type implements a spinlock, busy-waiting until the lock becomes available. There is no inherent thread-identification in the spinlock,
+ * and should not be copied around by value (i.e. the spinlock should be static or should be a member type, or just use a pointer)
+ */
+typedef Atomic Spinlock;
+
+/** @brief Initialize a spinlock.
+ *
+ * The spinlock is left in an unlocked state.
+ *
+ * @param spinlock The spinlock to initialize
+ */
+void spinlock_init(volatile Spinlock *spinlock);
+
+/** @brief Lock a spinlock
+ *
+ * The thread blocks until the spinlock is available, and then locks it.
+ * If the current thread already has the spinlock locked, a deadlock condition occurs.
+ *
+ * @param spinlock The spinlock to lock
+ */
+void spinlock_lock(volatile Spinlock *spinlock);
+
+/** @brief Attempt to lock a spinlock
+ *
+ * The thread attempts to lock the spinlock, and returns immediately regardless of whether it could lock or not.
+ * If the current thread already has the spinlock locked, 0 is returned.
+ *
+ * @param spinlock The spinlock to attempt to lock
+ * @return 0 if the spinlock could not be locked, either because the current thread or another thread owns the lock, or 1 if a lock could be obtained.
+ */
+int spinlock_try_lock(volatile Spinlock *spinlock);
+
+/** @brief Unlock a spinlock
+ *
+ * Unconditionally unlocks a spinlock. WARNING: Even if another thread has locked the spinlock, it will be unlocked after calling this function.
+ *
+ * @param spinlock The spinlock to unlock
+ */
+void spinlock_unlock(volatile Spinlock *spinlock);
+
+typedef void *Mutex;
+
+/** @brief Creates a new mutex object
+ *
+ * Mutex objects are not shareable across processes, just threads within a process.
+ *
+ * @return A new mutex object, or NULL if none could be created
+ */
+Mutex *mutex_create();
+
+/** @brief Locks a mutex
+ *
+ * If the mutex is currently locked by another thread, the current thread will block until it can get ownership of the mutex.
+ *
+ * @param mutex The mutex object to lock
+ */
+void mutex_lock(Mutex *mutex);
+
+/** @brief Attempts to lock a mutex
+ *
+ * The thread attempts to lock the mutex, and returns immediately regardless of whether it could lock or not.
+ * If the current thread already has the mutex locked, the result is undefined.
+ *
+ * @param mutex The mutex object to attempt to lock
+ * @return 1 if the mutex was able to be locked, 0 if another thread has currently locked the mutex. If the current thread locked the mutex, the result is undefined
+ */
+int mutex_try_lock(Mutex *mutex);
+
+/** @brief Unlock a mutex
+ *
+ * Unlocks a mutex that was locked by the current thread. If a mutex that is currently locked by a thread other than the current thread,
+ * the behavior is undefined.
+ *
+ * @param mutex The mutex object to unlock
+ */
+void mutex_unlock(Mutex *mutex);
+
+/** @brief Destroys a mutex object
+ *
+ * Destroys the mutex object and frees all resources associated with it.
+ * The mutex must be destroyed while in the unlocked state.
+ *
+ * @param mutex The mutex object to destroy
+ */
+void mutex_destroy(Mutex *mutex);
 
 int memswap(void *p, void *q, size_t size);
 

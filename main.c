@@ -581,10 +581,11 @@ int main()
 #endif
 
     {
-        Process p = process_start("E:\\Test_Data\\CmdTest.exe", NULL);
+        Process p = process_start("/shared/Test_Data/CmdTest", NULL);
 
         printf("Start error: %s\n", error_description(process_error(p)));
 
+        io_puts("Test 1\n", process_stdin(p));
         process_close_stdin(p);
         io_copy(process_stdout(p), io_open_file(stdout));
         printf("EOF: %d\n", io_eof(process_stdout(p)));
