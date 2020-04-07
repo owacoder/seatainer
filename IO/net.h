@@ -61,7 +61,16 @@ enum NetAddressType {
     NetAddressIPv6
 };
 
+/** @brief Initializes the IO networking stack.
+ *
+ * This function must be called once, for the entire process, before any network IO sockets are created.
+ */
 void io_net_init(void);
+    
+/** @brief Cleans up the IO networking stack.
+ *
+ * This function must be called once, for the entire process, after all network IO sockets are destroyed.
+ */
 void io_net_destroy(void);
 
 IO io_open_tcp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err);
