@@ -829,8 +829,12 @@ int process_native_kill_normal(ProcessNativeHandle handle) {
         return 0;
     } else {
         if (AttachConsole(handle.dwProcessId)) {
+            SetConsoleCtrlHandler(NULL, TRUE);
+            GenerateConsoleCtrlEvent(CTRL_C_EVENT, handle.dwProcessId);
+
+            FreeConsole();
+
             SetConsoleCtrlHandler(NULL, FALSE);
-            GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, handle.dwProcessId);
 
             return 0;
         }
