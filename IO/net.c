@@ -1235,25 +1235,27 @@ static IO io_open_http_chunked(IO io, const char *mode) {
 
 struct HttpStateStruct {
     IO io; /* Owned by this struct only if ownsIO is non-zero */
-    int ownsIO;
     IO body; /* Either chunked encoding IO device for request or response, or a limiter to read the correct number of bytes in a Content-Length response. Owned by this struct. */
     HttpHeaderCallback responseHeaderCb;
+    void *userdata; /* Userdata, to be passed to header callback function to identify this struct */
+    int ownsIO;
     unsigned long flags;
     unsigned long long contentLength; /* Contains user-defined content length if specified. Irrelevant if `flags & IO_HTTP_DEFINED_BODY` is 0. */
 };
 
-HttpState http_create_state(IO http, HttpHeaderCallback responseHeaderCb) {
+HttpState http_create_state(IO http, HttpHeaderCallback responseHeaderCb, void *userdata) {
     HttpState state = CALLOC(1, sizeof(*state));
     if (state == NULL)
         return NULL;
 
     state->io = http;
     state->responseHeaderCb = responseHeaderCb;
+    state->userdata = userdata;
 
     return state;
 }
 
-HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderCb, int *err, void *ssl_ctx) {
+HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderCb, void *userdata, int *err, void *ssl_ctx) {
     UNUSED(ssl_ctx)
 
     HttpState state = CALLOC(1, sizeof(*state));
@@ -1284,6 +1286,7 @@ HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderC
 
     state->ownsIO = 1;
     state->responseHeaderCb = responseHeaderCb;
+    state->userdata = userdata;
 
     return state;
 }
@@ -1477,7 +1480,7 @@ static int http_read_headers(HttpState state) {
 
         /* Let the user know what the header was too */
         if (state->responseHeaderCb)
-            state->responseHeaderCb(header, value);
+            state->responseHeaderCb(header, value, state->userdata);
     }
 
     io_close(headerString);

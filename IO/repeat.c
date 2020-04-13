@@ -9,12 +9,6 @@
 
 #include <string.h>
 
-static void *repeat_open(void *userdata, IO io) {
-    UNUSED(io)
-
-    return userdata;
-}
-
 static size_t repeat_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {
     IO underlyingIO = userdata;
     char *cptr = ptr;
@@ -49,7 +43,7 @@ static const char *repeat_what(void *userdata, IO io) {
 }
 
 static const struct InputOutputDeviceCallbacks repeat_callbacks = {
-    .open = repeat_open,
+    .open = NULL,
     .close = NULL,
     .read = repeat_read,
     .write = NULL,

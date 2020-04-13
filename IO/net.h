@@ -68,10 +68,10 @@ IO io_open_tcp_socket(const char *host, unsigned short port, enum NetAddressType
 IO io_open_udp_socket(const char *host, unsigned short port, enum NetAddressType type, const char *mode, int *err);
 
 typedef struct HttpStateStruct *HttpState;
-typedef void (*HttpHeaderCallback)(const char *header, const char *value);
+typedef void (*HttpHeaderCallback)(const char *header, const char *value, void *userdata);
 
-HttpState http_create_state(IO http, HttpHeaderCallback responseHeaderCb);
-HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderCb, int *err, void *ssl_ctx);
+HttpState http_create_state(IO http, HttpHeaderCallback responseHeaderCb, void *userdata);
+HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderCb, void *userdata, int *err, void *ssl_ctx);
 void http_destroy_state(HttpState state);
 
 int http_begin_request(HttpState state, const char *method, Url url);

@@ -267,7 +267,7 @@ void spinlock_lock(volatile Spinlock *spinlock) {
 #if X86_CPU | AMD64_CPU
         /* Special implementation for x86/amd64, see https://wiki.osdev.org/Spinlock */
         while (*spinlock)
-            __builtin_ia32_pause();
+            _mm_pause(); /* See https://stackoverflow.com/questions/5833527/how-do-you-use-the-pause-assembly-instruction-in-64-bit-c-code */
 #endif
     }
 }

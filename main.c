@@ -352,6 +352,7 @@ void test_small_dll()
 #include "IO/repeat.h"
 #include "IO/limiter.h"
 #include "IO/buffer.h"
+#include "IO/base64.h"
 
 void test_io() {
     test_hex();
@@ -543,6 +544,31 @@ void walk_dir(IO out, Directory directory) {
 
 int main()
 {
+#if 1
+    {
+        IO base64 = io_open_base64_encode(io_open_cstring("any carnal pleasur", "rb"), "rb");
+        IO base64b = io_open_base64_encode(io_open_cstring("any carnal pleasur", "rb"), "rb");
+        IO base64decode = io_open_base64_decode(base64, "rb");
+        IO base64bdecode = io_open_base64_decode(base64b, "rb");
+        int err;
+
+        if (err = io_slow_copy(base64decode, io_open_file(stdout)))
+            printf("An error occured: %s\n", error_description(err));
+        io_puts("\n", io_open_file(stdout));
+        io_copy(base64bdecode, io_open_file(stdout));
+
+        puts("");
+        IO bout2 = io_open_base64_decode(io_open_file(stdout), "wb");
+        IO bout = io_open_base64_encode(bout2, "wb");
+        io_copy(io_open_cstring("any carnal pleasure[]()~~~", "rb"), bout);
+        io_close(bout);
+        io_close(bout2);
+        puts("");
+
+        return 0;
+    }
+#endif
+
 #if 0
     {
         IO buffer = io_open_thread_buffer();
@@ -673,7 +699,7 @@ int main()
     {
         Url url = url_from_percent_encoded("https://google.com");
         int err;
-        HttpState http = http_create_state_from_url(url, NULL, &err, NULL);
+        HttpState http = http_create_state_from_url(url, NULL, NULL, &err, NULL);
 
         if (err) {
             printf("Error: %s\n", error_description(err));

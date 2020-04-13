@@ -16,9 +16,9 @@ struct ConcatInitializationParams {
 };
 
 static void *concat_open(void *userdata, IO io) {
-    memcpy(io_tempdata(io), userdata, 3*sizeof(void *));
+    memcpy(io_tempdata(io), userdata, sizeof(struct ConcatInitializationParams));
 
-    return io;
+    return userdata;
 }
 
 static size_t concat_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {

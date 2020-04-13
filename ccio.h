@@ -563,8 +563,22 @@ IO io_open_buffer(char *buf, size_t size, const char *mode);
 IO io_open_minimal_buffer(const char *mode);
 IO io_open_dynamic_buffer(const char *mode);
 IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdata, const char *mode);
-/* Reads all data from `in` and pushes it to `out`
- * Returns 0 on success, any error that occured on failure. Detection of which stream failed is left up to the caller.
+/** @brief Reads all data from `in` and pushes it to `out`, one character at a time.
+ *
+ * This function is designed to be used for testing purposes only.
+ *
+ * @param in The input stream to read data from
+ * @param out The output stream to write data to
+ * @return Returns 0 on success, any error that occured on failure. Detection of which stream failed is left up to the caller
+ */
+int io_slow_copy(IO in, IO out);
+/** @brief Reads all data from `in` and pushes it to `out`.
+ *
+ * This function reads and writes more than one character at a time.
+ *
+ * @param in The input stream to read data from
+ * @param out The output stream to write data to
+ * @return Returns 0 on success, any error that occured on failure. Detection of which stream failed is left up to the caller
  */
 int io_copy(IO in, IO out);
 int io_copy_and_close(IO in, IO out);

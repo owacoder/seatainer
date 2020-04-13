@@ -15,7 +15,7 @@ struct TeeInitializationParams {
 static void *tee_open(void *userdata, IO io) {
     memcpy(io_tempdata(io), userdata, 2*sizeof(void *));
 
-    return io;
+    return userdata;
 }
 
 static size_t tee_write(const void *ptr, size_t size, size_t count, void *userdata, IO io) {

@@ -617,13 +617,14 @@ Process process_start(const char *process, const char *args[]) {
     const char * const temp_args[] = {process, NULL};
 
     Process p = CALLOC(1, sizeof(*p));
-    p->fdStdin = p->fdStdout = p->fdStderr = -1;
     if (p == NULL)
         return NULL;
 
     register_proc_funcs();
 
 #if LINUX_OS
+    p->fdStdin = p->fdStdout = p->fdStderr = -1;
+
     int pipefd[2] = {-1, -1};
     int stdinfd[2] = {-1, -1};
     int stdoutfd[2] = {-1, -1};

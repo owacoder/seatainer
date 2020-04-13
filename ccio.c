@@ -648,22 +648,38 @@ int io_copy_and_close(IO in, IO out) {
     return result;
 }
 
+int io_slow_copy(IO in, IO out) {
+    int ch;
+
+    while (1) {
+        ch = io_getc(in);
+        if (ch != EOF) {
+            if (io_putc(ch, out) == EOF)
+                return io_error(out);
+        } else if (io_error(in))
+            return io_error(in);
+        else
+            break;
+    }
+
+    return 0;
+}
+
 int io_copy(IO in, IO out) {
 #define IO_COPY_SIZE 256
     const size_t size = IO_COPY_SIZE;
     char data[IO_COPY_SIZE];
     size_t read = size;
 
-    while (read == size) {
+    do {
         read = io_read(data, 1, size, in);
-
-        if (read && io_write(data, 1, read, out) != read)
-            return io_error(out);
 
         if (read != size && io_error(in)) {
             return io_error(in);
+        } else if (read && io_write(data, 1, read, out) != read) {
+            return io_error(out);
         }
-    }
+    } while (!io_eof(in));
 
     return 0;
 }

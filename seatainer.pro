@@ -22,6 +22,7 @@ unix: !win32 {
 }
 
 SOURCES += \
+    IO/base64.c \
     ccdbllst.c \
     cclnklst.c \
     ccvector.c \
@@ -52,6 +53,7 @@ SOURCES += \
     IO/buffer.c
 
 HEADERS += \
+    IO/base64.h \
     ccdbllst.h \
     cclnklst.h \
     ccvector.h \
