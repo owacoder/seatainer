@@ -965,6 +965,19 @@ void filetime_to_time_t(FILETIME *time, time_t *t) {
 
     *t = (time_t) large.QuadPart;
 }
+
+void filetime_to_nsecs_since_epoch(FILETIME *time, long long *t) {
+    ULARGE_INTEGER large;
+
+    large.LowPart = time->dwLowDateTime;
+    large.HighPart = time->dwHighDateTime;
+
+    large.QuadPart -= 116444736000000000LL; /* Number of 100-nanosecond intervals between Jan 1, 1601 and Jan 1, 1970 */
+    large.QuadPart *= 100; /* Convert from 100 nanosecond intervals to nanosecond intervals */
+
+    *t = (long long) large.QuadPart;
+}
+
 #else
 struct DirStruct {
     int error; /* Zero if no error occured while opening the directory, platform specific otherwise */
@@ -1775,6 +1788,31 @@ time_t dirent_created_time(DirectoryEntry entry, int *err) {
 #endif
 }
 
+long long dirent_created_time_ns(DirectoryEntry entry, int *err) {
+#if WINDOWS_OS
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
+        entry->parent->error = CC_EBADF;
+        if (err) *err = -1;
+        return 0;
+    }
+
+    FILETIME time = entry->is_wide? entry->fdata.wdata.ftCreationTime: entry->fdata.data.ftCreationTime;
+    long long t;
+
+    filetime_to_nsecs_since_epoch(&time, &t);
+    if (err) *err = 0;
+
+    return t;
+#else
+    UNUSED(entry)
+    UNUSED(err)
+
+    entry->parent->error = CC_ENOTSUP;
+    if (err) *err = -1;
+    return 0;
+#endif
+}
+
 time_t dirent_last_access_time(DirectoryEntry entry, int *err) {
 #if LINUX_OS
     if (dirFillExtData(entry)) {
@@ -1795,6 +1833,39 @@ time_t dirent_last_access_time(DirectoryEntry entry, int *err) {
     time_t t;
 
     filetime_to_time_t(&time, &t);
+    if (err) *err = 0;
+
+    return t;
+#else
+    UNUSED(entry)
+    UNUSED(err)
+
+    entry->parent->error = CC_ENOTSUP;
+    if (err) *err = -1;
+    return 0;
+#endif
+}
+
+long long dirent_last_access_time_ns(DirectoryEntry entry, int *err) {
+#if LINUX_OS
+    if (dirFillExtData(entry)) {
+        if (err) *err = -1;
+        return 0;
+    }
+
+    if (err) *err = 0;
+    return entry->extData.st_atime;
+#elif WINDOWS_OS
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
+        entry->parent->error = CC_EBADF;
+        if (err) *err = -1;
+        return 0;
+    }
+
+    FILETIME time = entry->is_wide? entry->fdata.wdata.ftLastAccessTime: entry->fdata.data.ftLastAccessTime;
+    long long t;
+
+    filetime_to_nsecs_since_epoch(&time, &t);
     if (err) *err = 0;
 
     return t;
@@ -1841,7 +1912,59 @@ time_t dirent_last_modification_time(DirectoryEntry entry, int *err) {
 #endif
 }
 
+long long dirent_last_modification_time_ns(DirectoryEntry entry, int *err) {
+#if LINUX_OS
+    if (dirFillExtData(entry)) {
+        if (err) *err = -1;
+        return 0;
+    }
+
+    if (err) *err = 0;
+    return entry->extData.st_mtime;
+#elif WINDOWS_OS
+    if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
+        entry->parent->error = CC_EBADF;
+        if (err) *err = -1;
+        return 0;
+    }
+
+    FILETIME time = entry->is_wide? entry->fdata.wdata.ftLastWriteTime: entry->fdata.data.ftLastWriteTime;
+    long long t;
+
+    filetime_to_nsecs_since_epoch(&time, &t);
+    if (err) *err = 0;
+
+    return t;
+#else
+    UNUSED(entry)
+    UNUSED(err)
+
+    entry->parent->error = CC_ENOTSUP;
+    if (err) *err = -1;
+    return 0;
+#endif
+}
+
 time_t dirent_last_status_update_time(DirectoryEntry entry, int *err) {
+#if LINUX_OS
+    if (dirFillExtData(entry)) {
+        if (err) *err = -1;
+        return 0;
+    }
+
+    if (err) *err = 0;
+    return entry->extData.st_ctime;
+#else
+    UNUSED(entry)
+    UNUSED(err)
+
+    entry->parent->error = CC_ENOTSUP;
+    if (err) *err = -1;
+    return 0;
+#endif
+}
+
+long long dirent_last_status_update_time_ns(DirectoryEntry entry, int *err) {
 #if LINUX_OS
     if (dirFillExtData(entry)) {
         if (err) *err = -1;

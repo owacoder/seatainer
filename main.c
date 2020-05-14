@@ -520,22 +520,31 @@ void walk_dir(IO out, Directory directory) {
         if (!dirent_is_actual_entry(entry))
             continue;
 
+        long long ntime;
         time_t time;
         size_t name_len = strlen(dirent_name(entry));
         io_printf(out, "%s%-*c  %10lld bytes\n", dirent_name(entry), 40 - (int) name_len, dirent_is_directory(entry)? path_separator(): ' ', dirent_size(entry));
 
         int err;
-        if (time = dirent_created_time(entry, &err), err == 0)
-            io_printf(out, "  Created: %s", asctime(localtime(&time)));
+        if (ntime = dirent_created_time_ns(entry, &err), err == 0) {
+            time = ntime / 1000000000;
+            io_printf(out, "  Created: %s\b, %09lld", asctime(localtime(&time)), ntime % 1000000000);
+        }
 
-        if (time = dirent_last_modification_time(entry, &err), err == 0)
-            io_printf(out, "  Modified: %s", asctime(localtime(&time)));
+        if (ntime = dirent_last_modification_time_ns(entry, &err), err == 0) {
+            time = ntime / 1000000000;
+            io_printf(out, "  Modified: %s\b, %09lld", asctime(localtime(&time)), ntime % 1000000000);
+        }
 
-        if (time = dirent_last_status_update_time(entry, &err), err == 0)
-            io_printf(out, "  Updated: %s", asctime(localtime(&time)));
+        if (ntime = dirent_last_status_update_time_ns(entry, &err), err == 0) {
+            time = ntime / 1000000000;
+            io_printf(out, "  Updated: %s\b, %09lld", asctime(localtime(&time)), ntime % 1000000000);
+        }
 
-        if (time = dirent_last_access_time(entry, &err), err == 0)
-            io_printf(out, "  Accessed: %s", asctime(localtime(&time)));
+        if (ntime = dirent_last_access_time_ns(entry, &err), err == 0) {
+            time = ntime / 1000000000;
+            io_printf(out, "  Accessed: %s\b, %09lld", asctime(localtime(&time)), ntime % 1000000000);
+        }
     }
 }
 
@@ -544,6 +553,12 @@ void walk_dir(IO out, Directory directory) {
 
 int main()
 {
+    {
+        Directory wdir = dir_open("E:/Test_Data", DirFilterNone, DirSortNone);
+        walk_dir(io_open_file(stdout), wdir);
+        return 0;
+    }
+
 #if 1
     {
         IO base64 = io_open_base64_encode(io_open_cstring("any carnal pleasur", "rb"), "rb");

@@ -247,7 +247,7 @@ enum DirectoryFilter {
     DirFilterShowAll = DirFilterShowHidden | DirFilterShowSystem,
     DirFilterNoDot = 0x2000,
     DirFilterNoDotDot = 0x4000,
-    DirFilterNoDotOrDotDot = DirFilterNoDot | DirFilterNoDotDot,
+    DirFilterNoDotOrDotDot = DirFilterNoDot | DirFilterNoDotDot
 };
 
 #define DIR_SORT_TYPE_MASK 0xF
@@ -436,9 +436,13 @@ int dirent_set_attributes(DirectoryEntry entry, unsigned long attributes);
 /* Obtain the local time of file traits */
 /* err is 0 on success, -1 on failure (failure may occur because the requested trait doesn't exist for the platform) */
 time_t dirent_created_time(DirectoryEntry entry, int *err);
+long long dirent_created_time_ns(DirectoryEntry entry, int *err);
 time_t dirent_last_access_time(DirectoryEntry entry, int *err);
+long long dirent_last_access_time_ns(DirectoryEntry entry, int *err);
 time_t dirent_last_modification_time(DirectoryEntry entry, int *err);
+long long dirent_last_modification_time_ns(DirectoryEntry entry, int *err);
 time_t dirent_last_status_update_time(DirectoryEntry entry, int *err);
+long long dirent_last_status_update_time_ns(DirectoryEntry entry, int *err);
 
 #ifdef __cplusplus
 }
