@@ -3723,3 +3723,22 @@ int io_ungetc(int chr, IO io) {
             return EOF;
     }
 }
+
+int io_format_file_size(IO out, long long size) {
+    if (size < 0)
+        return io_puts("N/A", out) != 0;
+    else if (size < 1024LL)
+        return io_printf(out, "%lld bytes", size) < 0;
+    else if (size < 1024LL*1024)
+        return io_printf(out, "%.1f KB", (double) size / 1024LL) < 0;
+    else if (size < 1024LL*1024*1024)
+        return io_printf(out, "%.1f MB", (double) size / (1024LL*1024)) < 0;
+    else if (size < 1024LL*1024*1024*1024)
+        return io_printf(out, "%.1f GB", (double) size / (1024LL*1024*1024)) < 0;
+    else if (size < 1024LL*1024*1024*1024*1024)
+        return io_printf(out, "%.1f TB", (double) size / (1024LL*1024*1024*1024)) < 0;
+    else if (size < 1024LL*1024*1024*1024*1024*1024)
+        return io_printf(out, "%.1f PB", (double) size / (1024LL*1024*1024*1024*1024)) < 0;
+    else
+        return io_printf(out, "%lld bytes", size) < 0;
+}

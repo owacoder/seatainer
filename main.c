@@ -523,7 +523,9 @@ void walk_dir(IO out, Directory directory) {
         long long ntime;
         time_t time;
         size_t name_len = strlen(dirent_name(entry));
-        io_printf(out, "%s%-*c  %10lld bytes\n", dirent_name(entry), 40 - (int) name_len, dirent_is_directory(entry)? path_separator(): ' ', dirent_size(entry));
+        io_printf(out, "%s%-*c  ", dirent_name(entry), 40 - (int) name_len, dirent_is_directory(entry)? path_separator(): ' ');
+        io_format_file_size(out, dirent_size(entry));
+        io_putc('\n', out);
 
         int err;
         if (ntime = dirent_created_time_ns(entry, &err), err == 0) {
@@ -554,7 +556,7 @@ void walk_dir(IO out, Directory directory) {
 int main()
 {
     {
-        Directory wdir = dir_open("E:/Test_Data", DirFilterNone, DirSortNone);
+        Directory wdir = dir_open("/shared/Test_Data", DirFilterNone, DirSortNone);
         walk_dir(io_open_file(stdout), wdir);
         return 0;
     }

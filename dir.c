@@ -18,6 +18,12 @@
 #include <dirent.h>
 #elif WINDOWS_OS
 #include <windows.h>
+#else
+#define NATIVE_DIR 1
+#endif
+
+#if !NATIVE_DIR
+#define NATIVE_DIR 0
 #endif
 
 #include "utility.h"
@@ -469,7 +475,33 @@ char *path_up_cstr(char *pathStr) {
     char *npath = pathStr;
     char *minAddr = pathStr;
 
-#if LINUX_OS
+#if WINDOWS_OS
+    if (pathStr[0] == '\\' && pathStr[1] == '\\') {
+        minAddr = strchr(pathStr + 2, '\\');
+        if (minAddr == NULL)
+            return pathStr;
+    }
+
+    npath = pathStr + strlen(pathStr) - 1;
+    while (npath != pathStr && *npath == '\\') /* Trailing '\' character(s), ignore as if not there */
+        --npath;
+
+    while (*npath && *npath != '\\')
+        --npath;
+
+    /* Allow for proper resource locators (don't take the trailing '\' after "\\resource\") */
+    if (npath <= minAddr && minAddr != pathStr) {
+        /* Don't strip the name of resources of the form "\\.\name" (resources of this type won't have a trailing slash either) */
+        if (pathStr[2] != '.' || pathStr[3] != '\\')
+            minAddr[1] = 0;
+        return pathStr;
+    }
+
+    if (npath <= pathStr + 2 && pathStr[0] && pathStr[1] == ':') /* Absolute drive path, cannot go up */
+        pathStr[2 + (pathStr[2] == '\\')] = 0;
+    else
+        npath[0] = 0;
+#else
     if (*pathStr != '/') /* Either a relative path, or a resource locator */ {
         minAddr = strchr(pathStr, '/');
         if (minAddr == NULL || minAddr[-1] != ':')
@@ -497,32 +529,6 @@ char *path_up_cstr(char *pathStr) {
     if (npath == pathStr && *pathStr == '/') /* Traversed up to root, do not remove slash */
         npath[1] = 0;
     else /* Not root, so remove slash */
-        npath[0] = 0;
-#elif WINDOWS_OS
-    if (pathStr[0] == '\\' && pathStr[1] == '\\') {
-        minAddr = strchr(pathStr + 2, '\\');
-        if (minAddr == NULL)
-            return pathStr;
-    }
-
-    npath = pathStr + strlen(pathStr) - 1;
-    while (npath != pathStr && *npath == '\\') /* Trailing '\' character(s), ignore as if not there */
-        --npath;
-
-    while (*npath && *npath != '\\')
-        --npath;
-
-    /* Allow for proper resource locators (don't take the trailing '\' after "\\resource\") */
-    if (npath <= minAddr && minAddr != pathStr) {
-        /* Don't strip the name of resources of the form "\\.\name" (resources of this type won't have a trailing slash either) */
-        if (pathStr[2] != '.' || pathStr[3] != '\\')
-            minAddr[1] = 0;
-        return pathStr;
-    }
-
-    if (npath <= pathStr + 2 && pathStr[0] && pathStr[1] == ':') /* Absolute drive path, cannot go up */
-        pathStr[2 + (pathStr[2] == '\\')] = 0;
-    else
         npath[0] = 0;
 #endif
 
@@ -792,6 +798,7 @@ static int sorted_dir_add_entry(struct SortedDirStruct *s, DirectoryEntry entry)
     return 0;
 }
 
+#if !NATIVE_DIR
 /* See https://stackoverflow.com/a/46042467 */
 #if WINDOWS_OS
 #define DIR_QSORT(base, count, size, comparator, thunk) qsort_s((base), (count), (size), (comparator), (thunk))
@@ -893,6 +900,7 @@ static void sorted_dir_free(struct SortedDirStruct *s) {
 
     FREE(s->entries);
 }
+#endif /* NATIVE_DIR */
 
 #if LINUX_OS
 struct DirEntryStruct {
@@ -979,11 +987,20 @@ void filetime_to_nsecs_since_epoch(FILETIME *time, long long *t) {
 }
 
 #else
+struct DirEntryStruct {
+    Directory parent; /* Points to parent DirStruct, doesn't have ownership */
+    char ownedDir; /* non-zero if this structure should be free()d.
+                      * This will only be non-zero if the entry was created
+                      * independently of a dir_next() call, i.e. using dirent_open()
+                      * This is because a Directory object is always needed for a DirectoryEntry to exist */
+    char name[256]; /* Name part only of filename */
+};
+
 struct DirStruct {
-    int error; /* Zero if no error occured while opening the directory, platform specific otherwise */
-    enum DirectoryFilter filter;
-    struct SortedDirStruct sorted;
-}
+    int error; /* What error occurred last */
+    size_t path_len; /* Length of folder structure, not including file name or deepest subfolder name */
+    char path[]; /* Path name of directory entry */
+};
 #endif
 
 static int dir_entry_present_with_filter(DirectoryEntry entry, enum DirectoryFilter filter) {
@@ -1090,6 +1107,7 @@ Directory dir_open_with_mode(const char *dir, const char *mode, enum DirectoryFi
     return NULL;
 #endif
 
+#if !NATIVE_DIR
     result->filter = filter;
     if (sort != DirSortNone && result && result->error == 0) {
         DirectoryEntry entry;
@@ -1124,6 +1142,7 @@ Directory dir_open_with_mode(const char *dir, const char *mode, enum DirectoryFi
     }
 
     return result;
+#endif
 }
 
 int dir_error(Directory dir) {
@@ -1135,12 +1154,14 @@ void dir_clearerr(Directory dir) {
 }
 
 static DirectoryEntry dir_next_internal(Directory dir) {
+#if !NATIVE_DIR
     if (dir->sorted.in_use) {
         if (dir->sorted.entries == NULL || dir->sorted.next == dir->sorted.count)
             return NULL;
 
         return dir->sorted.entries[dir->sorted.next++];
     }
+#endif
 
 #if LINUX_OS
     if (dir->handle == NULL)
@@ -1180,11 +1201,18 @@ static DirectoryEntry dir_next_internal(Directory dir) {
 
     return entry;
 #else
+    UNUSED(dir);
+
     return NULL;
 #endif
 }
 
 DirectoryEntry dir_next(Directory dir) {
+#if NATIVE_DIR
+    UNUSED(dir)
+
+    return NULL;
+#else
     DirectoryEntry entry;
 
     while ((entry = dir_next_internal(dir)) != NULL) {
@@ -1195,6 +1223,7 @@ DirectoryEntry dir_next(Directory dir) {
     }
 
     return entry;
+#endif
 }
 
 const char *dir_path(Directory dir) {
@@ -1206,7 +1235,9 @@ void dir_close(Directory dir) {
     if (dir == NULL)
         return;
 
+#if !NATIVE_DIR
     sorted_dir_free(&dir->sorted);
+#endif
 
 #if LINUX_OS
     if (dir->handle != NULL)
@@ -1232,15 +1263,15 @@ DirectoryEntry dirent_open_with_mode(const char *path, const char *mode) {
     if (!entry)
         return NULL;
 
-#if LINUX_OS
-    dir = CALLOC(1, sizeof(*dir) + pathLen + 1);
-    if (!dir)
-        goto cleanup;
-#else
+#if WINDOWS_OS
     if (pathLen > MAX_PATH)
         goto cleanup;
 
     dir = CALLOC(1, sizeof(*dir));
+    if (!dir)
+        goto cleanup;
+#else
+    dir = CALLOC(1, sizeof(*dir) + pathLen + 1);
     if (!dir)
         goto cleanup;
 #endif
@@ -1288,6 +1319,10 @@ DirectoryEntry dirent_open_with_mode(const char *path, const char *mode) {
 
     if (dir->findFirstHandle == INVALID_HANDLE_VALUE)
         dir->error = GetLastError();
+#else
+    if (name_len > 255)
+        goto cleanup;
+    strcpy(entry->name, name);
 #endif
 
     /* Then remove filename from path */
@@ -1360,8 +1395,9 @@ int dirent_refresh(DirectoryEntry entry) {
     } else
         return entry->parent->error = CC_EPERM;
 #else
-    entry->parent->error = CC_ENOTSUP;
-    return -1;
+    UNUSED(entry)
+
+    return 0;
 #endif
 }
 
@@ -1386,9 +1422,7 @@ const char *dirent_name(DirectoryEntry entry) {
 
     return entry->fdata.data.cFileName;
 #else
-    UNUSED(entry)
-
-    return "";
+    return entry->name;
 #endif
 }
 
@@ -1406,8 +1440,7 @@ long long dirent_size(DirectoryEntry entry) {
     if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
         entry->parent->error = CC_EBADF;
         return -1LL;
-    }
-    else if (entry->is_wide) {
+    } else if (entry->is_wide) {
         li.LowPart = entry->fdata.wdata.nFileSizeLow;
         li.HighPart = entry->fdata.wdata.nFileSizeHigh;
     } else {
@@ -1417,9 +1450,20 @@ long long dirent_size(DirectoryEntry entry) {
 
     return li.QuadPart;
 #else
-    UNUSED(entry)
+    errno = 0;
+    FILE *file = fopen(dirent_fullname(entry), "r");
+    long size = -1LL;
 
-    return -1LL;
+    if (file) {
+        if (fseek(file, 0, SEEK_END) == 0)
+            size = ftell(file);
+
+        fclose(file);
+    }
+
+    if (size < 0)
+        entry->parent->error = errno;
+    return size;
 #endif
 }
 
@@ -1494,11 +1538,15 @@ int dirent_is_directory(DirectoryEntry entry) {
     } else {
         return entry->fdata.data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
     }
-#else
+#elif LINUX_OS
     if (dirFillExtData(entry))
         return !strcmp(dirent_name(entry), ".") || !strcmp(dirent_name(entry), "..");
 
     return S_ISDIR(entry->extData.st_mode);
+#else
+    UNUSED(entry)
+
+    return 0;
 #endif
 }
 
@@ -1758,9 +1806,12 @@ int dirent_set_attributes(DirectoryEntry entry, unsigned long attributes) {
 cleanup:
     FREE(wide);
     return entry->parent->error = GetLastError();
-#endif
+#else
+    UNUSED(attributes)
 
     /* TODO: Linux attributes */
+    return entry->parent->error = CC_ENOTSUP;
+#endif
 }
 
 time_t dirent_created_time(DirectoryEntry entry, int *err) {
@@ -1854,7 +1905,7 @@ long long dirent_last_access_time_ns(DirectoryEntry entry, int *err) {
     }
 
     if (err) *err = 0;
-    return entry->extData.st_atime;
+    return entry->extData.st_atim.tv_sec * 1000000000 + entry->extData.st_atim.tv_nsec;
 #elif WINDOWS_OS
     if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
         entry->parent->error = CC_EBADF;
@@ -1920,7 +1971,7 @@ long long dirent_last_modification_time_ns(DirectoryEntry entry, int *err) {
     }
 
     if (err) *err = 0;
-    return entry->extData.st_mtime;
+    return entry->extData.st_mtim.tv_sec * 1000000000 + entry->extData.st_mtim.tv_nsec;
 #elif WINDOWS_OS
     if (entry->ownedDir && entry->parent->findFirstHandle == INVALID_HANDLE_VALUE) {
         entry->parent->error = CC_EBADF;
@@ -1972,7 +2023,7 @@ long long dirent_last_status_update_time_ns(DirectoryEntry entry, int *err) {
     }
 
     if (err) *err = 0;
-    return entry->extData.st_ctime;
+    return entry->extData.st_ctim.tv_sec * 1000000000 + entry->extData.st_ctim.tv_nsec;
 #else
     UNUSED(entry)
     UNUSED(err)

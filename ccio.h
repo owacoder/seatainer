@@ -681,6 +681,14 @@ const char *io_description(IO io);
 IO io_tmpfile(void);
 int io_ungetc(int chr, IO io);
 
+/** @brief Format a file size as a string and output it to an IO device
+ *
+ * @param io the IO device to output the human-readable file size to
+ * @param size the file size to write
+ * @return Zero on success, non-zero on failure. The error code will be stored in @p io
+ */
+int io_format_file_size(IO io, long long size);
+
 #ifdef __cplusplus
 } // extern "C"
 
