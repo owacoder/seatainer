@@ -591,6 +591,14 @@ char *strgather(const char *strings[], size_t stringsCount) {
     return result;
 }
 
+char *strduplicate(const char *str) {
+    size_t len = strlen(str);
+    char *mem = MALLOC(len+1);
+    if (mem)
+        memcpy(mem, str, len+1);
+    return mem;
+}
+
 /* Adapted from https://en.wikipedia.org/wiki/Modular_exponentiation#Right-to-left_binary_method */
 static uint64_t exp_mod(uint64_t base, uint64_t exp, uint64_t mod) {
     uint64_t result = 1;

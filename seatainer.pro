@@ -50,7 +50,8 @@ SOURCES += \
     process.c \
     IO/sha256.c \
     IO/repeat.c \
-    IO/buffer.c
+    IO/buffer.c \
+    ccstringlist.c
 
 HEADERS += \
     IO/base64.h \
@@ -82,7 +83,8 @@ HEADERS += \
     process.h \
     IO/sha256.h \
     IO/repeat.h \
-    IO/buffer.h
+    IO/buffer.h \
+    ccstringlist.h
 
 DISTFILES += \
     README.md \

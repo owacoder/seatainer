@@ -197,14 +197,14 @@ uint32_t utf8next(const char *utf8, const char **next);
  */
 char *utf8append(char *utf8, uint32_t codepoint, size_t *remainingBytes);
 
-/** @brief Lowercases the string.
+/** @brief Lowercases the ASCII string.
  *
  * @param str The string to lowercase.
  * @return Returns @p str.
  */
 char *strlower(char *str);
 
-/** @brief Uppercases the string.
+/** @brief Uppercases the ASCII string.
  *
  * @param str The string to uppercase.
  * @return Returns @p str.
@@ -228,6 +228,9 @@ int strcmp_no_case(const char *lhs, const char *rhs);
  * @result A newly allocated string that contains the concatenated strings, or `NULL` if out of memory.
  */
 char *strgather(const char *strings[], size_t stringsCount);
+
+char *strduplicate(const char *str);
+#define strdup strduplicate
 
 /* Performs a Pearson hash on the specified data, with a pseudo-random shuffle of hash bytes */
 unsigned pearson_hash(const char *data, size_t size);

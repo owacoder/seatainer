@@ -553,8 +553,24 @@ void walk_dir(IO out, Directory directory) {
 #include "process.h"
 #include <stdlib.h>
 
+#include "ccstringlist.h"
+
 int main()
 {
+    {
+        Stringlist list = stringlist_create();
+        stringlist_append(list, "First");
+        stringlist_append(list, "Second");
+        stringlist_append(list, "Third");
+
+        for (size_t i = 0; i < stringlist_size(list); ++i) {
+            printf("Item %u: %s\n", (unsigned) i, stringlist_array(list)[i]);
+        }
+
+        stringlist_destroy(list);
+        return 0;
+    }
+
     {
         Directory wdir = dir_open("/shared/Test_Data", DirFilterNone, DirSortNone);
         walk_dir(io_open_file(stdout), wdir);
