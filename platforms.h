@@ -57,6 +57,7 @@
 #if defined(__STDC_VERSION__)
 # if __STDC_VERSION__ >= 201112L
 #  define C11 1
+#  define decltype(x) _Generic((x), char: char x, default: void *x)
 #  define THREAD_STATIC static _Thread_local
 # endif
 

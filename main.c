@@ -558,7 +558,75 @@ void walk_dir(IO out, Directory directory) {
 int main()
 {
     {
-        Stringlist list = stringlist_create();
+        StringSet set = stringset_create();
+
+        // stringset_add(set, "M");
+        stringset_add(set, "N");
+        // stringset_add(set, "O");
+        // stringset_add(set, "L");
+        // stringset_add(set, "K");
+        stringset_add(set, "Q");
+        stringset_add(set, "P");
+        // stringset_add(set, "H");
+        stringset_add(set, "I");
+        // stringset_add(set, "A");
+        stringset_remove(set, "N");
+        stringset_remove(set, "Q");
+        //stringset_remove(set, "I");
+        //stringset_remove(set, "P");
+
+        avltree_print(set);
+        printf("Valid AVL tree: %d\n", avltree_is_avl(set));
+
+        StringSet copy = stringset_copy(set);
+
+        printf("Size: %d\n", stringset_size(set));
+        for (Iterator it = stringset_begin(set); it; it = stringset_next(set, it)) {
+            printf("Item: %s\n", stringset_value_of(set, it));
+        }
+
+        if (copy) {
+            printf("Size: %d\n", stringset_size(copy));
+            for (Iterator it = stringset_begin(copy); it; it = stringset_next(copy, it)) {
+                printf("Item: %s\n", stringset_value_of(copy, it));
+            }
+        }
+
+        stringset_destroy(set);
+    }
+
+    {
+        StringList list = stringlist_split("How are you doing  all today", " ", 1);
+
+        stringlist_set_compare_fn(list, strcmp_no_case);
+
+        StringList sorted = genericlist_stable_sorted(list, 1);
+
+        printf("Index of you: %d\n", (unsigned) stringlist_rfind(list, "YOU", SIZE_MAX));
+
+        for (size_t i = 0; i < stringlist_size(list); ++i) {
+            printf("Item %u: '%s'\n", (unsigned) i, stringlist_array(list)[i]);
+        }
+
+        printf("Sorted index of you: %d\n", (unsigned) stringlist_rfind(sorted, "YOU", SIZE_MAX));
+
+        for (size_t i = 0; i < stringlist_size(list); ++i) {
+            printf("Sorted Item %u: '%s'\n", (unsigned) i, stringlist_array(sorted)[i]);
+        }
+
+        printf("Equal: %d\n", stringlist_compare(list, list));
+
+        char *joined = stringlist_joined_alloc(list, "");
+        printf("Joined: %s\n", joined);
+        //FREE(joined);
+
+        stringlist_destroy(list);
+        stringlist_destroy(sorted);
+        return 0;
+    }
+
+    {
+        StringList list = stringlist_create();
         stringlist_append(list, "First");
         stringlist_append(list, "Second");
         stringlist_append(list, "Third");
@@ -566,6 +634,10 @@ int main()
         for (size_t i = 0; i < stringlist_size(list); ++i) {
             printf("Item %u: %s\n", (unsigned) i, stringlist_array(list)[i]);
         }
+
+        char *joined = stringlist_joined_alloc(list, ", ");
+        printf("Joined: %s\n", joined);
+        FREE(joined);
 
         stringlist_destroy(list);
         return 0;
@@ -732,7 +804,7 @@ int main()
     {
         Url url = url_from_percent_encoded("https://google.com");
         int err;
-        HttpState http = http_create_state_from_url(url, NULL, NULL, &err, NULL);
+        HttpState http = http_create_state_from_url(url, NULL, &err, NULL);
 
         if (err) {
             printf("Error: %s\n", error_description(err));

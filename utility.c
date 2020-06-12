@@ -107,7 +107,7 @@ int atomic_flip_bit(volatile Atomic *location, unsigned bit)
     ATOMIC_CMPXCHG(old ^ ((Atomic) 1 << bit));
 }
 
-static Atomic atomic_lock_acquire(const volatile Atomic *location)
+static Atomic atomic_lock_acquire(volatile Atomic *location)
 {
     return atomic_cmpxchg(location, 1, 0);
 }
@@ -570,18 +570,27 @@ int strcmp_no_case(const char *lhs, const char *rhs) {
     return 0;
 }
 
-char *strgather(const char *strings[], size_t stringsCount) {
+char *strjoin_alloc(const char *strings[], size_t stringsCount, const char *separator) {
     size_t totalLen = 0;
+    size_t separatorLen = separator? strlen(separator): 0;
     
     for (size_t i = 0; i < stringsCount; ++i) {
         totalLen += strlen(strings[i]);
     }
+
+    if (stringsCount > 1)
+        totalLen += separatorLen * (stringsCount - 1);
     
     char *result = MALLOC(totalLen + 1), *ptr = result;
     if (result == NULL)
         return NULL;
         
     for (size_t i = 0; i < stringsCount; ++i) {
+        if (i) {
+            memcpy(ptr, separator, separatorLen);
+            ptr += separatorLen;
+        }
+
         size_t len = strlen(strings[i]);
         memcpy(ptr, strings[i], len);
         ptr += len;
@@ -591,7 +600,7 @@ char *strgather(const char *strings[], size_t stringsCount) {
     return result;
 }
 
-char *strduplicate(const char *str) {
+char *strdup_alloc(const char *str) {
     size_t len = strlen(str);
     char *mem = MALLOC(len+1);
     if (mem)
@@ -959,7 +968,7 @@ size_t safe_multiply(size_t u, size_t v) {
 #if SIZE_MAX == UINT32_MAX
     unsigned long long result = (unsigned long long) u * (unsigned long long) v;
 
-    return result >> 32? 0: result;
+    return (size_t) (result >> 32? 0: result);
 #elif CLANG_COMPILER | GCC_COMPILER
     __uint128_t result = (__uint128_t) u * (__uint128_t) v;
 

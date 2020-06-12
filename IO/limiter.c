@@ -46,7 +46,7 @@ static size_t limiter_write(const void *buf, size_t size, size_t count, void *us
     unsigned long long uavailable = available;
 
     if (max > uavailable)
-        max = uavailable;
+        max = (size_t) uavailable;
 
     size_t written = io_write(buf, 1, max, limiter->io) / size;
     io_set_error(io, io_error(limiter->io));

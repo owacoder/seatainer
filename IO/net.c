@@ -1224,6 +1224,7 @@ static IO io_open_http_chunked(IO io, const char *mode) {
 }
 
 #include "limiter.h"
+#include "ccstringlist.h"
 
 #define IO_HTTP_STATUS_CODE 0x3ff
 #define IO_HTTP_NO_MESSAGE_BODY_ALLOWED 0x400
@@ -1236,34 +1237,44 @@ static IO io_open_http_chunked(IO io, const char *mode) {
 struct HttpStateStruct {
     IO io; /* Owned by this struct only if ownsIO is non-zero */
     IO body; /* Either chunked encoding IO device for request or response, or a limiter to read the correct number of bytes in a Content-Length response. Owned by this struct. */
-    HttpHeaderCallback responseHeaderCb;
+    StringList headers; /* Headers received from last HTTP request */
     void *userdata; /* Userdata, to be passed to header callback function to identify this struct */
     int ownsIO;
     unsigned long flags;
     unsigned long long contentLength; /* Contains user-defined content length if specified. Irrelevant if `flags & IO_HTTP_DEFINED_BODY` is 0. */
 };
 
-HttpState http_create_state(IO http, HttpHeaderCallback responseHeaderCb, void *userdata) {
+static HttpState http_alloc_state() {
     HttpState state = CALLOC(1, sizeof(*state));
     if (state == NULL)
         return NULL;
 
+    state->headers = stringlist_create();
+    if (state->headers == NULL) {
+        FREE(state);
+        return NULL;
+    }
+
+    return state;
+}
+
+HttpState http_create_state(IO http, void *userdata) {
+    HttpState state = http_alloc_state();
+    if (state == NULL)
+        return NULL;
+
     state->io = http;
-    state->responseHeaderCb = responseHeaderCb;
     state->userdata = userdata;
 
     return state;
 }
 
-HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderCb, void *userdata, int *err, void *ssl_ctx) {
+HttpState http_create_state_from_url(Url url, void *userdata, int *err, void *ssl_ctx) {
     UNUSED(ssl_ctx)
 
-    HttpState state = CALLOC(1, sizeof(*state));
-    if (state == NULL) {
-        if (err)
-            *err = CC_ENOMEM;
+    HttpState state = http_alloc_state();
+    if (state == NULL)
         return NULL;
-    }
 
 #ifdef CC_INCLUDE_SSL
     if (!strcmp(url_get_scheme(url), "https")) {
@@ -1273,25 +1284,25 @@ HttpState http_create_state_from_url(Url url, HttpHeaderCallback responseHeaderC
     if (!strcmp(url_get_scheme(url), "http"))
         state->io = io_open_tcp_socket(url_get_host(url), url_get_port_number(url), NetAddressAny, "rwb", err);
     else {
-        FREE(state);
+        http_destroy_state(state);
         if (err)
             *err = CC_EINVAL;
         return NULL;
     }
 
     if (state->io == NULL) {
-        FREE(state);
+        http_destroy_state(state);
         return NULL;
     }
 
     state->ownsIO = 1;
-    state->responseHeaderCb = responseHeaderCb;
     state->userdata = userdata;
 
     return state;
 }
 
 void http_destroy_state(HttpState state) {
+    stringlist_destroy(state->headers);
     io_close(state->body);
     if (state->ownsIO)
         io_close(state->io);
@@ -1421,6 +1432,8 @@ static int http_read_headers(HttpState state) {
     if (headerString == NULL)
         return CC_ENOMEM;
 
+    stringlist_clear(state->headers);
+
     /* Read headers, allow body initialization */
     while (1) {
         int ch = io_getc(state->io);
@@ -1463,6 +1476,10 @@ static int http_read_headers(HttpState state) {
         if ((value = strchr(header, ':')) == NULL)
             goto cleanup;
 
+        /* Let the user know what the header was too (TODO: this is not split into key and value) */
+        if (stringlist_append(state->headers, header))
+            goto cleanup;
+
         *value = 0;
         while (isspace(*++value));
 
@@ -1477,10 +1494,6 @@ static int http_read_headers(HttpState state) {
             state->contentLength = strtoull(value, NULL, 10);
             state->flags |= IO_HTTP_DEFINED_BODY;
         }
-
-        /* Let the user know what the header was too */
-        if (state->responseHeaderCb)
-            state->responseHeaderCb(header, value, state->userdata);
     }
 
     io_close(headerString);

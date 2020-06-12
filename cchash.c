@@ -377,7 +377,7 @@ int cc_ht_adjust_load_factor(HHashTable table, float desired_load_factor)
     else if (table->size == 0)
         return CC_OK;
 
-    return cc_ht_adjust_capacity(table, (float) table->size / desired_load_factor);
+    return cc_ht_adjust_capacity(table, (size_t) ((float) table->size / desired_load_factor));
 }
 
 int cc_ht_adjust_capacity(HHashTable table, size_t capacity)

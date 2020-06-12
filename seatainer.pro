@@ -3,7 +3,7 @@ CONFIG += console
 CONFIG -= app_bundle
 CONFIG -= qt
 
-QMAKE_CFLAGS += -msse4.1 -msha -maes -nostdlib -std=gnu99
+QMAKE_CFLAGS += -msse4.1 -msha -maes -nostdlib -std=gnu11
 QMAKE_CXXFLAGS += -std=c++11
 
 DEFINES += CC_TYPE_MISMATCH_ABORT \

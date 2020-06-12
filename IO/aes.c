@@ -682,7 +682,7 @@ static size_t aes_write(const void *ptr, size_t size, size_t count, void *userda
             add = 16 - aes->pos;
 
         memcpy(aes->state + aes->pos, cptr, add);
-        aes->pos += add;
+        aes->pos += (unsigned char) add;
         cptr += add;
         max -= add;
 
@@ -726,7 +726,7 @@ static size_t aes_read(void *ptr, size_t size, size_t count, void *userdata, IO 
             use = aes->pos;
 
         memcpy(cptr, aes->buffer + 16 - aes->pos, use);
-        aes->pos -= use;
+        aes->pos -= (unsigned char) use;
         cptr += use;
         max -= use;
     }

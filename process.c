@@ -513,25 +513,23 @@ int process_start_async(const char *process, const char * const args[], ProcessN
     FREE(commandline);
     FREE(wcommandline);
 
-    return success? 0: GetLastError();
+    if (success)
+        return 0;
 
-out_of_memory:
-    FREE(proc);
-    FREE(commandline);
-    FREE(wcommandline);
-    return CC_ENOMEM;
-
-error: {
+    {
         int error_code = GetLastError();
-        FREE(proc);
-        FREE(commandline);
-        FREE(wcommandline);
         proclist_remove(&proclist, procinfo);
         process_native_kill_immediate(procinfo);
         CloseHandle(procinfo.hProcess);
         CloseHandle(procinfo.hThread);
         return error_code;
     }
+
+out_of_memory:
+    FREE(proc);
+    FREE(commandline);
+    FREE(wcommandline);
+    return CC_ENOMEM;
 #else
     UNUSED(process)
     UNUSED(args)
