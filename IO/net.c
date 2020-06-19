@@ -1394,8 +1394,10 @@ int http_add_body(HttpState state, IO body, const char *mimeType) {
         if (chunked == NULL)
             return CC_ENOMEM;
 
-        if (!io_copy(body, chunked) || io_close(chunked))
+        if (!io_copy(body, chunked) || io_close(chunked)) {
+            io_close(chunked);
             goto cleanup;
+        }
     } else if (io_copy(body, state->io))
         goto cleanup;
 

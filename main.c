@@ -558,6 +558,28 @@ void walk_dir(IO out, Directory directory) {
 int main()
 {
     {
+        Variant var = variant_create_float(1000.1234);
+        Variant str = variant_create_float(103.44);
+
+        printf("Value of variant: %s\n", variant_to_string(var, NULL));
+        printf("Kilograms as integer: %d\n", variant_to_int(str, NULL));
+        printf("How many kilograms: %f\n", variant_to_float(str, NULL));
+        printf("Compare: %d\n", variant_compare(var, str));
+
+        variant_set_int64(var, 1233);
+        variant_set_string(var, "Not so fast");
+
+        printf("Value of variant: %s\n", variant_to_string(var, NULL));
+        printf("Kilograms as integer: %d\n", variant_to_int(str, NULL));
+        printf("How many kilograms: %f\n", variant_to_float(str, NULL));
+        printf("Compare: %d\n", variant_compare(var, str));
+
+        variant_destroy(var);
+        variant_destroy(str);
+        return 0;
+    }
+
+    {
         StringSet set = stringset_create();
 
         // stringset_add(set, "M");
@@ -622,7 +644,6 @@ int main()
 
         stringlist_destroy(list);
         stringlist_destroy(sorted);
-        return 0;
     }
 
     {
@@ -630,6 +651,8 @@ int main()
         stringlist_append(list, "First");
         stringlist_append(list, "Second");
         stringlist_append(list, "Third");
+
+        stringlist_insert_list(list, list, 2);
 
         for (size_t i = 0; i < stringlist_size(list); ++i) {
             printf("Item %u: %s\n", (unsigned) i, stringlist_array(list)[i]);
