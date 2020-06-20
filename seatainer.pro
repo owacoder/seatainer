@@ -23,13 +23,8 @@ unix: !win32 {
 
 SOURCES += \
     IO/base64.c \
-    ccdbllst.c \
-    cclnklst.c \
-    ccvector.c \
-    ccstring.c \
-    element.c \
+    ccio.c \
     utility.c \
-    cchash.c \
     IO/crypto_rand.c \
     IO/hex.c \
     IO/md5.c \
@@ -45,7 +40,6 @@ SOURCES += \
     main.c \
     seaerror.c \
     IO/limiter.c \
-    ccio.c \
     IO/concat.c \
     process.c \
     IO/sha256.c \
@@ -55,13 +49,7 @@ SOURCES += \
 
 HEADERS += \
     IO/base64.h \
-    ccdbllst.h \
-    cclnklst.h \
-    ccvector.h \
-    ccstring.h \
-    element.h \
     utility.h \
-    cchash.h \
     platforms.h \
     IO/crypto_rand.h \
     IO/hex.h \

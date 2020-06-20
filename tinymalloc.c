@@ -43,7 +43,7 @@ static unsigned char *tiny_next_possible_block_location(struct TinyMallocBlockHe
     if (currentBlock == &tiny_header)
         endOfData = tiny_pool;
     else
-        endOfData = currentBlock->data + currentBlock->size + (currentBlock->size & REQUIRED_ALIGNMENT_MASK); /* Keep required alignment */
+        endOfData = currentBlock->data + currentBlock->size + ((currentBlock->size & REQUIRED_ALIGNMENT_MASK)? REQUIRED_ALIGNMENT: 0); /* Keep required alignment */
 
     size_t ptr = endOfData - tiny_pool;
 
@@ -83,7 +83,7 @@ static size_t tiny_space_available_after_block(struct TinyMallocBlockHeader *cur
     if (currentBlock == &tiny_header)
         endOfData = tiny_pool;
     else
-        endOfData = currentBlock->data + currentBlock->size + (currentBlock->size & REQUIRED_ALIGNMENT_MASK); /* Keep required alignment */
+        endOfData = currentBlock->data + currentBlock->size + ((currentBlock->size & REQUIRED_ALIGNMENT_MASK)? REQUIRED_ALIGNMENT: 0); /* Keep required alignment */
 
     if (nextBlock == NULL)
         return tiny_pool_size - (endOfData - tiny_pool);
@@ -148,7 +148,7 @@ void *tiny_malloc(size_t size) {
         return NULL;
 
     struct TinyMallocBlockHeader *first = &tiny_header;
-    size_t required = sizeof(*first) + size + (size & REQUIRED_ALIGNMENT_MASK); /* Keep required alignment */
+    size_t required = sizeof(*first) + size + ((size & REQUIRED_ALIGNMENT_MASK)? REQUIRED_ALIGNMENT: 0); /* Keep required alignment */
 
 #ifdef TINY_DEBUG
     printf("\nAllocating %u bytes\n", (unsigned) size);
@@ -195,6 +195,9 @@ void *tiny_calloc(size_t size, size_t count) {
 }
 
 void tiny_free(void *ptr) {
+    if (ptr == NULL)
+        return;
+
     struct TinyMallocBlockHeader *last, *next = &tiny_header;
     struct TinyMallocBlockHeader *currentBlock = tiny_block_for_pointer(ptr);
 

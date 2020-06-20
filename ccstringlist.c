@@ -3,6 +3,7 @@
 #include "utility.h"
 #include <math.h>
 #include <stdio.h>
+#include <limits.h>
 
 static int binary_compare(const Binary *a, const Binary *b) {
     size_t max = MIN(a->length, b->length);
@@ -17,6 +18,29 @@ static int binary_compare(const Binary *a, const Binary *b) {
     else
         return 0;
 }
+
+/* These structs really aren't used at all, they're just present to emit compiler warnings if assigning one container type to another.
+ * Custom extensions of the generic types should use the same pattern:
+ *
+ * container.h:
+ *
+ *      typedef struct ContainerStruct *Container;
+ *
+ * container.c:
+ *
+ *      struct ContainerStruct {}; // Dummy struct just for type-safety warnings
+ *
+ *      void container_function(Container c) {
+ *          generic_function((GenericContainer) c); // Cast to generic container type when it needs to be used
+ *      }
+ *
+ * This prevents the user from unknowningly assigning one "type" of void * to another variable.
+ */
+struct StringListStruct {};
+struct StringSetStruct {};
+struct BinarySetStruct {};
+struct GenericMapStruct {};
+struct StringMapStruct {};
 
 struct VariantStructCustomHelper {
     Compare compare;
@@ -213,12 +237,31 @@ int variant_compare(Variant lhs, Variant rhs) {
         case VariantFloat: return (lhs->d.atom.d.floating > rhs->d.atom.d.floating) - (lhs->d.atom.d.floating < rhs->d.atom.d.floating);
         case VariantString: return strcmp(lhs->d.atom.string.data, rhs->d.atom.string.data);
         case VariantBinary: return binary_compare(&lhs->d.atom.string, &rhs->d.atom.string);
-        case VariantCustom: return lhs->d.custom.compare(lhs->d.custom.data, rhs->d.custom.data);
+        case VariantCustom: {
+            if (lhs->d.custom.copy == rhs->d.custom.copy)
+                return lhs->d.custom.compare(lhs->d.custom.data, rhs->d.custom.data);
+
+            /* C doesn't allow pointer comparisons, so we'll just order by where the copy functions appear in memory.
+             * This really doesn't create a good ordering scheme for sorting, but sorting variants is inherently problematic anyway.
+             * It still gives correct results when comparing variants for equality,
+             * and it each type of custom variant will at least be grouped and sorted properly. Just the type ordering will be undefined. */
+            uintptr_t lhs_ptr = (uintptr_t) lhs->d.custom.copy;
+            uintptr_t rhs_ptr = (uintptr_t) rhs->d.custom.copy;
+            return (lhs_ptr > rhs_ptr) - (lhs_ptr < rhs_ptr);
+        }
     }
 }
 
 enum VariantType variant_get_type(Variant var) {
     return var->type;
+}
+
+int variants_are_equal_types(Variant a, Variant b) {
+    if (variant_is_custom(a) && variant_is_custom(b)) {
+        return a->d.custom.copy == b->d.custom.copy;
+    }
+
+    return a->type == b->type;
 }
 
 Compare variant_get_compare_fn(Variant var) {
@@ -1283,6 +1326,29 @@ static size_t avltree_size(AVLTree *tree) {
     return tree->size;
 }
 
+Variant variant_from_binaryset(BinarySet set) {
+    return variant_create_custom(set, (Compare) binaryset_compare, (Copier) binaryset_copy, (Deleter) binaryset_destroy);
+}
+
+int variant_is_binaryset(Variant var) {
+    return variant_get_copier_fn(var) == (Copier) binaryset_copy;
+}
+
+BinarySet variant_get_binaryset(Variant var) {
+    if (!variant_is_binaryset(var))
+        return NULL;
+
+    return variant_get_custom(var);
+}
+
+int variant_set_binaryset_move(Variant var, BinarySet set) {
+    return variant_set_custom_move(var, set, (Compare) binaryset_compare, (Copier) binaryset_copy, (Deleter) binaryset_destroy);
+}
+
+int variant_set_binaryset(Variant var, const BinarySet set) {
+    return variant_set_custom(var, set, (Compare) binaryset_compare, (Copier) binaryset_copy, (Deleter) binaryset_destroy);
+}
+
 BinarySet binaryset_create() {
     return binaryset_create_custom(NULL);
 }
@@ -1563,6 +1629,29 @@ void binaryset_destroy(BinarySet set) {
     avltree_destroy((AVLTree *) set);
 }
 
+Variant variant_from_stringset(StringSet set) {
+    return variant_create_custom(set, (Compare) stringset_compare, (Copier) stringset_copy, (Deleter) stringset_destroy);
+}
+
+int variant_is_stringset(Variant var) {
+    return variant_get_copier_fn(var) == (Copier) stringset_copy;
+}
+
+StringSet variant_get_stringset(Variant var) {
+    if (!variant_is_stringset(var))
+        return NULL;
+
+    return variant_get_custom(var);
+}
+
+int variant_set_stringset_move(Variant var, StringSet set) {
+    return variant_set_custom_move(var, set, (Compare) stringset_compare, (Copier) stringset_copy, (Deleter) stringset_destroy);
+}
+
+int variant_set_stringset(Variant var, StringSet set) {
+    return variant_set_custom(var, set, (Compare) stringset_compare, (Copier) stringset_copy, (Deleter) stringset_destroy);
+}
+
 StringSet stringset_create() {
     return (StringSet) binaryset_create();
 }
@@ -1664,6 +1753,29 @@ void stringset_clear(StringSet set) {
 
 void stringset_destroy(StringSet set) {
     binaryset_destroy((BinarySet) set);
+}
+
+Variant variant_from_genericmap(GenericMap set) {
+    return variant_create_custom(set, (Compare) genericmap_compare, (Copier) genericmap_copy, (Deleter) genericmap_destroy);
+}
+
+int variant_is_genericmap(Variant var) {
+    return variant_get_copier_fn(var) == (Copier) genericmap_copy;
+}
+
+GenericMap variant_get_genericmap(Variant var) {
+    if (!variant_is_genericmap(var))
+        return NULL;
+
+    return variant_get_custom(var);
+}
+
+int variant_set_genericmap_move(Variant var, GenericMap set) {
+    return variant_set_custom_move(var, set, (Compare) genericmap_compare, (Copier) genericmap_copy, (Deleter) genericmap_destroy);
+}
+
+int variant_set_genericmap(Variant var, const GenericMap set) {
+    return variant_set_custom(var, set, (Compare) genericmap_compare, (Copier) genericmap_copy, (Deleter) genericmap_destroy);
 }
 
 GenericMap genericmap_create(BinaryCompare compare, Copier copy, Deleter deleter) {
@@ -1805,6 +1917,29 @@ void genericmap_clear(GenericMap map) {
 
 void genericmap_destroy(GenericMap map) {
     avltree_destroy((AVLTree *) map);
+}
+
+Variant variant_from_stringmap(StringMap set) {
+    return variant_create_custom(set, (Compare) stringmap_compare, (Copier) stringmap_copy, (Deleter) stringmap_destroy);
+}
+
+int variant_is_stringmap(Variant var) {
+    return variant_get_copier_fn(var) == (Copier) stringmap_copy;
+}
+
+StringMap variant_get_stringmap(Variant var) {
+    if (!variant_is_stringmap(var))
+        return NULL;
+
+    return variant_get_custom(var);
+}
+
+int variant_set_stringmap_move(Variant var, StringMap set) {
+    return variant_set_custom_move(var, set, (Compare) stringmap_compare, (Copier) stringmap_copy, (Deleter) stringmap_destroy);
+}
+
+int variant_set_stringmap(Variant var, const StringMap set) {
+    return variant_set_custom(var, set, (Compare) stringmap_compare, (Copier) stringmap_copy, (Deleter) stringmap_destroy);
 }
 
 StringMap stringmap_create() {
@@ -1953,6 +2088,29 @@ struct BinaryListStruct {
     size_t array_capacity;
 };
 
+Variant variant_from_genericlist(GenericList set) {
+    return variant_create_custom(set, (Compare) genericlist_compare, (Copier) genericlist_copy, (Deleter) genericlist_destroy);
+}
+
+int variant_is_genericlist(Variant var) {
+    return variant_get_copier_fn(var) == (Copier) genericlist_copy;
+}
+
+GenericList variant_get_genericlist(Variant var) {
+    if (!variant_is_genericlist(var))
+        return NULL;
+
+    return variant_get_custom(var);
+}
+
+int variant_set_genericlist_move(Variant var, GenericList set) {
+    return variant_set_custom_move(var, set, (Compare) genericlist_compare, (Copier) genericlist_copy, (Deleter) genericlist_destroy);
+}
+
+int variant_set_genericlist(Variant var, const GenericList set) {
+    return variant_set_custom(var, set, (Compare) genericlist_compare, (Copier) genericlist_copy, (Deleter) genericlist_destroy);
+}
+
 GenericList genericlist_create(Compare compare, Copier copy, Deleter deleter) {
     return genericlist_create_reserve(0, compare, copy, deleter);
 }
@@ -2026,6 +2184,30 @@ GenericList genericlist_from_genericmap_values(GenericMap other, Compare compare
 
     for (Iterator it = genericmap_begin(other); it; it = genericmap_next(other, it)) {
         if (genericlist_append(list, genericmap_value_of(other, it))) {
+            genericlist_destroy(list);
+            return NULL;
+        }
+    }
+
+    return list;
+}
+
+GenericList genericlist_from_array(const void **items, Compare compare, Copier copy, Deleter deleter) {
+    const void **ptr = items;
+    size_t count = 0;
+
+    for (; *ptr; ++ptr, ++count);
+
+    return genericlist_from_array_n(items, count, compare, copy, deleter);
+}
+
+GenericList genericlist_from_array_n(const void **items, size_t count, Compare compare, Copier copy, Deleter deleter) {
+    GenericList list = genericlist_create_reserve(count, compare, copy, deleter);
+    if (!list)
+        return NULL;
+
+    for (size_t i = 0; i < count; ++i) {
+        if (genericlist_append(list, items[i])) {
             genericlist_destroy(list);
             return NULL;
         }
@@ -2509,6 +2691,29 @@ void genericlist_destroy(GenericList list) {
     }
 }
 
+Variant variant_from_stringlist(StringList set) {
+    return variant_create_custom(set, (Compare) stringlist_compare, (Copier) stringlist_copy, (Deleter) stringlist_destroy);
+}
+
+int variant_is_stringlist(Variant var) {
+    return variant_get_copier_fn(var) == (Copier) stringlist_copy;
+}
+
+StringList variant_get_stringlist(Variant var) {
+    if (!variant_is_stringlist(var))
+        return NULL;
+
+    return variant_get_custom(var);
+}
+
+int variant_set_stringlist_move(Variant var, StringList set) {
+    return variant_set_custom_move(var, set, (Compare) stringlist_compare, (Copier) stringlist_copy, (Deleter) stringlist_destroy);
+}
+
+int variant_set_stringlist(Variant var, const StringList set) {
+    return variant_set_custom(var, set, (Compare) stringlist_compare, (Copier) stringlist_copy, (Deleter) stringlist_destroy);
+}
+
 StringList stringlist_create() {
     return stringlist_create_custom((StringCompare) strcmp);
 }
@@ -2568,6 +2773,14 @@ cleanup:
 
 StringList stringlist_copy(StringList other) {
     return (StringList) genericlist_copy((GenericList) other);
+}
+
+StringList stringlist_from_array(const char **strings) {
+    return (StringList) genericlist_from_array((const void **) strings, (Compare) strcmp, (Copier) strdup, (Deleter) FREE);
+}
+
+StringList stringlist_from_array_n(const char **strings, size_t count) {
+    return (StringList) genericlist_from_array_n((const void **) strings, count, (Compare) strcmp, (Copier) strdup, (Deleter) FREE);
 }
 
 StringList stringlist_from_stringset(StringSet other) {
@@ -2792,7 +3005,7 @@ int stringlist_compare(StringList list, StringList other) {
     return genericlist_compare((GenericList) list, (GenericList) other);
 }
 
-char *stringlist_joined_alloc(StringList list, const char *separator) {
+char *stringlist_join(StringList list, const char *separator) {
     return strjoin_alloc((const char **) stringlist_array(list), stringlist_size(list), separator);
 }
 
@@ -2846,6 +3059,29 @@ void stringlist_clear(StringList list) {
 
 void stringlist_destroy(StringList list) {
     genericlist_destroy((GenericList) list);
+}
+
+Variant variant_from_binarylist(BinaryList set) {
+    return variant_create_custom(set, (Compare) binarylist_compare, (Copier) binarylist_copy, (Deleter) binarylist_destroy);
+}
+
+int variant_is_binarylist(Variant var) {
+    return variant_get_copier_fn(var) == (Copier) binarylist_copy;
+}
+
+BinaryList variant_get_binarylist(Variant var) {
+    if (!variant_is_binarylist(var))
+        return NULL;
+
+    return variant_get_custom(var);
+}
+
+int variant_set_binarylist_move(Variant var, BinaryList set) {
+    return variant_set_custom_move(var, set, (Compare) binarylist_compare, (Copier) binarylist_copy, (Deleter) binarylist_destroy);
+}
+
+int variant_set_binarylist(Variant var, const BinaryList set) {
+    return variant_set_custom(var, set, (Compare) binarylist_compare, (Copier) binarylist_copy, (Deleter) binarylist_destroy);
 }
 
 static int binarylist_grow(BinaryList list, size_t added) {

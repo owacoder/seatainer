@@ -9,6 +9,7 @@
 
 #include "seaerror.h"
 #include "ccio.h"
+#include "ccstringlist.h"
 #include <signal.h>
 
 #ifdef __cplusplus
@@ -74,6 +75,12 @@ IO process_stdin(Process p); /* writable */
 void process_close_stdin(Process p);
 IO process_stdout(Process p); /* readable */
 IO process_stderr(Process p); /* readable */
+
+const char *environment_get_variable(const char *name);
+int environment_set_variable(const char *name, const char *value);
+int environment_remove_variable(const char *name);
+StringList environment_get_variable_list();
+StringMap environment_get_variable_map();
 
 #ifdef __cplusplus
 }

@@ -2,6 +2,9 @@
 #include "../utility.h"
 #include "../seaerror.h"
 
+#include "limiter.h"
+#include "../ccstringlist.h"
+
 #include <string.h>
 #include <limits.h>
 #include <ctype.h>
@@ -1222,9 +1225,6 @@ static const struct InputOutputDeviceCallbacks http_chunked_callbacks = {
 static IO io_open_http_chunked(IO io, const char *mode) {
     return io_open_custom(&http_chunked_callbacks, io, mode);
 }
-
-#include "limiter.h"
-#include "ccstringlist.h"
 
 #define IO_HTTP_STATUS_CODE 0x3ff
 #define IO_HTTP_NO_MESSAGE_BODY_ALLOWED 0x400

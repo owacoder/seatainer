@@ -8,18 +8,16 @@ CXXFLAGS = -Wall -std=c++11
 DEFINES = -D_POSIX_C_SOURCE=200809L -DCC_INCLUDE_NETWORK
 LDLIBS = -lm -lz
 
-SRCFILES = ccdbllst.c \
-           ccstring.c \
-           cchash.c \
-           ccvector.c \
-           cclnklst.c \
-           element.c \
+SRCFILES = ccstringlist.c \
            IO/aes.c \
+           IO/base64.c \
+           IO/buffer.c \
            IO/concat.c \
            IO/crypto_rand.c \
            IO/hex.c \
            IO/limiter.c \
            IO/md5.c \
+           IO/repeat.c \
            IO/sha1.c \
            IO/sha256.c \
            IO/net.c \
@@ -35,17 +33,16 @@ SRCFILES = ccdbllst.c \
            seaerror.c \
            tinymalloc.c
 
-HEADERFILES = ccdbllst.h \
-              element.h \
-              ccstring.h \
-              cchash.h \
-              ccvector.h \
+HEADERFILES = ccstringlist.h \
               IO/aes.h \
+              IO/base64.h \
+              IO/buffer.h \
               IO/concat.h \
               IO/crypto_rand.h \
               IO/hex.h \
               IO/limiter.h \
               IO/md5.h \
+              IO/repeat.h \
               IO/sha1.h \
               IO/sha256.h \
               IO/net.h \
@@ -54,7 +51,6 @@ HEADERFILES = ccdbllst.h \
               IO/padding/bit.h \
               IO/padding/pkcs7.h \
               ccio.h \
-              cclnklst.h \
               dir.h \
               process.h \
               platforms.h \

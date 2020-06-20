@@ -7,7 +7,7 @@
 #include "crypto_rand.h"
 #include <limits.h>
 
-#include "seaerror.h"
+#include "../seaerror.h"
 
 #if WINDOWS_OS
 #include <windows.h>

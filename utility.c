@@ -272,6 +272,15 @@ void spinlock_lock(volatile Spinlock *spinlock) {
     }
 }
 
+int spinlock_is_locked(volatile Spinlock *spinlock) {
+    if (spinlock_try_lock(spinlock)) {
+        spinlock_unlock(spinlock);
+        return 0;
+    }
+
+    return 1;
+}
+
 int spinlock_try_lock(volatile Spinlock *spinlock) {
     return !atomic_lock_acquire((volatile Atomic *) spinlock);
 }
@@ -280,69 +289,79 @@ void spinlock_unlock(volatile Spinlock *spinlock) {
     atomic_lock_release((volatile Atomic *) spinlock);
 }
 
-Mutex *mutex_create() {
+struct MutexStruct {
 #if LINUX_OS
-    pthread_mutex_t *mutex = MALLOC(sizeof(pthread_mutex_t));
+    pthread_mutex_t mutex;
+#elif WINDOWS_OS
+    CRITICAL_SECTION critical_section;
+#else
+    Spinlock spinlock;
+#endif
+};
+
+Mutex mutex_create() {
+#if LINUX_OS
+    struct MutexStruct *mutex = CALLOC(sizeof(*mutex), 1);
     if (mutex == NULL)
         return NULL;
 
-    if (pthread_mutex_init(mutex, NULL) != 0) {
+    if (pthread_mutex_init(&mutex->mutex, NULL) != 0) {
         FREE(mutex);
         return NULL;
     }
 
-    return (Mutex *) mutex;
+    return (Mutex) mutex;
 #elif WINDOWS_OS
-    CRITICAL_SECTION *mutex = MALLOC(sizeof(CRITICAL_SECTION));
+    struct MutexStruct *mutex = CALLOC(sizeof(*mutex), 1);
     if (mutex == NULL)
         return NULL;
 
-    if (InitializeCriticalSectionAndSpinCount(mutex, 0x400) == 0) {
+    if (InitializeCriticalSectionAndSpinCount(&mutex->critical_section, 0x400) == 0) {
         FREE(mutex);
         return NULL;
     }
 
-    return (Mutex *) mutex;
+    return (Mutex) mutex;
 #else
-    return CALLOC(sizeof(Spinlock), 1);
+    return CALLOC(sizeof(struct MutexStruct), 1);
 #endif
 }
 
-void mutex_lock(Mutex *mutex) {
+void mutex_lock(Mutex mutex) {
 #if LINUX_OS
-    pthread_mutex_lock((pthread_mutex_t *) mutex);
+    pthread_mutex_lock(&((struct MutexStruct *) mutex)->mutex);
 #elif WINDOWS_OS
-    EnterCriticalSection((CRITICAL_SECTION *) mutex);
+    EnterCriticalSection(&((struct MutexStruct *) mutex)->critical_section);
 #else
-    return spinlock_lock((Spinlock *) mutex);
+    spinlock_lock(&((struct MutexStruct *) mutex)->spinlock);
 #endif
 }
 
-int mutex_try_lock(Mutex *mutex) {
+int mutex_try_lock(Mutex mutex) {
 #if LINUX_OS
-    return pthread_mutex_trylock((pthread_mutex_t *) mutex) == 0;
+    return pthread_mutex_trylock(&((struct MutexStruct *) mutex)->mutex) == 0;
 #elif WINDOWS_OS
-    return TryEnterCriticalSection((CRITICAL_SECTION *) mutex);
+    return TryEnterCriticalSection(&((struct MutexStruct *) mutex)->critical_section);
 #else
-    return spinlock_try_lock((Spinlock *) mutex);
+    return spinlock_try_lock(&((struct MutexStruct *) mutex)->spinlock);
 #endif
 }
 
-void mutex_unlock(Mutex *mutex) {
+void mutex_unlock(Mutex mutex) {
 #if LINUX_OS
-    pthread_mutex_unlock((pthread_mutex_t *) mutex);
+    pthread_mutex_unlock(&((struct MutexStruct *) mutex)->mutex);
 #elif WINDOWS_OS
-    LeaveCriticalSection((CRITICAL_SECTION *) mutex);
+    LeaveCriticalSection(&((struct MutexStruct *) mutex)->critical_section);
 #else
-    return spinlock_unlock((Spinlock *) mutex);
+    return spinlock_unlock(&((struct MutexStruct *) mutex)->spinlock);
 #endif
 }
 
-void mutex_destroy(Mutex *mutex) {
+void mutex_destroy(Mutex mutex) {
 #if LINUX_OS
-    pthread_mutex_destroy((pthread_mutex_t *) mutex);
+    pthread_mutex_destroy(&((struct MutexStruct *) mutex)->mutex);
 #elif WINDOWS_OS
-    DeleteCriticalSection((CRITICAL_SECTION *) mutex);
+    DeleteCriticalSection(&((struct MutexStruct *) mutex)->critical_section);
 #endif
 
     FREE(mutex);
@@ -623,15 +642,6 @@ static uint64_t exp_mod(uint64_t base, uint64_t exp, uint64_t mod) {
 }
 
 /* The following is adapted from https://en.wikipedia.org/wiki/Miller%E2%80%93Rabin_primality_test#Deterministic_variants */
-/**
- * @brief Detects whether a number is prime.
- *
- * This function is deterministic, i.e. the number is definitely prime if this function says so.
- * `is_prime()` is specifically designed for use for testing hash table sizes for primality.
- *
- * @param number is the number to test for primality.
- * @return 1 if @p number is prime, 0 if @p number is composite.
- */
 int is_prime(size_t number) {
     size_t i, j;
     static int divisors[] = {3, 5, 7, 11, 13};
@@ -671,13 +681,6 @@ next:;
     return 1;
 }
 
-/**
- * @brief Attempts to find the lowest prime number not less than @p number.
- *
- * @param number is the number to begin testing for primality from.
- * @return If the result would be greater than 32 bits wide, @p number itself is returned.
- *         Otherwise, the lowest prime not less than @p number is returned.
- */
 size_t next_prime(size_t number) {
     number |= 1;
     while (!is_prime(number) && number < 0xffffffffu)
@@ -727,16 +730,6 @@ static unsigned char *pearson_lookup_table() {
     return lookup;
 }
 
-/**
- * @brief Performs a Pearson hash on specified data.
- *
- * Performs a Pearson hash on an arbitrary amount of data, using a pseudo-randomly shuffled hash table.
- * The output is uniformly-distributed if the input is uniformly-distributed too.
- *
- * @param data points to the data to hash.
- * @param size is the size in bytes of the data to hash.
- * @return The Pearson hash of the data.
- */
 unsigned pearson_hash(const char *data, size_t size)
 {
     const unsigned char *lookup = pearson_lookup_table();
@@ -762,42 +755,18 @@ unsigned pearson_hash(const char *data, size_t size)
     return result;
 }
 
-/** @brief Rotates @p v left by @p amount bits.
- *
- *  @param v is the 32-bit number to rotate.
- *  @param amount is the number of bits to rotate @p v by. @p amount @bold must be limited to the range [0, 32)
- *  @return @p v, rotated left (toward the MSB) by @p amount bits
- */
 uint32_t rotate_left32(uint32_t v, unsigned amount) {
     return (v << amount) | (v >> ((~amount + 1) & 0x1f));
 }
 
-/** @brief Rotates @p v right by @p amount bits.
- *
- *  @param v is the 32-bit number to rotate.
- *  @param amount is the number of bits to rotate @p v by. @p amount @bold must be limited to the range [0, 32)
- *  @return @p v, rotated right (toward the LSB) by @p amount bits
- */
 uint32_t rotate_right32(uint32_t v, unsigned amount) {
     return (v >> amount) | (v << ((~amount + 1) & 0x1f));
 }
 
-/** @brief Rotates @p v left by @p amount bits.
- *
- *  @param v is the 64-bit number to rotate.
- *  @param amount is the number of bits to rotate @p v by. @p amount @bold must be limited to the range [0, 64)
- *  @return @p v, rotated left (toward the MSB) by @p amount bits
- */
 uint64_t rotate_left64(uint64_t v, unsigned amount) {
     return (v << amount) | (v >> ((~amount + 1) & 0x3f));
 }
 
-/** @brief Rotates @p v right by @p amount bits.
- *
- *  @param v is the 64-bit number to rotate.
- *  @param amount is the number of bits to rotate @p v by. @p amount @bold must be limited to the range [0, 64)
- *  @return @p v, rotated right (toward the LSB) by @p amount bits
- */
 uint64_t rotate_right64(uint64_t v, unsigned amount) {
     return (v >> amount) | (v << ((~amount + 1) & 0x3f));
 }

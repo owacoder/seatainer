@@ -606,6 +606,7 @@ int process_start_daemon(const char *process, const char * const args[], Process
 #else
     UNUSED(process)
     UNUSED(args)
+    UNUSED(handle)
 
     return CC_ENOTSUP;
 #endif
@@ -969,6 +970,173 @@ IO process_stderr(Process p) {
         return p->ioStderr = io_open_native_file(p->hStderr, "rb");
 
     return p->ioStderr;
+#else
+    return NULL;
+#endif
+}
+
+#if LINUX_OS
+extern char **environ;
+#endif
+
+const char *environment_get_variable(const char *name) {
+#if WINDOWS_OS
+    THREAD_STATIC char buffer[65536];
+    THREAD_STATIC wchar_t wbuffer[32768];
+
+    LPWSTR wname = utf8_to_wide_alloc(name);
+    if (wname == NULL)
+        return NULL;
+
+    DWORD size = GetEnvironmentVariableW(wname, wbuffer, sizeof(wbuffer)/sizeof(*wbuffer));
+
+    FREE(wname);
+
+    if (size == 0)
+        return NULL;
+
+    WideCharToMultiByte(CP_UTF8, 0, wbuffer, -1, buffer, sizeof(buffer), NULL, NULL);
+    return buffer;
+
+#else
+    return getenv(name);
+#endif
+}
+
+int environment_set_variable(const char *name, const char *value) {
+#if LINUX_OS
+    errno = 0;
+
+    if (value == NULL)
+        return unsetenv(name)? errno: 0;
+    else
+        return setenv(name, value, 1)? errno: 0;
+#elif WINDOWS_OS
+    LPWSTR wname = utf8_to_wide_alloc(name);
+    LPWSTR wvalue = value? utf8_to_wide_alloc(value): NULL;
+    int err = 0;
+
+    if (wname == NULL || (wvalue == NULL && value != NULL))
+        err = CC_ENOMEM;
+    else if (!SetEnvironmentVariableW(wname, wvalue))
+        err = GetLastError();
+
+    FREE(wname);
+    FREE(wvalue);
+
+    return err;
+#else
+    UNUSED(name)
+    UNUSED(value)
+
+    return CC_ENOTSUP;
+#endif
+}
+
+int environment_remove_variable(const char *name) {
+    return environment_set_variable(name, NULL);
+}
+
+StringList environment_get_variable_list() {
+#if LINUX_OS
+    return stringlist_from_array((const char **) environ);
+#elif WINDOWS_OS
+    StringList list = stringlist_create();
+    LPWCH env = GetEnvironmentStringsW();
+    if (!list || !env)
+        goto cleanup;
+
+    LPWSTR var = (LPWSTR) env;
+
+    while (*var) {
+        char *utf8 = wide_to_utf8_alloc(var);
+
+        if (utf8 == NULL || stringlist_append_move(list, utf8)) {
+            FREE(utf8);
+            goto cleanup;
+        }
+
+        var += lstrlenW(var) + 1;
+    }
+
+    FreeEnvironmentStringsW(env);
+
+    return list;
+
+cleanup:
+    stringlist_destroy(list);
+    if (env)
+        FreeEnvironmentStringsW(env);
+    return NULL;
+#else
+    return NULL;
+#endif
+}
+
+StringMap environment_get_variable_map() {
+#if LINUX_OS
+    StringMap map = stringmap_create();
+    if (!map)
+        goto cleanup;
+
+    for (char **env = environ; *env; ++env) {
+        char *value = strchr(*env, '=');
+        if (!value)
+            goto cleanup;
+        *value = 0; /* TODO: not sure if environ is allowed to be modified (and modified back)? */
+
+        if (stringmap_insert(map, key, value+1)) {
+            *value = '=';
+            goto cleanup;
+        }
+
+        *value = '=';
+    }
+
+    return map;
+
+cleanup:
+    stringmap_destroy(map);
+    return NULL;
+#elif WINDOWS_OS
+    StringMap map = stringmap_create();
+    LPWCH env = GetEnvironmentStringsW();
+    if (!map || !env)
+        goto cleanup;
+
+    LPWSTR var = (LPWSTR) env;
+
+    while (*var) {
+        char *utf8 = wide_to_utf8_alloc(var);
+        if (utf8 == NULL)
+            goto cleanup;
+
+        char *name = utf8;
+        char *value = strchr(utf8, '=');
+        if (!value) {
+            FREE(utf8);
+            goto cleanup;
+        }
+        *value++ = 0;
+
+        if (stringmap_insert(map, name, value)) {
+            FREE(utf8);
+            goto cleanup;
+        }
+
+        FREE(utf8);
+        var += lstrlenW(var) + 1;
+    }
+
+    FreeEnvironmentStringsW(env);
+
+    return map;
+
+cleanup:
+    stringmap_destroy(map);
+    if (env)
+        FreeEnvironmentStringsW(env);
+    return NULL;
 #else
     return NULL;
 #endif

@@ -70,6 +70,13 @@ void spinlock_init(volatile Spinlock *spinlock);
  */
 void spinlock_lock(volatile Spinlock *spinlock);
 
+/** @brief Detects if a spinlock is locked
+ *
+ * @param spinlock The spinlock to check the lock state of
+ * @return Returns 1 if the spinlock is currently locked, 0 if unlocked
+ */
+int spinlock_is_locked(volatile Spinlock *spinlock);
+
 /** @brief Attempt to lock a spinlock
  *
  * The thread attempts to lock the spinlock, and returns immediately regardless of whether it could lock or not.
@@ -96,34 +103,43 @@ typedef void *Mutex;
  *
  * @return A new mutex object, or NULL if none could be created
  */
-Mutex *mutex_create();
+Mutex mutex_create();
 
-/** @brief Locks a mutex
+/** @brief Creates a new recursive mutex object
+ *
+ * Mutex objects are not shareable across processes, just threads within a process.
+ *
+ * @return A new mutex object, or NULL if none could be created
+ */
+Mutex mutex_create_recursive();
+
+/** @brief Locks a mutex.
  *
  * If the mutex is currently locked by another thread, the current thread will block until it can get ownership of the mutex.
  *
  * @param mutex The mutex object to lock
  */
-void mutex_lock(Mutex *mutex);
+void mutex_lock(Mutex mutex);
 
-/** @brief Attempts to lock a mutex
+/** @brief Attempts to lock a mutex.
  *
  * The thread attempts to lock the mutex, and returns immediately regardless of whether it could lock or not.
  * If the current thread already has the mutex locked, the result is undefined.
  *
  * @param mutex The mutex object to attempt to lock
- * @return 1 if the mutex was able to be locked, 0 if another thread has currently locked the mutex. If the current thread locked the mutex, the result is undefined
+ * @return 1 if the mutex was able to be locked, 0 if another thread has currently locked the mutex.
+ *         If the current thread locked the mutex, the result is undefined.
  */
-int mutex_try_lock(Mutex *mutex);
+int mutex_try_lock(Mutex mutex);
 
 /** @brief Unlock a mutex
  *
- * Unlocks a mutex that was locked by the current thread. If a mutex that is currently locked by a thread other than the current thread,
+ * Unlocks a mutex that was locked by the current thread. If @p mutex is currently locked by a thread other than the current thread,
  * the behavior is undefined.
  *
  * @param mutex The mutex object to unlock
  */
-void mutex_unlock(Mutex *mutex);
+void mutex_unlock(Mutex mutex);
 
 /** @brief Destroys a mutex object
  *
@@ -132,10 +148,28 @@ void mutex_unlock(Mutex *mutex);
  *
  * @param mutex The mutex object to destroy
  */
-void mutex_destroy(Mutex *mutex);
+void mutex_destroy(Mutex mutex);
 
+/** @brief Swaps two memory blocks.
+ *
+ * Swaps the contents of two memory blocks.
+ *
+ * @param p One of the arrays to swap.
+ * @param q One of the arrays to swap.
+ * @param size The number of bytes to swap between @p p and @p q.
+ * @return Always returns 0.
+ */
 int memswap(void *p, void *q, size_t size);
 
+/** @brief Performs an XOR of two memory blocks.
+ *
+ * Performs an XOR operation for every byte of @p src with @p dst, and stores the result in @p dst.
+ *
+ * @param dst The destination to XOR with and write to.
+ * @param src The source to XOR with @p dst.
+ * @param size The number of bytes to operate on.
+ * @return Always returns 0.
+ */
 int memxor(void *dst, void *src, size_t size);
 
 /** @brief Sleeps for @p milliseconds milliseconds.
@@ -226,25 +260,77 @@ int strcmp_no_case(const char *lhs, const char *rhs);
  * @param strings The array of strings to concatenate.
  * @param stringsCount The number of entries in the strings array.
  * @param separator A string to insert between every gathered element.
- * @result A newly allocated string that contains the concatenated strings, or `NULL` if out of memory.
+ * @return A newly allocated string that contains the concatenated strings, or `NULL` if out of memory.
  */
 char *strjoin_alloc(const char *strings[], size_t stringsCount, const char *separator);
 
+/** @brief Allocates a duplicate of a NUL-terminated string.
+ *
+ * @param str The string to copy. This parameter must not be NULL.
+ * @return A newly allocated string that contains a copy of @p str.
+ */
 char *strdup_alloc(const char *str);
 #define strdup strdup_alloc
 
-/* Performs a Pearson hash on the specified data, with a pseudo-random shuffle of hash bytes */
+/** @brief Performs a Pearson hash on specified data.
+ *
+ * Performs a Pearson hash on an arbitrary amount of data, using a pseudo-randomly shuffled hash table.
+ * The output is uniformly-distributed if the input is uniformly-distributed too.
+ *
+ * @param data points to the data to hash.
+ * @param size is the size in bytes of the data to hash.
+ * @return The Pearson hash of the data.
+ */
 unsigned pearson_hash(const char *data, size_t size);
 
-/* Returns 1 if number is prime, 0 otherwise */
+/** @brief Detects whether a number is prime.
+ *
+ * This function is deterministic, i.e. the number is definitely prime if this function says so.
+ * `is_prime()` is specifically designed for use for testing hash table sizes for primality.
+ *
+ * @param number is the number to test for primality.
+ * @return 1 if @p number is prime, 0 if @p number is composite.
+ */
 int is_prime(size_t number);
 
-/* Returns next prime number greater than `number` */
+/** @brief Attempts to find the lowest prime number not less than @p number.
+ *
+ * @param number is the number to begin testing for primality from.
+ * @return If the result would be greater than 32 bits wide, @p number itself is returned.
+ *         Otherwise, the lowest prime not less than @p number is returned.
+ */
 size_t next_prime(size_t number);
 
+/** @brief Rotates @p v left by @p amount bits.
+ *
+ *  @param v is the 32-bit number to rotate.
+ *  @param amount is the number of bits to rotate @p v by. @p amount @bold must be limited to the range [0, 32)
+ *  @return @p v, rotated left (toward the MSB) by @p amount bits
+ */
 uint32_t rotate_left32(uint32_t v, unsigned amount);
+
+/** @brief Rotates @p v right by @p amount bits.
+ *
+ *  @param v is the 32-bit number to rotate.
+ *  @param amount is the number of bits to rotate @p v by. @p amount @bold must be limited to the range [0, 32)
+ *  @return @p v, rotated right (toward the LSB) by @p amount bits
+ */
 uint32_t rotate_right32(uint32_t v, unsigned amount);
+
+/** @brief Rotates @p v left by @p amount bits.
+ *
+ *  @param v is the 64-bit number to rotate.
+ *  @param amount is the number of bits to rotate @p v by. @p amount @bold must be limited to the range [0, 64)
+ *  @return @p v, rotated left (toward the MSB) by @p amount bits
+ */
 uint64_t rotate_left64(uint64_t v, unsigned amount);
+
+/** @brief Rotates @p v right by @p amount bits.
+ *
+ *  @param v is the 64-bit number to rotate.
+ *  @param amount is the number of bits to rotate @p v by. @p amount @bold must be limited to the range [0, 64)
+ *  @return @p v, rotated right (toward the LSB) by @p amount bits
+ */
 uint64_t rotate_right64(uint64_t v, unsigned amount);
 
 /** @brief Copies @p v safely into @p dst as a little-endian value.

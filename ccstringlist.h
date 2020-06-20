@@ -6,15 +6,20 @@
 
 struct GenericListStruct;
 struct BinaryListStruct;
+struct StringListStruct;
+struct StringSetStruct;
+struct BinarySetStruct;
+struct GenericMapStruct;
+struct StringMapStruct;
 
 typedef struct VariantStruct *Variant; /* Simple variant type that can hold integers, floating point values, strings, or other containers. Simple conversions can be performed */
 typedef struct GenericListStruct *GenericList; /* Simple list of generic pointers */
-typedef void *StringList; /* Simple list of NUL-terminated strings */
+typedef struct StringListStruct *StringList; /* Simple list of NUL-terminated strings */
 typedef struct BinaryListStruct *BinaryList; /* Simple list of binary strings or other sized plain-old-data */
-typedef void *StringSet; /* Simple exclusive set of NUL-terminated strings, each element only appears once. Elements are in ascending order */
-typedef void *BinarySet; /* Simple exclusive set of binary strings or other sized plain-old-data. Elements are in ascending order */
-typedef void *GenericMap; /* Ordered map of binary strings, containing generic pointers. Elements are in ascending order */
-typedef void *StringMap; /* Simple exclusive map of NUL-terminated string keys with values, each element only appears once. Elements are NUL-terminated strings. Elements are in ascending order */
+typedef struct StringSetStruct *StringSet; /* Simple exclusive set of NUL-terminated strings, each element only appears once. Elements are in ascending order */
+typedef struct BinarySetStruct *BinarySet; /* Simple exclusive set of binary strings or other sized plain-old-data. Elements are in ascending order */
+typedef struct GenericMapStruct *GenericMap; /* Ordered map of binary strings, containing generic pointers. Elements are in ascending order */
+typedef struct StringMapStruct *StringMap; /* Simple exclusive map of NUL-terminated string keys with values, each element only appears once. Elements are NUL-terminated strings. Elements are in ascending order */
 typedef void *Iterator; /* Simple iterator, does not need to be freed */
 
 typedef struct BinaryStruct {
@@ -101,12 +106,18 @@ double variant_to_float(Variant var, int *error);
 const char *variant_to_string(Variant var, int *error);
 Binary variant_to_binary(Variant var, int *error);
 enum VariantType variant_get_type(Variant var);
+int variants_are_equal_types(Variant a, Variant b);
 Compare variant_get_compare_fn(Variant var);
 Copier variant_get_copier_fn(Variant var);
 Deleter variant_get_deleter_fn(Variant var);
 void variant_clear(Variant var);
 void variant_destroy(Variant var);
 
+Variant variant_from_stringset(StringSet set);
+int variant_is_stringset(Variant var);
+StringSet variant_get_stringset(Variant var);
+int variant_set_stringset(Variant var, const StringSet set);
+int variant_set_stringset_move(Variant var, StringSet set);
 StringSet stringset_create();
 StringSet stringset_create_custom(BinaryCompare compare);
 StringSet stringset_from_stringlist(StringList list, BinaryCompare compare);
@@ -130,6 +141,11 @@ void stringset_set_compare_fn(StringSet set, BinaryCompare compare);
 void stringset_clear(StringSet set);
 void stringset_destroy(StringSet set);
 
+Variant variant_from_binaryset(BinarySet set);
+int variant_is_binaryset(Variant var);
+BinarySet variant_get_binaryset(Variant var);
+int variant_set_binaryset(Variant var, const BinarySet set);
+int variant_set_binaryset_move(Variant var, BinarySet set);
 BinarySet binaryset_create();
 BinarySet binaryset_create_custom(BinaryCompare compare);
 BinarySet binaryset_from_binarylist(BinaryList list);
@@ -156,6 +172,11 @@ void binaryset_set_compare_fn(BinarySet set, BinaryCompare compare);
 void binaryset_clear(BinarySet set);
 void binaryset_destroy(BinarySet set);
 
+Variant variant_from_genericmap(GenericMap map);
+int variant_is_genericmap(Variant var);
+GenericMap variant_get_genericmap(Variant var);
+int variant_set_genericmap(Variant var, const GenericMap set);
+int variant_set_genericmap_move(Variant var, GenericMap set);
 GenericMap genericmap_create(BinaryCompare compare, Copier copy, Deleter deleter);
 GenericMap genericmap_copy(GenericMap other);
 int genericmap_insert_move(GenericMap map, const char *key, size_t key_len, void *item);
@@ -183,6 +204,11 @@ void genericmap_set_deleter_fn(GenericMap map, Deleter deleter);
 void genericmap_clear(GenericMap map);
 void genericmap_destroy(GenericMap map);
 
+Variant variant_from_stringmap(StringMap map);
+int variant_is_stringmap(Variant var);
+StringMap variant_get_stringmap(Variant var);
+int variant_set_stringmap(Variant var, const StringMap set);
+int variant_set_stringmap_move(Variant var, StringMap set);
 StringMap stringmap_create();
 StringMap stringmap_create_custom(BinaryCompare compare);
 StringMap stringmap_copy(StringMap other);
@@ -208,11 +234,18 @@ void stringmap_set_compare_fn(StringMap map, BinaryCompare compare);
 void stringmap_clear(StringMap map);
 void stringmap_destroy(StringMap map);
 
+Variant variant_from_genericlist(GenericList map);
+int variant_is_genericlist(Variant var);
+GenericList variant_get_genericlist(Variant var);
+int variant_set_genericlist(Variant var, const GenericList set);
+int variant_set_genericlist_move(Variant var, GenericList set);
 GenericList genericlist_create(Compare compare, Copier copy, Deleter deleter);
 GenericList genericlist_create_reserve(size_t reserve, Compare compare, Copier copy, Deleter deleter);
 GenericList genericlist_copy(GenericList other);
 GenericList genericlist_concatenate(GenericList left, GenericList right);
 GenericList genericlist_from_genericmap_values(GenericMap other, Compare compare);
+GenericList genericlist_from_array(const void **items, Compare compare, Copier copy, Deleter deleter);
+GenericList genericlist_from_array_n(const void **items, size_t count, Compare compare, Copier copy, Deleter deleter);
 GenericList genericlist_create_filled(const void *item, size_t size, Compare compare, Copier copy, Deleter deleter);
 int genericlist_fill(GenericList list, const void *item, size_t size);
 int genericlist_resize(GenericList list, size_t size, const void *empty_item);
@@ -252,10 +285,17 @@ void genericlist_clear(GenericList list);
 void genericlist_destroy(GenericList list);
 
 /* The Compare function for a StringList is `int (*)(const char *, const char *)` */
+Variant variant_from_stringlist(StringList map);
+int variant_is_stringlist(Variant var);
+StringList variant_get_stringlist(Variant var);
+int variant_set_stringlist(Variant var, const StringList set);
+int variant_set_stringlist_move(Variant var, StringList set);
 StringList stringlist_create();
 StringList stringlist_create_custom(StringCompare compare);
 StringList stringlist_create_reserve(size_t reserve, StringCompare compare);
 StringList stringlist_concatenate(StringList left, StringList right);
+StringList stringlist_from_array(const char **strings);
+StringList stringlist_from_array_n(const char **strings, size_t count);
 StringList stringlist_from_stringset(StringSet other);
 StringList stringlist_from_binarylist(BinaryList other);
 StringList stringlist_from_genericmap_keys(GenericMap other);
@@ -299,9 +339,14 @@ StringCompare stringlist_get_compare_fn(StringList list);
 void stringlist_set_compare_fn(StringList list, StringCompare compare);
 void stringlist_clear(StringList list);
 void stringlist_destroy(StringList list);
-char *stringlist_joined_alloc(StringList list, const char *separator);
+char *stringlist_join(StringList list, const char *separator);
 
 /* If binary data is passed to a function that adopts the allocated data (e.g. the `move` functions), the user MUST ensure that data[length] == 0 */
+Variant variant_from_binarylist(BinaryList map);
+int variant_is_binarylist(Variant var);
+BinaryList variant_get_binarylist(Variant var);
+int variant_set_binarylist(Variant var, const BinaryList set);
+int variant_set_binarylist_move(Variant var, BinaryList set);
 BinaryList binarylist_create();
 BinaryList binarylist_create_custom(BinaryCompare compare);
 BinaryList binarylist_create_reserve(size_t reserve, BinaryCompare compare);
