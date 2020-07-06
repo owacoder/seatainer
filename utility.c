@@ -14,6 +14,7 @@
 
 #if LINUX_OS
 #include <pthread.h>
+#include <errno.h>
 #endif
 
 #if WINDOWS_OS
@@ -409,11 +410,42 @@ int memxor(void *dst, void *src, size_t size) {
     return 0;
 }
 
-void thread_sleep(unsigned long milliseconds) {
+void thread_sleep(unsigned long long tm) {
 #if LINUX_OS
-    usleep(milliseconds * 1000);
+    struct timespec t;
+
+    t.tv_sec = tm / 1000;
+    t.tv_nsec = (tm % 1000) * 1000000L;
+
+    while (nanosleep(&t, &t) == EINTR);
 #elif WINDOWS_OS
-    Sleep(milliseconds);
+    Sleep(tm);
+#endif
+}
+
+void thread_usleep(unsigned long long tm) {
+#if LINUX_OS
+    struct timespec t;
+
+    t.tv_sec = tm / 1000000L;
+    t.tv_nsec = (tm % 1000000) * 1000L;
+
+    while (nanosleep(&t, &t) == EINTR);
+#elif WINDOWS_OS
+    Sleep(tm / 1000);
+#endif
+}
+
+void thread_nsleep(unsigned long long tm) {
+#if LINUX_OS
+    struct timespec t;
+
+    t.tv_sec = tm / 1000000000L;
+    t.tv_nsec = tm % 1000000000L;
+
+    while (nanosleep(&t, &t) == EINTR);
+#elif WINDOWS_OS
+    Sleep(tm / 1000000);
 #endif
 }
 
@@ -950,6 +982,13 @@ size_t safe_multiply(size_t u, size_t v) {
 
     return result;
 #endif
+}
+
+size_t safe_add(size_t u, size_t v) {
+    if (u + v < u)
+        return 0;
+
+    return u + v;
 }
 
 #if WINDOWS_OS

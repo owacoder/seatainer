@@ -8,6 +8,8 @@
 
 #include "../seaerror.h"
 
+#include <string.h>
+
 struct Buffer {
     char *data;
     size_t capacity, pos, endpos; /* pos points to first character in buffer, endpos points past last character in buffer, if equal, buffer is empty */

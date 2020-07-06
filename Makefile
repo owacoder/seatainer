@@ -6,7 +6,7 @@ LD = gcc # define to ld if you want freestanding behavior (not yet supported)
 CFLAGS = -Wall -std=c99 # -maes -msse4.1 -msha
 CXXFLAGS = -Wall -std=c++11
 DEFINES = -D_POSIX_C_SOURCE=200809L -DCC_INCLUDE_NETWORK
-LDLIBS = -lm -lz
+LDLIBS = -lm -lz -lpthread
 
 SRCFILES = ccstringlist.c \
            IO/aes.c \

@@ -5,6 +5,35 @@
 #include <stdio.h>
 #include <limits.h>
 
+int generictypes_compatible_compare(Compare compare_lhs, Compare compare_rhs, Copier copier_lhs, Copier copier_rhs, Deleter deleter_lhs, Deleter deleter_rhs) {
+    /* If copiers and deleters are the same, it's the same type */
+    if (copier_lhs == copier_rhs && deleter_lhs == deleter_rhs)
+        return 0;
+    /* If no copier, but compare and deleters are the same, it's the same type */
+    else if (copier_lhs == NULL && copier_rhs == NULL && compare_lhs == compare_rhs && deleter_lhs == deleter_rhs)
+        return 0;
+    /* Otherwise, the types are different */
+    else if (copier_lhs || copier_rhs) {
+        /* NOTE: this only works on platforms where it's safe to cast function pointers to uintptr_t (which is just about any modern system), but it may fail for other systems */
+        uintptr_t lhs = (uintptr_t) copier_lhs;
+        uintptr_t rhs = (uintptr_t) copier_rhs;
+
+        return (lhs > rhs) - (lhs < rhs);
+    } else if (compare_lhs || compare_rhs) {
+        /* NOTE: this only works on platforms where it's safe to cast function pointers to uintptr_t (which is just about any modern system), but it may fail for other systems */
+        uintptr_t lhs = (uintptr_t) compare_lhs;
+        uintptr_t rhs = (uintptr_t) compare_rhs;
+
+        return (lhs > rhs) - (lhs < rhs);
+    } else {
+        /* NOTE: this only works on platforms where it's safe to cast function pointers to uintptr_t (which is just about any modern system), but it may fail for other systems */
+        uintptr_t lhs = (uintptr_t) deleter_lhs;
+        uintptr_t rhs = (uintptr_t) deleter_rhs;
+
+        return (lhs > rhs) - (lhs < rhs);
+    }
+}
+
 static int binary_compare(const Binary *a, const Binary *b) {
     size_t max = MIN(a->length, b->length);
     int cmp = memcmp(a->data, b->data, max);
@@ -173,9 +202,6 @@ Variant variant_create_binary_string_binary(const Binary value) {
 }
 
 Variant variant_create_custom_move(void *item, Compare compare, Copier copier, Deleter deleter) {
-    if (compare == NULL || copier == NULL)
-        return NULL;
-
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
@@ -190,7 +216,7 @@ Variant variant_create_custom_move(void *item, Compare compare, Copier copier, D
 }
 
 Variant variant_create_custom(const void *item, Compare compare, Copier copier, Deleter deleter) {
-    if (compare == NULL || copier == NULL)
+    if (copier == NULL)
         return NULL;
 
     if (deleter == NULL)
@@ -238,16 +264,18 @@ int variant_compare(Variant lhs, Variant rhs) {
         case VariantString: return strcmp(lhs->d.atom.string.data, rhs->d.atom.string.data);
         case VariantBinary: return binary_compare(&lhs->d.atom.string, &rhs->d.atom.string);
         case VariantCustom: {
-            if (lhs->d.custom.copy == rhs->d.custom.copy)
-                return lhs->d.custom.compare(lhs->d.custom.data, rhs->d.custom.data);
+            int cmp = generictypes_compatible_compare(lhs->d.custom.compare, rhs->d.custom.compare,
+                                                      lhs->d.custom.copy, rhs->d.custom.copy,
+                                                      lhs->d.custom.deleter, rhs->d.custom.deleter);
+            if (cmp)
+                return cmp;
 
-            /* C doesn't allow pointer comparisons, so we'll just order by where the copy functions appear in memory.
-             * This really doesn't create a good ordering scheme for sorting, but sorting variants is inherently problematic anyway.
-             * It still gives correct results when comparing variants for equality,
-             * and it each type of custom variant will at least be grouped and sorted properly. Just the type ordering will be undefined. */
-            uintptr_t lhs_ptr = (uintptr_t) lhs->d.custom.copy;
-            uintptr_t rhs_ptr = (uintptr_t) rhs->d.custom.copy;
-            return (lhs_ptr > rhs_ptr) - (lhs_ptr < rhs_ptr);
+            if (lhs->d.custom.compare)
+                return lhs->d.custom.compare(lhs->d.custom.data, rhs->d.custom.data);
+            else if (rhs->d.custom.compare)
+                return rhs->d.custom.compare(lhs->d.custom.data, rhs->d.custom.data);
+
+            return 0; /* Assume equal if no comparison function */
         }
     }
 }
@@ -257,9 +285,10 @@ enum VariantType variant_get_type(Variant var) {
 }
 
 int variants_are_equal_types(Variant a, Variant b) {
-    if (variant_is_custom(a) && variant_is_custom(b)) {
-        return a->d.custom.copy == b->d.custom.copy;
-    }
+    if (variant_is_custom(a) && variant_is_custom(b))
+        return !generictypes_compatible_compare(a->d.custom.compare, b->d.custom.compare,
+                                                a->d.custom.copy, b->d.custom.copy,
+                                                a->d.custom.deleter, b->d.custom.deleter);
 
     return a->type == b->type;
 }
@@ -717,7 +746,8 @@ typedef struct AVLNode {
 
 typedef struct AVLTree {
     struct AVLNode *root;
-    BinaryCompare compare;
+    BinaryCompare key_compare;
+    Compare value_compare;
     Copier copy;
     Deleter deleter;
     size_t size;
@@ -755,12 +785,20 @@ static void avltree_nodedestroy(AVLNode *node, Deleter deleter) {
     FREE(node);
 }
 
-static BinaryCompare avltree_get_compare_fn(AVLTree *tree) {
-    return tree->compare;
+static BinaryCompare avltree_get_key_compare_fn(AVLTree *tree) {
+    return tree->key_compare;
 }
 
-static void avltree_set_compare_fn(AVLTree *tree, BinaryCompare compare) {
-    tree->compare = compare? compare: binary_compare;
+static void avltree_set_key_compare_fn(AVLTree *tree, BinaryCompare compare) {
+    tree->key_compare = compare? compare: binary_compare;
+}
+
+static Compare avltree_get_value_compare_fn(AVLTree *tree) {
+    return tree->value_compare;
+}
+
+static void avltree_set_value_compare_fn(AVLTree *tree, Compare compare) {
+    tree->value_compare = compare;
 }
 
 static Copier avltree_get_copier_fn(AVLTree *tree) {
@@ -768,7 +806,7 @@ static Copier avltree_get_copier_fn(AVLTree *tree) {
 }
 
 static void avltree_set_copier_fn(AVLTree *tree, Copier copier) {
-    tree->copy = copier? copier: (Copier) avltree_copier;
+    tree->copy = copier;
 }
 
 static Deleter avltree_get_deleter_fn(AVLTree *tree) {
@@ -784,7 +822,8 @@ static AVLTree *avltree_create() {
     if (tree == NULL)
         return NULL;
 
-    tree->compare = binary_compare;
+    tree->key_compare = binary_compare;
+    tree->value_compare = NULL;
     tree->copy = avltree_copier;
     tree->deleter = avltree_deleter;
 
@@ -831,11 +870,15 @@ static AVLNode *avltree_copy_helper(AVLNode *node, AVLNode *parent, Copier copie
 }
 
 static AVLTree *avltree_copy(AVLTree *other) {
+    if (other->copy == NULL)
+        return NULL;
+
     AVLTree *tree = avltree_create();
     if (tree == NULL)
         return NULL;
 
-    tree->compare = other->compare;
+    tree->key_compare = other->key_compare;
+    tree->value_compare = other->value_compare;
     tree->copy = other->copy;
     tree->deleter = other->deleter;
     tree->size = other->size;
@@ -947,7 +990,7 @@ static AVLNode *avltree_find(AVLTree *tree, const char *key, size_t key_len) {
     Binary b = {.data = (char *) key, .length = key_len};
     AVLNode *parent;
 
-    return *avltree_find_helper(&tree->root, &parent, tree->compare, b);
+    return *avltree_find_helper(&tree->root, &parent, tree->key_compare, b);
 }
 
 static AVLNode *avltree_rotate_left(AVLNode *parent, AVLNode *child) {
@@ -1049,7 +1092,7 @@ static AVLNode *avltree_rotate_leftright(AVLNode *parent, AVLNode *child) {
 static AVLNode *avltree_insert(AVLTree *tree, const char *key, size_t key_len, void *value) {
     Binary b = {.data = (char *) key, .length = key_len};
     AVLNode *parent, *node, *inserted;
-    AVLNode **nodeptr = avltree_find_helper(&tree->root, &parent, tree->compare, b);
+    AVLNode **nodeptr = avltree_find_helper(&tree->root, &parent, tree->key_compare, b);
 
     if (*nodeptr != NULL) {
         tree->deleter((*nodeptr)->value);
@@ -1289,17 +1332,17 @@ int avltree_is_avl(AVLTree *tree) {
     return abs(deep - shallow) <= 1;
 }
 
-static int avltree_compare(AVLTree *left, AVLTree *right, Compare value_compare) {
+static int avltree_compare(AVLTree *left, AVLTree *right) {
     AVLNode *lhs = avltree_min_node(left);
     AVLNode *rhs = avltree_min_node(right);
 
     while (lhs && rhs) {
-        int cmp = left->compare(&lhs->key, &rhs->key);
+        int cmp = left->key_compare(&lhs->key, &rhs->key);
         if (cmp)
             return cmp;
 
-        if (value_compare) {
-            cmp = value_compare(lhs->value, rhs->value);
+        if (left->value_compare) {
+            cmp = left->value_compare(lhs->value, rhs->value);
             if (cmp)
                 return cmp;
         }
@@ -1356,7 +1399,7 @@ BinarySet binaryset_create() {
 BinarySet binaryset_create_custom(BinaryCompare compare) {
     BinarySet set = (BinarySet) avltree_create();
     if (set)
-        avltree_set_compare_fn((AVLTree *) set, compare);
+        avltree_set_key_compare_fn((AVLTree *) set, compare);
 
     return set;
 }
@@ -1610,15 +1653,15 @@ size_t binaryset_size(BinarySet set) {
 }
 
 int binaryset_compare(BinarySet lhs, BinarySet rhs) {
-    return avltree_compare((AVLTree *) lhs, (AVLTree *) rhs, NULL);
+    return avltree_compare((AVLTree *) lhs, (AVLTree *) rhs);
 }
 
 BinaryCompare binaryset_get_compare_fn(BinarySet set) {
-    return avltree_get_compare_fn((AVLTree *) set);
+    return avltree_get_key_compare_fn((AVLTree *) set);
 }
 
 void binaryset_set_compare_fn(BinarySet set, BinaryCompare compare) {
-    avltree_set_compare_fn((AVLTree *) set, compare);
+    avltree_set_key_compare_fn((AVLTree *) set, compare);
 }
 
 void binaryset_clear(BinarySet set) {
@@ -1778,12 +1821,13 @@ int variant_set_genericmap(Variant var, const GenericMap set) {
     return variant_set_custom(var, set, (Compare) genericmap_compare, (Copier) genericmap_copy, (Deleter) genericmap_destroy);
 }
 
-GenericMap genericmap_create(BinaryCompare compare, Copier copy, Deleter deleter) {
+GenericMap genericmap_create(BinaryCompare key_compare, Compare value_compare, Copier copy, Deleter deleter) {
     AVLTree *tree = avltree_create();
     if (tree == NULL)
         return NULL;
 
-    avltree_set_compare_fn(tree, compare);
+    avltree_set_key_compare_fn(tree, key_compare);
+    avltree_set_value_compare_fn(tree, value_compare);
     avltree_set_copier_fn(tree, copy);
     avltree_set_deleter_fn(tree, deleter);
 
@@ -1794,7 +1838,7 @@ GenericMap genericmap_copy(GenericMap other) {
     return (GenericMap) avltree_copy((AVLTree *) other);
 }
 
-int genericmap_insert_move(GenericMap map, const char *key, size_t key_len, void *item) {
+int genericmap_insert_move(GenericMap map, const char *key, size_t key_len, void *item) {    
     if (avltree_insert((AVLTree *) map, key, key_len, item) == NULL)
         return CC_ENOMEM;
 
@@ -1802,6 +1846,9 @@ int genericmap_insert_move(GenericMap map, const char *key, size_t key_len, void
 }
 
 int genericmap_insert(GenericMap map, const char *key, size_t key_len, const void *item) {
+    if (avltree_get_copier_fn((AVLTree *) map) == NULL)
+        return CC_ENOTSUP;
+
     void *duplicate = avltree_get_copier_fn((AVLTree *) map)(item);
     if (duplicate == NULL && item != NULL)
         return CC_ENOMEM;
@@ -1822,6 +1869,9 @@ int genericmap_replace_move(GenericMap map, Iterator it, void *item) {
 }
 
 int genericmap_replace(GenericMap map, Iterator it, const void *item) {
+    if (avltree_get_copier_fn((AVLTree *) map) == NULL)
+        return CC_ENOTSUP;
+
     void *duplicate = avltree_get_copier_fn((AVLTree *) map)(item);
     if (duplicate == NULL && item != NULL)
         return CC_ENOMEM;
@@ -1879,20 +1929,34 @@ void *genericmap_value_of_key(GenericMap map, const char *key, size_t key_len) {
     return genericmap_value_of(map, it);
 }
 
-int genericmap_compare(GenericMap lhs, GenericMap rhs, Compare value_compare) {
-    return avltree_compare((AVLTree *) lhs, (AVLTree *) rhs, value_compare);
+int genericmap_compare(GenericMap lhs, GenericMap rhs) {
+    int cmp = generictypes_compatible_compare(((AVLTree *) lhs)->value_compare, ((AVLTree *) rhs)->value_compare,
+                                              ((AVLTree *) lhs)->copy, ((AVLTree *) rhs)->copy,
+                                              ((AVLTree *) lhs)->deleter, ((AVLTree *) rhs)->deleter);
+    if (cmp)
+        return cmp;
+
+    return avltree_compare((AVLTree *) lhs, (AVLTree *) rhs);
 }
 
 size_t genericmap_size(GenericMap map) {
     return avltree_size((AVLTree *) map);
 }
 
-BinaryCompare genericmap_get_compare_fn(GenericMap map) {
-    return avltree_get_compare_fn((AVLTree *) map);
+BinaryCompare genericmap_get_key_compare_fn(GenericMap map) {
+    return avltree_get_key_compare_fn((AVLTree *) map);
 }
 
-void genericmap_set_compare_fn(GenericMap map, BinaryCompare compare) {
-    avltree_set_compare_fn((AVLTree *) map, compare);
+void genericmap_set_key_compare_fn(GenericMap map, BinaryCompare compare) {
+    avltree_set_key_compare_fn((AVLTree *) map, compare);
+}
+
+Compare genericmap_get_value_compare_fn(GenericMap map) {
+    return avltree_get_value_compare_fn((AVLTree *) map);
+}
+
+void genericmap_set_value_compare_fn(GenericMap map, Compare compare) {
+    avltree_set_value_compare_fn((AVLTree *) map, compare);
 }
 
 Copier genericmap_get_copier_fn(GenericMap map) {
@@ -1943,11 +2007,11 @@ int variant_set_stringmap(Variant var, const StringMap set) {
 }
 
 StringMap stringmap_create() {
-    return stringmap_create_custom(NULL);
+    return stringmap_create_custom(NULL, NULL);
 }
 
-StringMap stringmap_create_custom(BinaryCompare compare) {
-    return (StringMap) genericmap_create(compare, (Copier) strdup, (Deleter) FREE);
+StringMap stringmap_create_custom(BinaryCompare key_compare, StringCompare value_compare) {
+    return (StringMap) genericmap_create(key_compare, (Compare) (value_compare? value_compare: strcmp), (Copier) strdup, (Deleter) FREE);
 }
 
 StringMap stringmap_copy(StringMap other) {
@@ -2052,16 +2116,24 @@ size_t stringmap_size(StringMap map) {
     return genericmap_size((GenericMap) map);
 }
 
-int stringmap_compare(StringMap lhs, StringMap rhs, StringCompare value_compare) {
-    return genericmap_compare((GenericMap) lhs, (GenericMap) rhs, (Compare) (value_compare? value_compare: strcmp));
+int stringmap_compare(StringMap lhs, StringMap rhs) {
+    return genericmap_compare((GenericMap) lhs, (GenericMap) rhs);
 }
 
-BinaryCompare stringmap_get_compare_fn(StringMap map) {
-    return genericmap_get_compare_fn((GenericMap) map);
+BinaryCompare stringmap_get_key_compare_fn(StringMap map) {
+    return genericmap_get_key_compare_fn((GenericMap) map);
 }
 
-void stringmap_set_compare_fn(StringMap map, BinaryCompare compare) {
-    genericmap_set_compare_fn((GenericMap) map, compare);
+void stringmap_set_key_compare_fn(StringMap map, BinaryCompare compare) {
+    genericmap_set_key_compare_fn((GenericMap) map, compare);
+}
+
+StringCompare stringmap_get_value_compare_fn(StringMap map) {
+    return (StringCompare) genericmap_get_value_compare_fn((GenericMap) map);
+}
+
+void stringmap_set_value_compare_fn(StringMap map, StringCompare compare) {
+    genericmap_set_value_compare_fn((GenericMap) map, (Compare) compare);
 }
 
 void stringmap_clear(StringMap map) {
@@ -2226,6 +2298,28 @@ GenericList genericlist_create_filled(const void *item, size_t size, Compare com
     return list;
 }
 
+GenericList genericlist_copy_slice(GenericList other, size_t begin_index, size_t length) {
+    if (begin_index > genericlist_size(other))
+        begin_index = genericlist_size(other);
+
+    if (genericlist_size(other) - begin_index < length)
+        length = genericlist_size(other) - begin_index;
+
+    GenericList list = genericlist_create_reserve(length, genericlist_get_compare_fn(list), genericlist_get_copier_fn(list), genericlist_get_deleter_fn(list));
+    if (list == NULL)
+        return NULL;
+
+    const void **array = genericlist_array(other);
+    for (size_t i = 0; i < length; ++i) {
+        if (genericlist_append(list, array[begin_index+i])) {
+            genericlist_destroy(list);
+            return NULL;
+        }
+    }
+
+    return list;
+}
+
 static int genericlist_grow(GenericList list, size_t added) {
     if (list->array_size+added >= list->array_capacity) {
         size_t new_capacity = MAX(list->array_capacity + (list->array_capacity / 2), list->array_size + added) + 1;
@@ -2245,6 +2339,9 @@ static int genericlist_grow(GenericList list, size_t added) {
 }
 
 int genericlist_fill(GenericList list, const void *item, size_t size) {
+    if (list->copy == NULL)
+        return CC_ENOTSUP;
+
     size_t fill_size = MIN(genericlist_size(list), size);
 
     int error = genericlist_resize(list, size, item);
@@ -2267,6 +2364,9 @@ int genericlist_resize(GenericList list, size_t size, const void *empty_item) {
     size_t original_size = genericlist_size(list);
 
     if (size > original_size) {
+        if (list->copy == NULL)
+            return CC_ENOTSUP;
+
         int error = genericlist_grow(list, size - original_size);
         if (error)
             return error;
@@ -2334,6 +2434,9 @@ int genericlist_append_move(GenericList list, void *item) {
 }
 
 int genericlist_append(GenericList list, const void *item) {
+    if (list->copy == NULL)
+        return CC_ENOTSUP;
+
     void *duplicate = list->copy(item);
     if (duplicate == NULL && item != NULL)
         return CC_ENOMEM;
@@ -2346,6 +2449,9 @@ int genericlist_append(GenericList list, const void *item) {
 }
 
 int genericlist_insert_list(GenericList list, GenericList other, size_t before_index) {
+    if (list->copy == NULL)
+        return CC_ENOTSUP;
+
     if (before_index >= genericlist_size(list))
         before_index = genericlist_size(list);
 
@@ -2423,6 +2529,9 @@ int genericlist_insert_move(GenericList list, void *item, size_t before_index) {
 }
 
 int genericlist_insert(GenericList list, const void *item, size_t before_index) {
+    if (list->copy == NULL)
+        return CC_ENOTSUP;
+
     void *duplicate = list->copy(item);
     if (duplicate == NULL && item != NULL)
         return CC_ENOMEM;
@@ -2444,6 +2553,9 @@ int genericlist_replace_move_at(GenericList list, size_t index, void *item) {
 }
 
 int genericlist_replace_at(GenericList list, size_t index, const void *item) {
+    if (list->copy == NULL)
+        return CC_ENOTSUP;
+
     void *duplicate = list->copy(item);
     if (duplicate == NULL && item != NULL)
         return CC_ENOMEM;
@@ -2508,6 +2620,9 @@ int genericlist_contains(GenericList list, const void *item) {
 }
 
 size_t genericlist_find(GenericList list, const void *item, size_t begin_index) {
+    if (list->compare == NULL)
+        return SIZE_MAX;
+
     for (size_t i = begin_index; i < genericlist_size(list); ++i) {
         if (list->compare(genericlist_array(list)[i], item) == 0)
             return i;
@@ -2517,6 +2632,9 @@ size_t genericlist_find(GenericList list, const void *item, size_t begin_index) 
 }
 
 size_t genericlist_rfind(GenericList list, const void *item, size_t begin_index) {
+    if (list->compare == NULL)
+        return SIZE_MAX;
+
     if (begin_index >= genericlist_size(list))
         begin_index = genericlist_size(list)-1;
 
@@ -2529,13 +2647,21 @@ size_t genericlist_rfind(GenericList list, const void *item, size_t begin_index)
 }
 
 int genericlist_compare(GenericList list, GenericList other) {
+    int cmp = generictypes_compatible_compare(list->compare, other->compare,
+                                              list->copy, other->copy,
+                                              list->deleter, other->deleter);
+    if (cmp)
+        return cmp;
+
     size_t max = MIN(genericlist_size(list), genericlist_size(other));
 
-    for (size_t i = 0; i < max; ++i) {
-        int cmp = list->compare(genericlist_array(list)[i], genericlist_array(other)[i]);
+    if (list->compare != NULL) {
+        for (size_t i = 0; i < max; ++i) {
+            int cmp = list->compare(genericlist_array(list)[i], genericlist_array(other)[i]);
 
-        if (cmp)
-            return cmp;
+            if (cmp)
+                return cmp;
+        }
     }
 
     if (genericlist_size(other) != max)
@@ -2604,6 +2730,9 @@ int genericlist_sort(GenericList list, int descending) {
 }
 
 int genericlist_stable_sort(GenericList list, int descending) {
+    if (list->compare == NULL)
+        return CC_ENOTSUP;
+
     void **temp = MALLOC(genericlist_size(list) * sizeof(*temp));
     if (temp == NULL) {
         FREE(temp);
@@ -2651,8 +2780,7 @@ Compare genericlist_get_compare_fn(GenericList list) {
 }
 
 void genericlist_set_compare_fn(GenericList list, Compare compare) {
-    if (compare != NULL)
-        list->compare = compare;
+    list->compare = compare;
 }
 
 Copier genericlist_get_copier_fn(GenericList list) {
@@ -2660,8 +2788,7 @@ Copier genericlist_get_copier_fn(GenericList list) {
 }
 
 void genericlist_set_copier_fn(GenericList list, Copier copier) {
-    if (copier != NULL)
-        list->copy = copier;
+    list->copy = copier;
 }
 
 Deleter genericlist_get_deleter_fn(GenericList list) {
@@ -2864,6 +2991,10 @@ StringList stringlist_from_stringmap_values(StringMap other) {
 
 StringList stringlist_create_filled(const char *item, size_t size) {
     return (StringList) genericlist_create_filled(item, size, (Compare) strcmp, (Copier) strdup, (Deleter) FREE);
+}
+
+StringList stringlist_copy_slice(StringList other, size_t begin_index, size_t length) {
+    return (StringList) genericlist_copy_slice((GenericList) other, begin_index, length);
 }
 
 int stringlist_fill(StringList list, const char *item, size_t size) {
@@ -3179,6 +3310,28 @@ BinaryList binarylist_copy(BinaryList other) {
     return list;
 }
 
+BinaryList binarylist_copy_slice(BinaryList other, size_t begin_index, size_t length) {
+    if (begin_index > binarylist_size(other))
+        begin_index = binarylist_size(other);
+
+    if (binarylist_size(other) - begin_index < length)
+        length = binarylist_size(other) - begin_index;
+
+    BinaryList list = binarylist_create_reserve(length, binarylist_get_compare_fn(list));
+    if (list == NULL)
+        return NULL;
+
+    const Binary *array = binarylist_array(other);
+    for (size_t i = 0; i < length; ++i) {
+        if (binarylist_append_binary(list, array[begin_index+i])) {
+            binarylist_destroy(list);
+            return NULL;
+        }
+    }
+
+    return list;
+}
+
 BinaryList binarylist_concatenate(BinaryList left, BinaryList right) {
     BinaryList result = binarylist_create_reserve(binarylist_size(left) + binarylist_size(right),
                                                   binarylist_get_compare_fn(left));
@@ -3235,7 +3388,7 @@ BinaryList binarylist_from_binaryset(BinarySet other) {
 }
 
 BinaryList binarylist_from_genericmap_keys(GenericMap other) {
-    BinaryList list = binarylist_create_reserve(genericmap_size(other), genericmap_get_compare_fn(other));
+    BinaryList list = binarylist_create_reserve(genericmap_size(other), genericmap_get_key_compare_fn(other));
     if (!list)
         return NULL;
 
@@ -3254,7 +3407,7 @@ BinaryList binarylist_from_stringmap_keys(StringMap other) {
 }
 
 BinaryList binarylist_from_stringmap_values(StringMap other) {
-    BinaryList list = binarylist_create_reserve(stringmap_size(other), stringmap_get_compare_fn(other));
+    BinaryList list = binarylist_create_reserve(stringmap_size(other), stringmap_get_key_compare_fn(other));
     if (!list)
         return NULL;
 

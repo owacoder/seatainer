@@ -5,6 +5,7 @@
 /* TODO: processes are a work in progress */
 
 #if LINUX_OS
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
@@ -86,7 +87,7 @@ static int proclist_add(ProcessList lst, pid_t proc) {
 }
 
 static void proclist_at_exit(void) {
-    printf("Killing %d\n", proclist.count);
+    printf("Killing %d\n", (int) proclist.count);
 
     for (size_t i = 0; i < proclist.count; ++i) {
         kill(proclist.processes[i], SIGKILL);
@@ -96,7 +97,8 @@ static void proclist_at_exit(void) {
     FREE(proclist.processes);
 }
 
-static void sigchld(void) { /* SIGCHLD handler only handles zombie processes */
+static void sigchld(int unused) { /* SIGCHLD handler only handles zombie processes */
+    UNUSED(unused)
     atomic_set(&proclist_purge, 1);
 }
 
@@ -361,7 +363,7 @@ int process_start_sync(const char *process, const char * const args[], int *exit
 
         siginfo_t info;
 
-        if (waitid(P_PID, child, &info, WEXITED) == -1)
+        if (waitid(P_PID, (id_t) child, &info, WEXITED) == -1)
             return errno;
 
         if (info.si_code == CLD_EXITED) {
@@ -1080,6 +1082,7 @@ StringMap environment_get_variable_map() {
         goto cleanup;
 
     for (char **env = environ; *env; ++env) {
+        char *key = *env;
         char *value = strchr(*env, '=');
         if (!value)
             goto cleanup;

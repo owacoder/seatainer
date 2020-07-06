@@ -200,22 +200,22 @@ void walk_dir(IO out, Directory directory) {
         io_putc('\n', out);
 
         int err;
-        if (ntime = dirent_created_time_ns(entry, &err), err == 0) {
+        if ((void)(ntime = dirent_created_time_ns(entry, &err)), err == 0) {
             time = ntime / 1000000000;
             io_printf(out, "  Created: %s\b, %09lld", asctime(localtime(&time)), ntime % 1000000000);
         }
 
-        if (ntime = dirent_last_modification_time_ns(entry, &err), err == 0) {
+        if ((void)(ntime = dirent_last_modification_time_ns(entry, &err)), err == 0) {
             time = ntime / 1000000000;
             io_printf(out, "  Modified: %s\b, %09lld", asctime(localtime(&time)), ntime % 1000000000);
         }
 
-        if (ntime = dirent_last_status_update_time_ns(entry, &err), err == 0) {
+        if ((void)(ntime = dirent_last_status_update_time_ns(entry, &err)), err == 0) {
             time = ntime / 1000000000;
             io_printf(out, "  Updated: %s\b, %09lld", asctime(localtime(&time)), ntime % 1000000000);
         }
 
-        if (ntime = dirent_last_access_time_ns(entry, &err), err == 0) {
+        if ((void)(ntime = dirent_last_access_time_ns(entry, &err)), err == 0) {
             time = ntime / 1000000000;
             io_printf(out, "  Accessed: %s\b, %09lld", asctime(localtime(&time)), ntime % 1000000000);
         }
@@ -238,8 +238,6 @@ int main(int argc, char **argv, const char **envp)
     }
 
     stringmap_destroy(environs);
-
-    return 0;
 
     {
         Variant var = variant_create_float(1000.1234);

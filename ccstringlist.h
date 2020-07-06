@@ -33,6 +33,10 @@ typedef int (*StringCompare)(const char *a, const char *b);
 typedef void *(*Copier)(const void *p);
 typedef void (*Deleter)(void *p);
 
+int generictypes_compatible_compare(Compare compare_lhs, Compare compare_rhs,
+                                    Copier copier_lhs, Copier copier_rhs,
+                                    Deleter deleter_lhs, Deleter deleter_rhs);
+
 /* Basic operations needed:
  *  - Creation, initialization, and copying
  *  - Insertion (at end or in middle)
@@ -177,7 +181,7 @@ int variant_is_genericmap(Variant var);
 GenericMap variant_get_genericmap(Variant var);
 int variant_set_genericmap(Variant var, const GenericMap set);
 int variant_set_genericmap_move(Variant var, GenericMap set);
-GenericMap genericmap_create(BinaryCompare compare, Copier copy, Deleter deleter);
+GenericMap genericmap_create(BinaryCompare key_compare, Compare value_compare, Copier copy, Deleter deleter);
 GenericMap genericmap_copy(GenericMap other);
 int genericmap_insert_move(GenericMap map, const char *key, size_t key_len, void *item);
 int genericmap_insert(GenericMap map, const char *key, size_t key_len, const void *item);
@@ -193,10 +197,12 @@ Iterator genericmap_next(GenericMap map, Iterator it);
 Binary genericmap_key_of(GenericMap map, Iterator it);
 void *genericmap_value_of(GenericMap map, Iterator it);
 void *genericmap_value_of_key(GenericMap map, const char *key, size_t key_len);
-int genericmap_compare(GenericMap lhs, GenericMap rhs, Compare value_compare);
+int genericmap_compare(GenericMap lhs, GenericMap rhs);
 size_t genericmap_size(GenericMap map);
-BinaryCompare genericmap_get_compare_fn(GenericMap map);
-void genericmap_set_compare_fn(GenericMap map, BinaryCompare compare);
+BinaryCompare genericmap_get_key_compare_fn(GenericMap map);
+void genericmap_set_key_compare_fn(GenericMap map, BinaryCompare compare);
+Compare genericmap_get_value_compare_fn(GenericMap map);
+void genericmap_set_value_compare_fn(GenericMap map, Compare compare);
 Copier genericmap_get_copier_fn(GenericMap map);
 void genericmap_set_copier_fn(GenericMap map, Copier copier);
 Deleter genericmap_get_deleter_fn(GenericMap map);
@@ -210,7 +216,7 @@ StringMap variant_get_stringmap(Variant var);
 int variant_set_stringmap(Variant var, const StringMap set);
 int variant_set_stringmap_move(Variant var, StringMap set);
 StringMap stringmap_create();
-StringMap stringmap_create_custom(BinaryCompare compare);
+StringMap stringmap_create_custom(BinaryCompare compare, StringCompare value_compare);
 StringMap stringmap_copy(StringMap other);
 int stringmap_insert_move(StringMap map, const char *key, char *item);
 int stringmap_insert(StringMap map, const char *key, const char *item);
@@ -228,9 +234,11 @@ const char *stringmap_key_of(StringMap map, Iterator it);
 char *stringmap_value_of(StringMap map, Iterator it);
 char *stringmap_value_of_key(StringMap map, const char *key);
 size_t stringmap_size(StringMap map);
-int stringmap_compare(StringMap lhs, StringMap rhs, StringCompare value_compare);
-BinaryCompare stringmap_get_compare_fn(StringMap map);
-void stringmap_set_compare_fn(StringMap map, BinaryCompare compare);
+int stringmap_compare(StringMap lhs, StringMap rhs);
+BinaryCompare stringmap_get_key_compare_fn(StringMap map);
+void stringmap_set_key_compare_fn(StringMap map, BinaryCompare compare);
+StringCompare stringmap_get_value_compare_fn(StringMap map);
+void stringmap_set_value_compare_fn(StringMap map, StringCompare compare);
 void stringmap_clear(StringMap map);
 void stringmap_destroy(StringMap map);
 
@@ -247,6 +255,7 @@ GenericList genericlist_from_genericmap_values(GenericMap other, Compare compare
 GenericList genericlist_from_array(const void **items, Compare compare, Copier copy, Deleter deleter);
 GenericList genericlist_from_array_n(const void **items, size_t count, Compare compare, Copier copy, Deleter deleter);
 GenericList genericlist_create_filled(const void *item, size_t size, Compare compare, Copier copy, Deleter deleter);
+GenericList genericlist_copy_slice(GenericList other, size_t begin_index, size_t length);
 int genericlist_fill(GenericList list, const void *item, size_t size);
 int genericlist_resize(GenericList list, size_t size, const void *empty_item);
 int genericlist_append_list(GenericList list, GenericList other);
@@ -304,6 +313,7 @@ StringList stringlist_from_stringmap_values(StringMap other);
 StringList stringlist_split(const char *string, const char *separator, int keep_empty);
 StringList stringlist_copy(StringList other);
 StringList stringlist_create_filled(const char *item, size_t size);
+StringList stringlist_copy_slice(StringList other, size_t begin_index, size_t length);
 int stringlist_fill(StringList list, const char *item, size_t size);
 int stringlist_resize(StringList list, size_t size, const char *empty_item);
 int stringlist_append_list(StringList list, StringList other);
@@ -358,6 +368,7 @@ BinaryList binarylist_from_stringmap_keys(StringMap other);
 BinaryList binarylist_from_stringmap_values(StringMap other);
 BinaryList binarylist_split(const char *string, const char *separator, size_t separator_len, int keep_empty);
 BinaryList binarylist_copy(BinaryList other);
+BinaryList binarylist_copy_slice(BinaryList other, size_t begin_index, size_t length);
 BinaryList binarylist_create_filled(const char *item, size_t item_len, size_t size);
 BinaryList binarylist_create_filled_binary(const Binary item, size_t size);
 int binarylist_fill(BinaryList list, const char *item, size_t item_len, size_t size);

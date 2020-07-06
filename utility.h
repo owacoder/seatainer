@@ -172,11 +172,13 @@ int memswap(void *p, void *q, size_t size);
  */
 int memxor(void *dst, void *src, size_t size);
 
-/** @brief Sleeps for @p milliseconds milliseconds.
+/** @brief Sleeps for @p milliseconds milliseconds (thread_sleep), microseconds (thread_usleep), or nanoseconds (thread_nsleep).
  *
- * @param milliseconds The number of milliseconds to sleep for.
+ * @param tm The time period to sleep for.
  */
-void thread_sleep(unsigned long milliseconds);
+void thread_sleep(unsigned long long tm);
+void thread_usleep(unsigned long long tm);
+void thread_nsleep(unsigned long long tm);
 
 #define UTF8_MAX (0x10ffff)
 #define UTF8_MASK (0x1fffff)
@@ -225,7 +227,7 @@ uint32_t utf8next(const char *utf8, const char **next);
  * @param utf8 The UTF-8 string to append to. This must point to the NUL character at the end of the string.
  * @param codepoint The codepoint to append to @p utf8.
  * @param remainingBytes A pointer to the number of bytes remaining in the buffer after @p utf8.
- *     The NUL that @p utf8 points to must not be included in this size.
+ *     The NUL that @p utf8 points to must not be included in this available size.
  *     This field is updated with the number of bytes available after the function returns.
  * @return On success, a pointer to the NUL at the end of the string is returned, otherwise NULL is returned and nothing is appended.
  */
@@ -270,7 +272,9 @@ char *strjoin_alloc(const char *strings[], size_t stringsCount, const char *sepa
  * @return A newly allocated string that contains a copy of @p str.
  */
 char *strdup_alloc(const char *str);
+#ifndef strdup
 #define strdup strdup_alloc
+#endif
 
 /** @brief Performs a Pearson hash on specified data.
  *
@@ -396,13 +400,13 @@ uint64_t u64get_be(uint64_t *dst, unsigned char *src);
 #if X86_CPU | AMD64_CPU
 /** @brief Obtains x86 CPU information.
  *
+ * Requires that `dst` be able to store at least 4 32-bit integers.
+ *
  *  @param function is the main leaf to extract data from with the `CPUID` function.
  *  @param subfunction is the sub-leaf to extract data from with the `CPUID` function. If the main leaf does not require one, just use 0.
  *  @param dst is the location to store the extracted data in. The indexes 0, 1, 2, and 3 reference EAX, EBX, ECX, and EDX, respectively.
  *  @return 0 on success, non-zero on failure to complete the operation.
  */
-/* Requires that `dst` be able to store at least 4 32-bit integers */
-/* Returns 0 on success, non-zero on failure */
 int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t dst[4]);
 #endif
 
@@ -421,6 +425,14 @@ int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t dst[4]);
  *  @return The product resulting from multiplying u and v, or 0 if overflow would occur.
  */
 size_t safe_multiply(size_t u, size_t v);
+
+/** @brief Performs an overflow-safe addition of two size_t values.
+ *
+ * @param u The first number to add.
+ * @param v The second number to add.
+ * @return The sum resulting from adding u and v, or 0 if overflow would occur.
+ */
+size_t safe_add(size_t u, size_t v);
 
 #if WINDOWS_OS
 int str_is_codepage_safe(LPCSTR utf8);
