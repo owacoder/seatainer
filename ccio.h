@@ -40,6 +40,7 @@ struct InputOutputDevice;
  *   - `t` - Open device in text mode. On Linux, the stream is left unchanged. On Windows, CRLF is converted to LF when reading, and vice versa when writing.
  *   - `b` - Open device in binary mode. This is the opposite of `t`. If both are specified, the last in the mode string is used.
  *   - `<` - Disable hardware acceleration. Currently only implemented for AES and SHA IO.
+ *   - '*' - Forces reads and writes to the device to be atomic.
  *   - `g` - Grab ownership of handle when opening a native file descriptor.
  *   - `@ncp` - If specified in this order, the [n]ative [c]ode [p]age is used on Windows to open files instead of UTF-8.
  *
@@ -283,7 +284,10 @@ struct InputOutputDeviceCallbacks {
 #define IO_FLAG_RESET (IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_UPDATE | IO_FLAG_APPEND | IO_FLAG_ERROR | IO_FLAG_EOF | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_BINARY)
 
 /* Flags for devices to specify support for various modes of operation */
+/* Whether IO device supports switching between reading and writing without an explicit state switch (e.g. `io_seek(io, 0, SEEK_CUR)`) */
 #define IO_FLAG_SUPPORTS_NO_STATE_SWITCH ((unsigned) 0x10000)
+/* Whether IO device requires atomic read and write operations */
+#define IO_FLAG_REQUIRES_ATOMIC ((unsigned) 0x20000)
 
 /* For Large File Support on Linux, the compile flag -D_FILE_OFFSET_BITS=64 must be used for
  * io_[seek/tell]64() functions to work with 64-bit offsets. io.c specifies these defines */

@@ -293,10 +293,14 @@ void spinlock_unlock(volatile Spinlock *spinlock) {
 struct MutexStruct {
 #if LINUX_OS
     pthread_mutex_t mutex;
+    int recursive; /* Never changes over the lifetime of the mutex, so accessing this member doesn't require a lock */
 #elif WINDOWS_OS
     CRITICAL_SECTION critical_section;
+    DWORD locked_by;
+    size_t is_locked;
+    int recursive; /* Never changes over the lifetime of the mutex, so accessing this member doesn't require a lock */
 #else
-    Spinlock spinlock;
+    Spinlock spinlock; /* Serves as the actual mutex (of a sort) if not a supported platform */
 #endif
 };
 
@@ -328,86 +332,280 @@ Mutex mutex_create() {
 #endif
 }
 
-void mutex_lock(Mutex mutex) {
+Mutex mutex_create_recursive() {
 #if LINUX_OS
-    pthread_mutex_lock(&((struct MutexStruct *) mutex)->mutex);
+    struct MutexStruct *mutex = CALLOC(sizeof(*mutex), 1);
+    if (mutex == NULL)
+        return NULL;
+
+    pthread_mutexattr_t attr;
+
+    if (pthread_mutexattr_init(&attr)) {
+        FREE(mutex);
+        return NULL;
+    }
+
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    if (pthread_mutex_init(&mutex->mutex, &attr) != 0) {
+        FREE(mutex);
+        return NULL;
+    }
+    pthread_mutexattr_destroy(&attr);
+
+    mutex->recursive = 1;
+    return (Mutex) mutex;
 #elif WINDOWS_OS
-    EnterCriticalSection(&((struct MutexStruct *) mutex)->critical_section);
+    struct MutexStruct *mutex = mutex_create();
+
+    mutex->recursive = 1;
+    return (Mutex) mutex;
 #else
-    spinlock_lock(&((struct MutexStruct *) mutex)->spinlock);
+    return NULL;
+#endif
+}
+
+int mutex_is_recursive(Mutex mutex) {
+    struct MutexStruct *m = mutex;
+    UNUSED(m)
+
+#if LINUX_OS | WINDOWS_OS
+    return m->recursive;
+#else
+    return 0;
+#endif
+}
+
+void mutex_lock(Mutex mutex) {
+    struct MutexStruct *m = mutex;
+
+#if LINUX_OS
+    pthread_mutex_lock(&m->mutex);
+#elif WINDOWS_OS
+    EnterCriticalSection(&m->critical_section);
+
+    m->locked_by = GetCurrentThreadId();
+    ++m->is_locked;
+#else
+    spinlock_lock(&m->spinlock);
 #endif
 }
 
 int mutex_try_lock(Mutex mutex) {
+    struct MutexStruct *m = mutex;
+
 #if LINUX_OS
-    return pthread_mutex_trylock(&((struct MutexStruct *) mutex)->mutex) == 0;
+    return pthread_mutex_trylock(&m->mutex) == 0;
 #elif WINDOWS_OS
-    return TryEnterCriticalSection(&((struct MutexStruct *) mutex)->critical_section);
+    if (TryEnterCriticalSection(&m->critical_section)) { /* Lock achieved, but returns 1 if current thread had mutex locked already */
+        DWORD this_thread = GetCurrentThreadId();
+
+        if (!m->recursive && m->is_locked && m->locked_by == this_thread) {
+            LeaveCriticalSection(&m->critical_section);
+            return 0;
+        }
+
+        ++m->is_locked;
+        m->locked_by = this_thread;
+
+        return 1;
+    }
+
+    return 0;
 #else
-    return spinlock_try_lock(&((struct MutexStruct *) mutex)->spinlock);
+    return spinlock_try_lock(&m->spinlock);
 #endif
 }
 
 void mutex_unlock(Mutex mutex) {
+    struct MutexStruct *m = mutex;
+
 #if LINUX_OS
-    pthread_mutex_unlock(&((struct MutexStruct *) mutex)->mutex);
+    pthread_mutex_unlock(&m->mutex);
 #elif WINDOWS_OS
-    LeaveCriticalSection(&((struct MutexStruct *) mutex)->critical_section);
+    --m->is_locked;
+    LeaveCriticalSection(&m->critical_section);
 #else
-    return spinlock_unlock(&((struct MutexStruct *) mutex)->spinlock);
+    return spinlock_unlock(&m->spinlock);
 #endif
 }
 
 void mutex_destroy(Mutex mutex) {
+    struct MutexStruct *m = mutex;
+
 #if LINUX_OS
-    pthread_mutex_destroy(&((struct MutexStruct *) mutex)->mutex);
+    pthread_mutex_destroy(&m->mutex);
 #elif WINDOWS_OS
-    DeleteCriticalSection(&((struct MutexStruct *) mutex)->critical_section);
+    DeleteCriticalSection(&m->critical_section);
 #endif
 
     FREE(mutex);
 }
 
-/**
- * @brief Swaps a number of bytes in @p p and @p q.
- *
- * The memory spans must not overlap.
- *
- * @param p is a pointer to a memory block to swap. Must not be `NULL`.
- * @param q is a pointer to a second memory block to swap. Must not be `NULL`.
- * @param size is the number of the bytes to swap.
- * @return This function always returns 0.
- */
-int memswap(void *p, void *q, size_t size) {
-    char *pchar = p, *qchar = q;
+#if LINUX_OS
+struct ThreadStart {
+    ThreadStartFn fn;
+    void *args;
+    int result_valid;
+    int result;
+};
 
-    while (size--)
-    {
-        char tmp = *pchar;
-        *pchar++ = *qchar;
-        *qchar++ = tmp;
+struct ThreadStruct {
+    pthread_t thread;
+    struct ThreadStart state;
+};
+
+static void *thread_start(void *thread_start_struct) {
+    struct ThreadStart *start = thread_start_struct;
+
+    start->result = start->fn(start->args);
+    start->result_valid = 1;
+
+    return NULL;
+}
+#elif WINDOWS_OS
+struct ThreadStart {
+    ThreadStartFn fn;
+    void *args;
+};
+
+static DWORD WINAPI thread_start(void *thread_start_struct) {
+    struct ThreadStart start = *((struct ThreadStart *) thread_start_struct);
+    FREE(thread_start_struct);
+
+    DWORD result = start.fn(start.args);
+
+    return result;
+}
+#endif
+
+Thread thread_create(ThreadStartFn fn, void *args) {
+#if LINUX_OS
+    struct ThreadStruct *ts = CALLOC(1, sizeof(*ts));
+    if (ts == NULL)
+        return NULL;
+
+    ts->state.fn = fn;
+    ts->state.args = args;
+
+    if (pthread_create(&ts->thread, NULL, thread_start, &ts->state) != 0) {
+        FREE(ts);
+        return NULL;
     }
 
-    return 0;
+    return ts;
+#elif WINDOWS_OS
+    struct ThreadStart *ts = MALLOC(sizeof(*ts));
+    if (ts == NULL)
+        return NULL;
+
+    ts->fn = fn;
+    ts->args = args;
+
+    Thread t = CreateThread(NULL, 0, thread_start, ts, 0, NULL);
+    if (t == NULL)
+        FREE(ts);
+
+    return t;
+#else
+    UNUSED(fn)
+    UNUSED(args)
+    return NULL;
+#endif
 }
 
-/**
- * @brief XORs a number of bytes in @p p and @p q.
- *
- * The memory spans must not overlap.
- *
- * @param dst is a pointer to the destination memory block to XOR. Must not be `NULL`.
- * @param src is a pointer to the source memory block to XOR. Must not be `NULL`.
- * @param size is the number of the bytes to XOR.
- * @return This function always returns 0.
- */
-int memxor(void *dst, void *src, size_t size) {
-    char *pdst = dst, *psrc = src;
+static int thread_run_no_args(int (*fn)(void)) {
+    return fn();
+}
 
-    for (; size; --size)
-        *pdst++ ^= *psrc++;
+Thread thread_create_no_args(ThreadStartFnNoArgs fn) {
+    if (sizeof(void *) != sizeof(fn))
+        return NULL;
+
+    return thread_create((ThreadStartFn) thread_run_no_args, (void *) fn);
+}
+
+int thread_is_current(Thread t) {
+#if LINUX_OS
+    struct ThreadStruct *ts = t;
+    return pthread_equal(ts->thread, pthread_self());
+#elif WINDOWS_OS
+    return GetCurrentThread() == t;
+#else
+    UNUSED(t)
+    return 0;
+#endif
+}
+
+void thread_yield() {
+#if LINUX_OS
+    pthread_yield();
+#elif WINDOWS_OS
+    YieldProcessor();
+#endif
+}
+
+int thread_join(Thread t, int *result) {
+#if LINUX_OS
+    struct ThreadStruct *ts = t;
+    void *t_result;
+
+    int err = pthread_join(ts->thread, &t_result);
+    if (err != 0) {
+        FREE(ts);
+        return err;
+    }
+
+    if (result)
+        *result = ts->state.result_valid? ts->state.result: (intptr_t) t_result;
+
+    FREE(ts);
+    return 0;
+#elif WINDOWS_OS
+    DWORD n = 0;
+
+    if (WaitForSingleObject(t, INFINITE) != WAIT_OBJECT_0 ||
+            (result && !GetExitCodeThread(t, &n)) ||
+            !CloseHandle(t))
+        return GetLastError();
+
+    if (result)
+        *result = n;
 
     return 0;
+#else
+    UNUSED(t)
+    UNUSED(result)
+    return CC_ENOTSUP;
+#endif
+}
+
+int thread_detach(Thread t) {
+#if LINUX_OS
+    struct ThreadStruct *ts = t;
+
+    int err = pthread_detach(ts->thread);
+
+    FREE(ts);
+    return err;
+#elif WINDOWS_OS
+    if (!CloseHandle(t))
+        return GetLastError();
+
+    return 0;
+#else
+    UNUSED(t)
+    return CC_ENOTSUP;
+#endif
+}
+
+void thread_exit(int result) {
+#if LINUX_OS
+    pthread_exit((void *) result);
+#elif WINDOWS_OS
+    ExitThread(result);
+#else
+    exit(result);
+#endif
 }
 
 void thread_sleep(unsigned long long tm) {
@@ -447,6 +645,36 @@ void thread_nsleep(unsigned long long tm) {
 #elif WINDOWS_OS
     Sleep(tm / 1000000);
 #endif
+}
+
+void thread_close(Thread t) {
+#if LINUX_OS
+    FREE(t);
+#elif WINDOWS_OS
+    CloseHandle(t);
+#endif
+}
+
+int memswap(void *p, void *q, size_t size) {
+    char *pchar = p, *qchar = q;
+
+    while (size--)
+    {
+        char tmp = *pchar;
+        *pchar++ = *qchar;
+        *qchar++ = tmp;
+    }
+
+    return 0;
+}
+
+int memxor(void *dst, void *src, size_t size) {
+    char *pdst = dst, *psrc = src;
+
+    for (; size; --size)
+        *pdst++ ^= *psrc++;
+
+    return 0;
 }
 
 int utf8size(uint32_t codepoint) {
@@ -962,6 +1190,14 @@ int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t dst[4]) {
 
     return -1;
 #endif
+}
+#elif ARM64_CPU
+unsigned long arm_cpuid(void) {
+    return getauxval(AT_HWCAP);
+}
+#elif ARM_CPU
+unsigned long arm_cpuid(void) {
+    return getauxval(AT_HWCAP2);
 }
 #endif
 

@@ -227,8 +227,31 @@ void walk_dir(IO out, Directory directory) {
 
 #include "ccstringlist.h"
 
+int printer(void *arg) {
+    int value = *((int *) arg);
+    thread_sleep(5000 - value * 1000);
+    printf("Thread number %d\n", value);
+    return value;
+}
+
 int main(int argc, char **argv, const char **envp)
 {
+    int args[5] = {1, 2, 3, 4, 5};
+    Thread threads[5];
+
+    for (size_t i = 0; i < 5; ++i) {
+        threads[i] = thread_create(printer, &args[i]);
+    }
+
+    for (size_t i = 0; i < 5; ++i) {
+        int result;
+        thread_join(threads[i], &result);
+
+        printf("Thread %d returned %d\n", i, result);
+    }
+
+    return 0;
+
     printf("ENVIRON PATH: %s\n", environment_get_variable("PATH"));
 
     StringMap environs = environment_get_variable_map();

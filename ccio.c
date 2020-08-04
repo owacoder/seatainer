@@ -95,6 +95,7 @@ struct InputOutputDevice {
 
     unsigned char raw[3 * sizeof(void *)];
     unsigned long flags;
+    Spinlock atomic;
 
     /** Stores the read timeout assigned to this IO device. Read timeouts are only relevant for sockets, or native file devices on Linux */
     long long read_timeout;
@@ -255,6 +256,18 @@ static int io_grow(IO io, size_t size) {
     io->sizes.capacity = growth;
 
     return 0;
+}
+
+static void io_lock(IO io) {
+    if (io->flags & IO_FLAG_REQUIRES_ATOMIC)
+        spinlock_lock(&io->atomic);
+}
+
+static int io_unlock(IO io, int value) {
+    if (io->flags & IO_FLAG_REQUIRES_ATOMIC)
+        spinlock_unlock(&io->atomic);
+
+    return value;
 }
 
 static int io_current_char(IO io) {
@@ -842,6 +855,7 @@ static unsigned io_flags_for_mode(const char *mode) {
             case 'x': flags |= IO_FLAG_FAIL_IF_EXISTS; break;
             case 'b': flags |= IO_FLAG_BINARY; break;
             case 't': flags &= ~IO_FLAG_BINARY; break;
+            case '*': flags |= IO_FLAG_REQUIRES_ATOMIC; break;
         }
     }
 

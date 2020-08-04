@@ -95,27 +95,39 @@ int spinlock_try_lock(volatile Spinlock *spinlock);
  */
 void spinlock_unlock(volatile Spinlock *spinlock);
 
-typedef void *Mutex;
+struct MutexStruct;
+typedef struct MutexStruct *Mutex;
 
 /** @brief Creates a new mutex object
  *
  * Mutex objects are not shareable across processes, just threads within a process.
  *
- * @return A new mutex object, or NULL if none could be created
+ * @return A new non-recursive mutex object, or NULL if none could be created
  */
 Mutex mutex_create();
 
-/** @brief Creates a new recursive mutex object
+/** @brief Creates a new mutex object
  *
  * Mutex objects are not shareable across processes, just threads within a process.
  *
- * @return A new mutex object, or NULL if none could be created
+ * @return A new recursive mutex object, or NULL if none could be created
  */
 Mutex mutex_create_recursive();
+
+/** @brief Checks if a mutex object is recursive
+ *
+ * @p mutex The mutex to check
+ * @return 1 if @p mutex is a recursive mutex, 0 if @p mutex is non-recursive
+ */
+int mutex_is_recursive(Mutex mutex);
 
 /** @brief Locks a mutex.
  *
  * If the mutex is currently locked by another thread, the current thread will block until it can get ownership of the mutex.
+ *
+ * If the current thread already has the mutex locked, a deadlock will occur unless the mutex is recursive.
+ *
+ * If @p mutex is a recursive mutex, the mutex will be relocked and each call to `mutex_lock()` must be accompanied by a call to `mutex_unlock()`.
  *
  * @param mutex The mutex object to lock
  */
@@ -124,11 +136,12 @@ void mutex_lock(Mutex mutex);
 /** @brief Attempts to lock a mutex.
  *
  * The thread attempts to lock the mutex, and returns immediately regardless of whether it could lock or not.
- * If the current thread already has the mutex locked, the result is undefined.
+ * If the current thread already has the mutex locked, the result is 0.
  *
  * @param mutex The mutex object to attempt to lock
  * @return 1 if the mutex was able to be locked, 0 if another thread has currently locked the mutex.
- *         If the current thread locked the mutex, the result is undefined.
+ *         If the current thread locked the mutex, and @p mutex is non-recursive, 0 is returned.
+ *         If the current thread locked the mutex, and @p mutex is recursive, 1 is returned.
  */
 int mutex_try_lock(Mutex mutex);
 
@@ -144,11 +157,41 @@ void mutex_unlock(Mutex mutex);
 /** @brief Destroys a mutex object
  *
  * Destroys the mutex object and frees all resources associated with it.
- * The mutex must be destroyed while in the unlocked state.
+ * The mutex must be destroyed while in the unlocked state, or the side effects are is undefined.
  *
  * @param mutex The mutex object to destroy
  */
 void mutex_destroy(Mutex mutex);
+
+typedef void *Thread;
+
+typedef int (*ThreadStartFn)(void *);
+typedef int (*ThreadStartFnNoArgs)(void);
+
+Thread thread_create(ThreadStartFn fn, void *args);
+Thread thread_create_no_args(ThreadStartFnNoArgs fn);
+
+int thread_is_current(Thread t);
+
+void thread_yield(void);
+
+int thread_join(Thread t, int *result);
+
+int thread_detach(Thread t);
+
+void thread_close(Thread t);
+
+void thread_exit(int result);
+
+/** @brief Sleeps for @p tm milliseconds (thread_sleep), microseconds (thread_usleep), or nanoseconds (thread_nsleep).
+ *
+ * Note that the resolution of the system timer may not actually achieve microsecond or nanosecond precision.
+ *
+ * @param tm The time period to sleep for.
+ */
+void thread_sleep(unsigned long long tm);
+void thread_usleep(unsigned long long tm);
+void thread_nsleep(unsigned long long tm);
 
 /** @brief Swaps two memory blocks.
  *
@@ -171,14 +214,6 @@ int memswap(void *p, void *q, size_t size);
  * @return Always returns 0.
  */
 int memxor(void *dst, void *src, size_t size);
-
-/** @brief Sleeps for @p milliseconds milliseconds (thread_sleep), microseconds (thread_usleep), or nanoseconds (thread_nsleep).
- *
- * @param tm The time period to sleep for.
- */
-void thread_sleep(unsigned long long tm);
-void thread_usleep(unsigned long long tm);
-void thread_nsleep(unsigned long long tm);
 
 #define UTF8_MAX (0x10ffff)
 #define UTF8_MASK (0x1fffff)
@@ -408,6 +443,22 @@ uint64_t u64get_be(uint64_t *dst, unsigned char *src);
  *  @return 0 on success, non-zero on failure to complete the operation.
  */
 int x86_cpuid(uint32_t function, uint32_t subfunction, uint32_t dst[4]);
+#elif ARM64_CPU
+#define CPU_FLAG_SUPPORTS_AES HWCAP_AES
+#define CPU_FLAG_SUPPORTS_CRC32 HWCAP_CRC32
+#define CPU_FLAG_SUPPORTS_PMULL HWCAP_PMULL
+#define CPU_FLAG_SUPPORTS_SHA1 HWCAP_SHA1
+#define CPU_FLAG_SUPPORTS_SHA2 HWCAP_SHA2
+
+unsigned long arm_cpuid(void);
+#elif ARM_CPU
+#define CPU_FLAG_SUPPORTS_AES HWCAP2_AES
+#define CPU_FLAG_SUPPORTS_CRC32 HWCAP2_CRC32
+#define CPU_FLAG_SUPPORTS_PMULL HWCAP2_PMULL
+#define CPU_FLAG_SUPPORTS_SHA1 HWCAP2_SHA1
+#define CPU_FLAG_SUPPORTS_SHA2 HWCAP2_SHA2
+
+unsigned long arm_cpuid(void);
 #endif
 
 /** @brief Tests a specific bit number @p bit in the parameter @p x.
