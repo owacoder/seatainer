@@ -7,7 +7,7 @@
 #ifndef AES_H
 #define AES_H
 
-#include "../ccio.h"
+#include "io_core.h"
 
 #ifdef __cplusplus
 extern "C" {

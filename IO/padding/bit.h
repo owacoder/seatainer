@@ -7,7 +7,7 @@
 #ifndef BIT_H
 #define BIT_H
 
-#include "../../ccio.h"
+#include "../io_core.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -1,3 +1,9 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2020
+ */
+
 #include "tinymalloc.h"
 
 #include <stdio.h>

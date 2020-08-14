@@ -1,3 +1,9 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2020
+ */
+
 #ifndef TINYMALLOC_H
 #define TINYMALLOC_H
 

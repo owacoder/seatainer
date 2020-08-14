@@ -7,7 +7,7 @@
 #ifndef BUFFER_H
 #define BUFFER_H
 
-#include "../ccio.h"
+#include "io_core.h"
 
 /** @brief Opens a device to buffer information, even between threads.
  *

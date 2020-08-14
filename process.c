@@ -1,5 +1,10 @@
-#include "process.h"
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2020
+ */
 
+#include "process.h"
 #include "utility.h"
 
 /* TODO: processes are a work in progress */

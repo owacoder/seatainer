@@ -1,9 +1,15 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2020
+ */
+
 #include "net.h"
 #include "../utility.h"
 #include "../seaerror.h"
 
 #include "limiter.h"
-#include "../ccstringlist.h"
+#include "../containers.h"
 
 #include <string.h>
 #include <limits.h>
@@ -1194,6 +1200,7 @@ cleanup:
 }
 
 static signed long long http_chunked_tell64(void *userdata, IO io) {
+    UNUSED(io)
     struct HttpChunkedStruct *chunked = userdata;
 
     return chunked->totalBytes;

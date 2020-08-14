@@ -5,7 +5,6 @@
  */
 
 #include "hex.h"
-
 #include "../seaerror.h"
 
 #include <stdlib.h>

@@ -432,6 +432,9 @@ void mutex_unlock(Mutex mutex) {
 void mutex_destroy(Mutex mutex) {
     struct MutexStruct *m = mutex;
 
+    if (mutex == NULL)
+        return;
+
 #if LINUX_OS
     pthread_mutex_destroy(&m->mutex);
 #elif WINDOWS_OS
@@ -556,7 +559,7 @@ int thread_join(Thread t, int *result) {
     }
 
     if (result)
-        *result = ts->state.result_valid? ts->state.result: (intptr_t) t_result;
+        *result = ts->state.result_valid? ts->state.result: (int) (intptr_t) t_result;
 
     FREE(ts);
     return 0;

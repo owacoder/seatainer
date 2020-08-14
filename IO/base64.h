@@ -7,7 +7,7 @@
 #ifndef BASE64_H
 #define BASE64_H
 
-#include "../ccio.h"
+#include "io_core.h"
 
 #ifdef __cplusplus
 extern "C" {

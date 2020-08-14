@@ -1,7 +1,13 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2020
+ */
+
 #ifndef NET_H
 #define NET_H
 
-#include "../ccio.h"
+#include "io_core.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -7,7 +7,7 @@
 #ifndef SHA1_H
 #define SHA1_H
 
-#include "../ccio.h"
+#include "io_core.h"
 
 #ifdef __cplusplus
 extern "C" {

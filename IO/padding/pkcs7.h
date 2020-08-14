@@ -7,7 +7,7 @@
 #ifndef PKCS7_H
 #define PKCS7_H
 
-#include "../../ccio.h"
+#include "../io_core.h"
 
 #ifdef __cplusplus
 extern "C" {

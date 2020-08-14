@@ -7,7 +7,7 @@
 #ifndef SHA256_H
 #define SHA256_H
 
-#include "../ccio.h"
+#include "io_core.h"
 
 #ifdef __cplusplus
 extern "C" {

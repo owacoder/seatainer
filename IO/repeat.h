@@ -7,7 +7,7 @@
 #ifndef REPEAT_H
 #define REPEAT_H
 
-#include "../ccio.h"
+#include "io_core.h"
 
 /** @brief Opens a device to repeat an IO stream as an infinite stream.
  *

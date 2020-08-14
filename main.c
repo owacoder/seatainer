@@ -225,7 +225,7 @@ void walk_dir(IO out, Directory directory) {
 #include "process.h"
 #include <stdlib.h>
 
-#include "ccstringlist.h"
+#include "containers.h"
 
 int printer(void *arg) {
     int value = *((int *) arg);
@@ -236,6 +236,37 @@ int printer(void *arg) {
 
 int main(int argc, char **argv, const char **envp)
 {
+    {
+        StringList list = stringlist_split("How are you doing  all today", " ", 1);
+
+        stringlist_set_compare_fn(list, strcmp_no_case);
+
+        StringList sorted = stringlist_stable_sorted(list, 0);
+
+        printf("Index of you: %d\n", (unsigned) stringlist_rfind(list, "YOU", SIZE_MAX));
+
+        for (size_t i = 0; i < stringlist_size(list); ++i) {
+            printf("Item %u: '%s'\n", (unsigned) i, stringlist_array(list)[i]);
+        }
+
+        printf("Sorted index of you: %d\n", (unsigned) stringlist_rfind(sorted, "YOU", SIZE_MAX));
+
+        for (size_t i = 0; i < stringlist_size(list); ++i) {
+            printf("Sorted Item %u: '%s'\n", (unsigned) i, stringlist_array(sorted)[i]);
+        }
+
+        printf("Equal: %d\n", stringlist_compare(list, list));
+
+        char *joined = stringlist_join(list, "");
+        printf("Joined: %s\n", joined);
+        //FREE(joined);
+
+        stringlist_destroy(list);
+        stringlist_destroy(sorted);
+
+        return 0;
+    }
+
     int args[5] = {1, 2, 3, 4, 5};
     Thread threads[5];
 

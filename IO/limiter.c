@@ -5,7 +5,6 @@
  */
 
 #include "limiter.h"
-
 #include "../seaerror.h"
 
 struct Limiter {

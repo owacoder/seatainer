@@ -7,7 +7,7 @@
 #ifndef HEX_H
 #define HEX_H
 
-#include "../ccio.h"
+#include "io_core.h"
 
 #ifdef __cplusplus
 extern "C" {

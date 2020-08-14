@@ -16,9 +16,9 @@
 #include <math.h> /* For printf and scanf */
 #include <float.h>
 
-#include "ccio.h"
-#include "utility.h"
-#include "seaerror.h"
+#include "io_core.h"
+#include "../utility.h"
+#include "../seaerror.h"
 
 #if LINUX_OS
 #include <sys/stat.h>
@@ -95,7 +95,7 @@ struct InputOutputDevice {
 
     unsigned char raw[3 * sizeof(void *)];
     unsigned long flags;
-    Spinlock atomic;
+    Mutex mutex; /* Recursive mutex for locking */
 
     /** Stores the read timeout assigned to this IO device. Read timeouts are only relevant for sockets, or native file devices on Linux */
     long long read_timeout;
@@ -140,6 +140,7 @@ static IO io_static_alloc(enum IO_Type type) {
         return NULL;
     }
 
+    io->mutex = NULL;
     io->type = type;
     io->flags = IO_FLAG_IN_USE;
     io->callbacks = NULL;
@@ -199,6 +200,7 @@ static IO io_alloc(enum IO_Type type) {
     if (io == NULL)
         return NULL;
 
+    io->mutex = NULL;
     io->type = type;
     io->flags = IO_FLAG_IN_USE | IO_FLAG_DYNAMIC;
     io->callbacks = NULL;
@@ -211,10 +213,15 @@ static IO io_alloc(enum IO_Type type) {
 }
 
 static void io_destroy(IO io) {
+    if (io == NULL)
+        return;
+
     if (io->flags & IO_FLAG_OWNS_BUFFER) {
         FREE(io->sizes.ptr2);
         io->flags &= ~IO_FLAG_OWNS_BUFFER;
     }
+
+    mutex_destroy(io->mutex);
 
     if (io->flags & IO_FLAG_DYNAMIC)
         FREE(io);
@@ -258,16 +265,31 @@ static int io_grow(IO io, size_t size) {
     return 0;
 }
 
-static void io_lock(IO io) {
-    if (io->flags & IO_FLAG_REQUIRES_ATOMIC)
-        spinlock_lock(&io->atomic);
+int io_can_lock(IO io) {return io->mutex != NULL;}
+
+void io_lock(IO io) {
+    if (io->mutex)
+        mutex_lock(io->mutex);
 }
 
-static int io_unlock(IO io, int value) {
-    if (io->flags & IO_FLAG_REQUIRES_ATOMIC)
-        spinlock_unlock(&io->atomic);
+void io_unlock(IO io) {
+    if (io->mutex)
+        mutex_unlock(io->mutex);
+}
 
-    return value;
+int io_unlocki(IO io, int passthrough) {
+    io_unlock(io);
+    return passthrough;
+}
+
+unsigned long io_unlocklu(IO io, unsigned long passthrough) {
+    io_unlock(io);
+    return passthrough;
+}
+
+long long io_unlockll(IO io, long long passthrough) {
+    io_unlock(io);
+    return passthrough;
 }
 
 static int io_current_char(IO io) {
@@ -323,6 +345,7 @@ static int io_close_without_destroying(IO io) {
     return result;
 }
 
+/* TODO: these internal functions only do binary data transferral, maybe add some wrappers that support text mode as well without checking flags? */
 static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io);
 static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO io);
 
@@ -371,7 +394,7 @@ int io_writable(IO io) {
     return io->flags & IO_FLAG_WRITABLE;
 }
 
-unsigned io_flags(IO io) {
+unsigned long io_flags(IO io) {
     return io->flags;
 }
 
@@ -697,7 +720,7 @@ int io_copy(IO in, IO out) {
     return 0;
 }
 
-int io_getc_internal(IO io) {
+static int io_getc_internal_helper(IO io) {
     int ch = io_from_unget_buffer(io);
     if (ch != EOF)
         return ch;
@@ -744,6 +767,21 @@ int io_getc_internal(IO io) {
     }
 }
 
+static int io_getc_internal(IO io) {
+    int ch = io_getc_internal_helper(io), ch2;
+    if (!(io->flags & IO_FLAG_BINARY) && (ch == '\r' || ch == '\n')) {
+        ch2 = io_getc_internal_helper(io);
+        if (ch2 == EOF)
+            io_clearerr(io);
+        else if (ch2 + ch != '\r' + '\n')
+            io_ungetc(ch2, io);
+
+        ch = '\n';
+    }
+
+    return ch;
+}
+
 int io_getc(IO io) {
     if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_READABLE | IO_FLAG_ERROR):
                                                    (IO_FLAG_READABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_WRITTEN)) & io->flags) != IO_FLAG_READABLE)
@@ -755,21 +793,7 @@ int io_getc(IO io) {
 
     io->flags |= IO_FLAG_HAS_JUST_READ;
 
-    if (io->flags & IO_FLAG_EOF)
-        return EOF;
-
-    int ch = io_getc_internal(io), ch2;
-    if (!(io->flags & IO_FLAG_BINARY) && (ch == '\r' || ch == '\n')) {
-        ch2 = io_getc_internal(io);
-        if (ch2 == EOF)
-            io_clearerr(io);
-        else if (ch2 + ch != '\r' + '\n')
-            io_ungetc(ch2, io);
-
-        ch = '\n';
-    }
-
-    return ch;
+    return io_getc_internal(io);
 }
 
 int io_getpos(IO io, IO_Pos *pos) {
@@ -825,7 +849,7 @@ char *io_gets(char *str, int num, IO io) {
         {
             int ch = 0;
 
-            while (--num > 0 && ch != '\n' && (ch = io_getc(io)) != EOF)
+            while (--num > 0 && ch != '\n' && (ch = io_getc_internal(io)) != EOF)
                 *str++ = (char) ch;
 
             if (ch == EOF && num == oldnum - 1)
@@ -839,7 +863,7 @@ char *io_gets(char *str, int num, IO io) {
     }
 }
 
-static unsigned io_flags_for_mode(const char *mode) {
+static int io_set_flags_for_mode(IO io, const char *mode, unsigned int *flags_) {
 #if defined(IO_DEFAULT_TEXT_MODE)
     unsigned flags = 0;
 #elif defined(IO_DEFAULT_BINARY_MODE)
@@ -859,7 +883,19 @@ static unsigned io_flags_for_mode(const char *mode) {
         }
     }
 
-    return flags;
+    io->flags |= flags;
+    if (flags_)
+        *flags_ = flags;
+
+    if ((io->flags & IO_FLAG_REQUIRES_ATOMIC)) {
+        if (io->mutex == NULL)
+            io->mutex = mutex_create_recursive();
+
+        if (io->mutex == NULL)
+            return CC_ENOTSUP;
+    }
+
+    return 0;
 }
 
 IO io_open(const char *filename, const char *mode) {
@@ -868,12 +904,10 @@ IO io_open(const char *filename, const char *mode) {
         return NULL;
 
     io->ptr = fopen(filename, mode);
-    if (io->ptr == NULL) {
-        io_close(io);
+    if (io->ptr == NULL || io_set_flags_for_mode(io, mode, NULL)) {
+        io_destroy(io);
         return NULL;
     }
-
-    io->flags |= io_flags_for_mode(mode);
 
     return io;
 }
@@ -884,10 +918,10 @@ IO io_open_native_file(int descriptor, const char *mode) {
         return NULL;
 
     IO io = io_alloc(strchr(mode, 'g')? IO_OwnNativeFile: IO_NativeFile);
-    if (io == NULL)
+    if (io == NULL || io_set_flags_for_mode(io, mode, NULL)) {
+        io_destroy(io);
         return NULL;
-
-    io->flags |= io_flags_for_mode(mode);
+    }
 
     io->ptr = (void *) (size_t) descriptor;
     io->sizes.ptr2 = NULL;
@@ -897,14 +931,14 @@ IO io_open_native_file(int descriptor, const char *mode) {
 }
 
 IO io_open_native(const char *filename, const char *mode) {
-    unsigned flags = io_flags_for_mode(mode);
     unsigned openFlags = 0;
+    unsigned flags = 0;
 
     IO io = io_alloc(IO_OwnNativeFile);
-    if (io == NULL)
+    if (io == NULL || io_set_flags_for_mode(io, mode, &flags)) {
+        io_destroy(io);
         return NULL;
-
-    io->flags |= flags;
+    }
 
     if ((flags & (IO_FLAG_READABLE | IO_FLAG_WRITABLE)) == (IO_FLAG_READABLE | IO_FLAG_WRITABLE))
         openFlags = O_RDWR | O_CREAT;
@@ -939,10 +973,10 @@ IO io_open_native_file(HANDLE descriptor, const char *mode) {
         return NULL;
 
     IO io = io_alloc(strchr(mode, 'g')? IO_OwnNativeFile: IO_NativeFile);
-    if (io == NULL)
+    if (io == NULL || io_set_flags_for_mode(io, mode, NULL)) {
+        io_destroy(io);
         return NULL;
-
-    io->flags |= io_flags_for_mode(mode);
+    }
 
     io->ptr = descriptor;
     io->sizes.ptr2 = NULL;
@@ -952,15 +986,15 @@ IO io_open_native_file(HANDLE descriptor, const char *mode) {
 }
 
 IO io_open_native(const char *filename, const char *mode) {
-    unsigned flags = io_flags_for_mode(mode);
+    unsigned flags = 0;
     DWORD desiredAccess = 0;
     DWORD createFlag = 0;
 
     IO io = io_alloc(IO_OwnNativeFile);
-    if (io == NULL)
+    if (io == NULL || io_set_flags_for_mode(io, mode, &flags)) {
+        io_destroy(io);
         return NULL;
-
-    io->flags |= flags;
+    }
 
     if (flags & IO_FLAG_READABLE)
         desiredAccess |= GENERIC_READ;
@@ -1043,10 +1077,11 @@ IO io_open_empty(void) {
 
 IO io_open_cstring(const char *str, const char *mode) {
     IO io = io_alloc(IO_CString);
-    if (io == NULL)
+    if (io == NULL || io_set_flags_for_mode(io, mode, NULL)) {
+        io_destroy(io);
         return NULL;
+    }
 
-    io->flags |= io_flags_for_mode(mode);
     io->ptr = (char *) str;
     io->sizes.pos = 0;
 
@@ -1060,14 +1095,14 @@ IO io_open_cstring(const char *str, const char *mode) {
 
 IO io_open_buffer(char *buf, size_t size, const char *mode) {
     IO io = io_alloc(IO_SizedBuffer);
-    if (io == NULL)
+    if (io == NULL || io_set_flags_for_mode(io, mode, NULL)) {
+        io_destroy(io);
         return NULL;
+    }
 
     io->ptr = buf;
     io->sizes.size = size;
     io->sizes.pos = 0;
-
-    io->flags |= io_flags_for_mode(mode);
 
     if (0 == (io->flags & (IO_FLAG_READABLE | IO_FLAG_WRITABLE))) {
         io_destroy(io);
@@ -1080,15 +1115,15 @@ IO io_open_buffer(char *buf, size_t size, const char *mode) {
     return io;
 }
 
-static IO io_open_dynamic_buffer_internal(enum IO_Type type, const char *mode) {
+static IO io_open_dynamic_buffer_helper(enum IO_Type type, const char *mode) {
     IO io = io_alloc(type);
-    if (io == NULL)
+    if (io == NULL || io_set_flags_for_mode(io, mode, NULL)) {
+        io_destroy(io);
         return NULL;
+    }
 
     io->sizes.ptr2 = io->ptr = NULL;
     io->sizes.size = io->sizes.pos = io->sizes.capacity = 0;
-
-    io->flags |= io_flags_for_mode(mode);
 
     if (0 == (io->flags & IO_FLAG_WRITABLE)) {
         io_destroy(io);
@@ -1099,11 +1134,11 @@ static IO io_open_dynamic_buffer_internal(enum IO_Type type, const char *mode) {
 }
 
 IO io_open_minimal_buffer(const char *mode) {
-    return io_open_dynamic_buffer_internal(IO_MinimalBuffer, mode);
+    return io_open_dynamic_buffer_helper(IO_MinimalBuffer, mode);
 }
 
 IO io_open_dynamic_buffer(const char *mode) {
-    return io_open_dynamic_buffer_internal(IO_DynamicBuffer, mode);
+    return io_open_dynamic_buffer_helper(IO_DynamicBuffer, mode);
 }
 
 IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdata, const char *mode) {
@@ -1111,15 +1146,15 @@ IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdat
         return NULL;
 
     IO io = io_alloc(IO_Custom);
-    if (io == NULL)
+    if (io == NULL || io_set_flags_for_mode(io, mode, NULL)) {
+        io_destroy(io);
         return NULL;
+    }
 
     io->ptr = userdata;
     io->sizes.ptr2 = NULL;
     io->sizes.size = io->sizes.pos = 0;
     io->callbacks = custom;
-
-    io->flags |= io_flags_for_mode(mode);
 
     if (0 == (io->flags & (IO_FLAG_READABLE | IO_FLAG_WRITABLE)) ||
             (custom->open != NULL && (io->ptr = custom->open(userdata, io)) == NULL)) {
@@ -1127,8 +1162,14 @@ IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdat
         return NULL;
     }
 
-    if (custom->flags != NULL)
+    if (custom->flags != NULL) {
         io->flags |= custom->flags(userdata, io);
+
+        if (io_set_flags_for_mode(io, "", NULL)) {
+            io_close(io);
+            return NULL;
+        }
+    }
 
     return io;
 }
@@ -1775,7 +1816,7 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
                     ++fmt;
 
                     if (*fmt == '%') {
-                        if (io_putc('%', io) == EOF) 
+                        if (io_putc('%', io) == EOF)
                             CLEANUP(-1);
                         ++written;
                         continue;
@@ -2074,7 +2115,7 @@ int io_printf(IO io, const char *fmt, ...) {
     return result;
 }
 
-int io_putc_internal(int ch, IO io) {
+int io_putc_internal_helper(int ch, IO io) {
     switch (io->type) {
         default:
             io->flags |= IO_FLAG_ERROR;
@@ -2106,6 +2147,19 @@ int io_putc_internal(int ch, IO io) {
     }
 }
 
+static int io_putc_internal(int ch, IO io) {
+    if (!(io->flags & IO_FLAG_BINARY) && ch == '\n') {
+#if WINDOWS_OS
+        if (io_putc_internal_helper('\r', io) == EOF ||
+                io_putc_internal_helper('\n', io) == EOF)
+            return EOF;
+        return ch;
+#endif
+    }
+
+    return io_putc_internal_helper(ch, io);
+}
+
 int io_putc(int ch, IO io) {
     if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_WRITABLE | IO_FLAG_ERROR):
                                                    (IO_FLAG_WRITABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ)) & io->flags) != IO_FLAG_WRITABLE)
@@ -2117,67 +2171,12 @@ int io_putc(int ch, IO io) {
 
     io->flags |= IO_FLAG_HAS_JUST_WRITTEN;
 
-    if (!(io->flags & IO_FLAG_BINARY) && ch == '\n') {
-#if WINDOWS_OS
-        if (io_putc_internal('\r', io) == EOF ||
-                io_putc_internal('\n', io) == EOF)
-            return EOF;
-        return ch;
-#endif
-    }
-
     return io_putc_internal(ch, io);
 }
 
 int io_puts(const char *str, IO io) {
-    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_WRITABLE | IO_FLAG_ERROR):
-                                                   (IO_FLAG_WRITABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ)) & io->flags) != IO_FLAG_WRITABLE)
-    {
-        io->flags |= IO_FLAG_ERROR;
-        io->error = CC_EWRITE;
-        return EOF;
-    }
-
-    io->flags |= IO_FLAG_HAS_JUST_WRITTEN;
-
-    switch (io->type) {
-        default:
-            io->flags |= IO_FLAG_ERROR;
-            io->error = CC_EWRITE;
-            return EOF;
-        case IO_File:
-        case IO_OwnFile: return fputs(str, io->ptr);
-        case IO_NativeFile:
-        case IO_OwnNativeFile:
-        case IO_Custom:
-        case IO_MinimalBuffer:
-        case IO_DynamicBuffer:
-        {
-            size_t len = strlen(str);
-            if (io_write(str, 1, len, io) != len)
-                return EOF;
-
-            return 0;
-        }
-        case IO_SizedBuffer:
-        {
-            int result = 0;
-            size_t len = strlen(str);
-            size_t avail = io->sizes.size - io->sizes.pos;
-
-            if (avail < len) {
-                len = avail;
-                io->flags |= IO_FLAG_ERROR;
-                io->error = CC_ENOBUFS;
-                result = EOF;
-            }
-
-            memcpy((char *) io->ptr + io->sizes.pos, str, len);
-
-            io->sizes.pos += len;
-            return result;
-        }
-    }
+    size_t len = strlen(str);
+    return io_write(str, 1, len, io) == len? 0: EOF;
 }
 
 size_t io_put_uint16_le(IO io, uint16_t value) {
@@ -2436,25 +2435,24 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
         return 0;
     }
 
-    if (io->flags & IO_FLAG_BINARY) {
-        /* Not readable or not switched over to reading yet */
-        if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_READABLE | IO_FLAG_ERROR):
-                                                       (IO_FLAG_READABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_WRITTEN)) & io->flags) != IO_FLAG_READABLE) {
-            io->flags |= IO_FLAG_ERROR;
-            if (0 == (io->flags & IO_FLAG_ERROR)) /* Don't overwrite error code if already present */
-                io->error = CC_EREAD;
-            return 0;
-        }
-
-        io->flags |= IO_FLAG_HAS_JUST_READ;
-
-        return io_read_internal(ptr, size, count, io);
+    /* Not readable or not switched over to reading yet */
+    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_READABLE | IO_FLAG_ERROR):
+                                                   (IO_FLAG_READABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_WRITTEN)) & io->flags) != IO_FLAG_READABLE) {
+        io->flags |= IO_FLAG_ERROR;
+        if (0 == (io->flags & IO_FLAG_ERROR)) /* Don't overwrite error code if already present */
+            io->error = CC_EREAD;
+        return 0;
     }
+
+    io->flags |= IO_FLAG_HAS_JUST_READ;
+
+    if (io->flags & IO_FLAG_BINARY)
+        return io_read_internal(ptr, size, count, io);
 
     size_t max = total;
     unsigned char *cptr = ptr;
     for (; max; --max) {
-        int ch = io_getc(io);
+        int ch = io_getc_internal(io);
         if (ch == EOF)
             break;
         *cptr++ = ch;
@@ -2904,7 +2902,7 @@ int io_seek(IO io, long int offset, int origin) {
         case IO_DynamicBuffer:
             switch (origin) {
                 case SEEK_SET:
-                    if (offset < 0 || SIZE_MAX < (unsigned long) offset)
+                    if (offset < 0 || SIZE_MAX < (uintmax_t) offset)
                         return -1;
                     io->sizes.pos = offset;
                     break;
@@ -2927,7 +2925,7 @@ int io_seek(IO io, long int offset, int origin) {
     return 0;
 }
 
-static int io_seek64_internal(IO io, long long int offset, int origin)
+static int io_seek64_helper(IO io, long long int offset, int origin)
 {
     switch (io->type) {
         default: return -1LL;
@@ -3031,7 +3029,7 @@ int io_seek64(IO io, long long int offset, int origin) {
         return io_state_switch(io);
 
     switch (io->type) {
-        default: return io_seek64_internal(io, offset, origin);
+        default: return io_seek64_helper(io, offset, origin);
         case IO_File:
         case IO_OwnFile: return _fseeki64(io->ptr, offset, origin);
         case IO_NativeFile:
@@ -3066,7 +3064,7 @@ int io_seek64(IO io, long long int offset, int origin) {
         return io_state_switch(io);
 
     switch (io->type) {
-        default: return io_seek64_internal(io, offset, origin);
+        default: return io_seek64_helper(io, offset, origin);
         case IO_File:
         case IO_OwnFile: return fseeko(io->ptr, offset, origin);
         case IO_NativeFile:
@@ -3092,7 +3090,7 @@ int io_seek64(IO io, long long offset, int origin) {
         return io_state_switch(io);
 
     switch (io->type) {
-        default: return io_seek64_internal(io, offset, origin);
+        default: return io_seek64_helper(io, offset, origin);
         case IO_File:
         case IO_OwnFile:
             if (offset < LONG_MIN || offset > LONG_MAX)
@@ -3195,7 +3193,7 @@ long int io_tell(IO io) {
     }
 }
 
-static long long int io_tell64_internal(IO io) {
+static long long int io_tell64_helper(IO io) {
     switch (io->type) {
         default: return -1LL;
         case IO_Custom:
@@ -3228,7 +3226,7 @@ static long long int io_tell64_internal(IO io) {
 #if WINDOWS_OS
 long long int io_tell64(IO io) {
     switch (io->type) {
-        default: return io_tell64_internal(io);
+        default: return io_tell64_helper(io);
         case IO_File:
         case IO_OwnFile: return _ftelli64(io->ptr);
         case IO_NativeFile:
@@ -3251,7 +3249,7 @@ long long int io_tell64(IO io) {
 #elif LINUX_OS
 long long int io_tell64(IO io) {
     switch (io->type) {
-        default: return io_tell64_internal(io);
+        default: return io_tell64_helper(io);
         case IO_File:
         case IO_OwnFile: return ftello(io->ptr);
         case IO_NativeFile:
@@ -3271,7 +3269,7 @@ long long int io_tell64(IO io) {
 #else
 long long int io_tell64(IO io) {
     if (io->type == IO_Custom)
-        return io_tell64_internal(io);
+        return io_tell64_helper(io);
     else
         return io_tell(io);
 }
@@ -3496,25 +3494,24 @@ size_t io_write(const void *ptr, size_t size, size_t count, IO io) {
         return 0;
     }
 
-    if (io->flags & IO_FLAG_BINARY) {
-        /* Not writable or not switched over to writing yet */
-        if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_WRITABLE | IO_FLAG_ERROR):
-                                                       (IO_FLAG_WRITABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ)) & io->flags) != IO_FLAG_WRITABLE) {
-            io->flags |= IO_FLAG_ERROR;
-            if (0 == (io->flags & IO_FLAG_ERROR))
-                io->error = CC_EWRITE;
-            return 0;
-        }
-
-        io->flags |= IO_FLAG_HAS_JUST_WRITTEN;
-
-        return io_write_internal(ptr, size, count, io);
+    /* Not writable or not switched over to writing yet */
+    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_WRITABLE | IO_FLAG_ERROR):
+                                                   (IO_FLAG_WRITABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ)) & io->flags) != IO_FLAG_WRITABLE) {
+        io->flags |= IO_FLAG_ERROR;
+        if (0 == (io->flags & IO_FLAG_ERROR))
+            io->error = CC_EWRITE;
+        return 0;
     }
+
+    io->flags |= IO_FLAG_HAS_JUST_WRITTEN;
+
+    if (io->flags & IO_FLAG_BINARY)
+        return io_write_internal(ptr, size, count, io);
 
     size_t max = total;
     const unsigned char *cptr = ptr;
     for (; max; --max) {
-        if (io_putc(*cptr++, io) == EOF)
+        if (io_putc_internal(*cptr++, io) == EOF)
             break;
     }
 

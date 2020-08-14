@@ -3,7 +3,7 @@ CONFIG += console
 CONFIG -= app_bundle
 CONFIG -= qt
 
-QMAKE_CFLAGS += -msse4.1 -msha -maes -nostdlib -std=gnu11
+QMAKE_CFLAGS += -msse4.1 -msha -maes -nostdlib -std=c11
 QMAKE_CXXFLAGS += -std=c++11
 
 DEFINES += CC_TYPE_MISMATCH_ABORT \
@@ -22,8 +22,19 @@ unix: !win32 {
 }
 
 SOURCES += \
+    Containers/binarylist.c \
+    Containers/binaryset.c \
+    Containers/common.c \
+    Containers/genericlist.c \
+    Containers/genericmap.c \
+    Containers/impl/avl.c \
+    Containers/stringlist.c \
+    Containers/stringmap.c \
+    Containers/stringset.c \
+    Containers/variant.c \
     IO/base64.c \
-    ccio.c \
+    IO/io_core.c \
+    container_io.c \
     utility.c \
     IO/crypto_rand.c \
     IO/hex.c \
@@ -44,11 +55,23 @@ SOURCES += \
     process.c \
     IO/sha256.c \
     IO/repeat.c \
-    IO/buffer.c \
-    ccstringlist.c
+    IO/buffer.c
 
 HEADERS += \
+    Containers/binarylist.h \
+    Containers/binaryset.h \
+    Containers/common.h \
+    Containers/genericlist.h \
+    Containers/genericmap.h \
+    Containers/impl/avl.h \
+    Containers/stringlist.h \
+    Containers/stringmap.h \
+    Containers/stringset.h \
+    Containers/variant.h \
     IO/base64.h \
+    IO/io_core.h \
+    container_io.h \
+    containers.h \
     utility.h \
     platforms.h \
     IO/crypto_rand.h \
@@ -71,8 +94,7 @@ HEADERS += \
     process.h \
     IO/sha256.h \
     IO/repeat.h \
-    IO/buffer.h \
-    ccstringlist.h
+    IO/buffer.h
 
 DISTFILES += \
     README.md \

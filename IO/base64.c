@@ -5,7 +5,6 @@
  */
 
 #include "base64.h"
-
 #include "../seaerror.h"
 
 #include <stdlib.h>

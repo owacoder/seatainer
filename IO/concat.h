@@ -7,7 +7,7 @@
 #ifndef CONCAT_H
 #define CONCAT_H
 
-#include "../ccio.h"
+#include "io_core.h"
 
 /** @brief Opens a device to concatenate two IO streams to a single IO stream.
  *

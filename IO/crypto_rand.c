@@ -5,9 +5,9 @@
  */
 
 #include "crypto_rand.h"
-#include <limits.h>
-
 #include "../seaerror.h"
+
+#include <limits.h>
 
 #if WINDOWS_OS
 #include <windows.h>
@@ -33,7 +33,8 @@ static void *crypto_rand_open(void *userdata, IO io) {
         return NULL;
     }
 
-    result->RtlGenRandom = (RtlGenRandomType) GetProcAddress(result->library, "SystemFunction036");
+    /* void cast is required to prevent GCC from complaining about incompatible function signatures */
+    result->RtlGenRandom = (RtlGenRandomType) (void *) GetProcAddress(result->library, "SystemFunction036");
     if (result->RtlGenRandom == NULL) {
         FREE(result);
         return NULL;

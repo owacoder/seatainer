@@ -1,7 +1,13 @@
+/** @file
+ *
+ *  @author Oliver Adams
+ *  @copyright Copyright (C) 2020
+ */
+
 #ifndef ZLIB_IO_H
 #define ZLIB_IO_H
 
-#include "../ccio.h"
+#include "io_core.h"
 
 #ifdef CC_INCLUDE_ZLIB
 #include <zlib.h>

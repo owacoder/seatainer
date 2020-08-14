@@ -5,7 +5,6 @@
  */
 
 #include "buffer.h"
-
 #include "../seaerror.h"
 
 #include <string.h>
