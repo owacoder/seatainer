@@ -282,6 +282,14 @@ char *strlower(char *str);
  */
 char *strupper(char *str);
 
+/** @brief Determines whether a string begins with another string
+ *
+ * @param str The string to compare
+ * @param substr The substring to compare to the beginning of @p str
+ * @return Returns 1 if @p string starts with @p substr, 0 otherwise
+ */
+int str_starts_with(const char *str, const char *substr);
+
 /** @brief Compares two case insensitive strings.
  *
  * Behavior is identical to strcmp(), except ASCII characters are compared case insensitively.
@@ -488,6 +496,7 @@ size_t safe_add(size_t u, size_t v);
 #if WINDOWS_OS
 int str_is_codepage_safe(LPCSTR utf8);
 LPWSTR utf8_to_wide_alloc(LPCSTR utf8);
+LPWSTR utf8_to_wide_alloc_additional(LPCSTR utf8, size_t additional);
 LPSTR wide_to_utf8_alloc(LPCWSTR wide);
 #endif
 

@@ -5,7 +5,11 @@
  */
 
 #include "variant.h"
+#include "../utility.h"
+
+#include <float.h>
 #include <math.h>
+#include <limits.h>
 #include <stdio.h>
 
 struct VariantStructCustomHelper {
@@ -31,94 +35,135 @@ struct VariantStruct {
         struct VariantStructAtomHelper atom;
     } d;
     enum VariantType type;
+    CommonContainerBase base;
 };
 
-Variant variant_create_null() {
+static void variant_clear_to(Variant var, enum VariantType type) {
+    if (variant_get_type(var) == VariantCustom)
+        var->d.custom.deleter(var->d.custom.data);
+    else
+        FREE(var->d.atom.string.data);
+
+    if (!var->base.cvt_expects_variant && type != var->type)
+        var->base = empty_container_base();
+
+    var->d.atom.string.data = NULL;
+    var->d.atom.string.length = 0;
+    var->type = type;
+}
+
+Variant variant_create_null() {return variant_create_null_base(empty_container_base());}
+
+Variant variant_create_null_base(CommonContainerBase base) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
 
     var->type = VariantNull;
+    var->base = base;
 
     return var;
 }
 
-Variant variant_create_boolean(int b) {
+Variant variant_create_boolean(int b) {return variant_create_boolean_base(b, empty_container_base());}
+
+Variant variant_create_boolean_base(int b, CommonContainerBase base) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
 
     var->type = VariantBoolean;
     var->d.atom.d.boolean = !!b;
+    var->base = base;
 
     return var;
 }
 
-Variant variant_create_int(int value) {
-    return variant_create_int64(value);
+Variant variant_create_int(int value) {return variant_create_int_base(value, empty_container_base());}
+
+Variant variant_create_int_base(int value, CommonContainerBase base) {
+    return variant_create_int64_base(value, base);
 }
 
-Variant variant_create_uint(unsigned int value) {
-    return variant_create_uint64(value);
+Variant variant_create_uint(unsigned int value) {return variant_create_uint_base(value, empty_container_base());}
+
+Variant variant_create_uint_base(unsigned int value, CommonContainerBase base) {
+    return variant_create_uint64_base(value, base);
 }
 
-Variant variant_create_int64(long long value) {
+Variant variant_create_int64(long long value) {return variant_create_int64_base(value, empty_container_base());}
+
+Variant variant_create_int64_base(long long value, CommonContainerBase base) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
 
     var->type = VariantInteger;
     var->d.atom.d.integer = value;
+    var->base = base;
 
     return var;
 }
 
-Variant variant_create_uint64(unsigned long long value) {
+Variant variant_create_uint64(unsigned long long value) {return variant_create_uint64_base(value, empty_container_base());}
+
+Variant variant_create_uint64_base(unsigned long long value, CommonContainerBase base) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
 
     var->type = VariantUnsignedInteger;
     var->d.atom.d.unsigned_integer = value;
+    var->base = base;
 
     return var;
 }
 
-Variant variant_create_float(double value) {
+Variant variant_create_float(double value) {return variant_create_float_base(value, empty_container_base());}
+
+Variant variant_create_float_base(double value, CommonContainerBase base) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
 
     var->type = VariantFloat;
     var->d.atom.d.floating = value;
+    var->base = base;
 
     return var;
 }
 
-Variant variant_create_string_move(char *value) {
+Variant variant_create_string_move(char *value) {return variant_create_string_move_base(value, empty_container_base());}
+
+Variant variant_create_string_move_base(char *value, CommonContainerBase base) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
 
     var->type = VariantString;
     var->d.atom.string.data = value;
+    var->base = base;
 
     return var;
 }
 
-Variant variant_create_string(const char *value) {
+Variant variant_create_string(const char *value) {return variant_create_string_base(value, empty_container_base());}
+
+Variant variant_create_string_base(const char *value, CommonContainerBase base) {
     char *duplicate = strdup(value);
     if (duplicate == NULL)
         return NULL;
 
-    Variant var = variant_create_string_move(duplicate);
+    Variant var = variant_create_string_move_base(duplicate, base);
     if (var == NULL)
         FREE(duplicate);
 
     return var;
 }
 
-Variant variant_create_binary_string_move(char *value, size_t value_len) {
+Variant variant_create_binary_string_move(char *value, size_t value_len) {return variant_create_binary_string_move_base(value, value_len, empty_container_base());}
+
+Variant variant_create_binary_string_move_base(char *value, size_t value_len, CommonContainerBase base) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
@@ -126,16 +171,19 @@ Variant variant_create_binary_string_move(char *value, size_t value_len) {
     var->type = VariantBinary;
     var->d.atom.string.data = value;
     var->d.atom.string.length = value_len;
+    var->base = base;
 
     return var;
 }
 
-Variant variant_create_binary_string(const char *value, size_t value_len) {
+Variant variant_create_binary_string(const char *value, size_t value_len) {return variant_create_binary_string_base(value, value_len, empty_container_base());}
+
+Variant variant_create_binary_string_base(const char *value, size_t value_len, CommonContainerBase base) {
     char *duplicate = MALLOC(value_len+1);
     if (duplicate == NULL)
         return NULL;
 
-    Variant var = variant_create_binary_string_move(duplicate, value_len);
+    Variant var = variant_create_binary_string_move_base(duplicate, value_len, base);
     if (var == NULL)
         FREE(duplicate);
     else {
@@ -150,11 +198,21 @@ Variant variant_create_binary_string_binary_move(Binary value) {
     return variant_create_binary_string_move(value.data, value.length);
 }
 
+Variant variant_create_binary_string_binary_move_base(Binary value, CommonContainerBase base) {
+    return variant_create_binary_string_move_base(value.data, value.length, base);
+}
+
 Variant variant_create_binary_string_binary(const Binary value) {
     return variant_create_binary_string(value.data, value.length);
 }
 
-Variant variant_create_custom_move(void *item, Compare compare, Copier copier, Deleter deleter) {
+Variant variant_create_binary_string_binary_base(const Binary value, CommonContainerBase base) {
+    return variant_create_binary_string_base(value.data, value.length, base);
+}
+
+Variant variant_create_custom_move(void *item, Compare compare, Copier copier, Deleter deleter) {return variant_create_custom_move_base(item, compare, copier, deleter, empty_container_base());}
+
+Variant variant_create_custom_move_base(void *item, Compare compare, Copier copier, Deleter deleter, CommonContainerBase base) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
@@ -164,11 +222,14 @@ Variant variant_create_custom_move(void *item, Compare compare, Copier copier, D
     var->d.custom.copy = copier;
     var->d.custom.deleter = deleter? deleter: (Deleter) FREE;
     var->d.custom.data = item;
+    var->base = base;
 
     return var;
 }
 
-Variant variant_create_custom(const void *item, Compare compare, Copier copier, Deleter deleter) {
+Variant variant_create_custom(const void *item, Compare compare, Copier copier, Deleter deleter) {return variant_create_custom_base(item, compare, copier, deleter, empty_container_base());}
+
+Variant variant_create_custom_base(const void *item, Compare compare, Copier copier, Deleter deleter, CommonContainerBase base) {
     if (copier == NULL)
         return NULL;
 
@@ -179,7 +240,7 @@ Variant variant_create_custom(const void *item, Compare compare, Copier copier, 
     if (duplicate == NULL && item != NULL)
         return NULL;
 
-    Variant var = variant_create_custom_move(duplicate, compare, copier, deleter);
+    Variant var = variant_create_custom_move_base(duplicate, compare, copier, deleter, base);
     if (var == NULL)
         deleter(duplicate);
 
@@ -189,17 +250,18 @@ Variant variant_create_custom(const void *item, Compare compare, Copier copier, 
 Variant variant_copy(Variant other) {
     switch (variant_get_type(other)) {
         default:
-        case VariantNull: return variant_create_null();
-        case VariantBoolean: return variant_create_boolean(variant_get_boolean(other));
-        case VariantInteger: return variant_create_int64(variant_get_int64(other));
-        case VariantUnsignedInteger: return variant_create_uint64(variant_get_uint64(other));
-        case VariantFloat: return variant_create_float(variant_get_float(other));
-        case VariantString: return variant_create_string(variant_get_string(other));
-        case VariantBinary: return variant_create_binary_string_binary(variant_get_binary(other));
-        case VariantCustom: return variant_create_custom(variant_get_custom(other),
-                                                         variant_get_compare_fn(other),
-                                                         variant_get_copier_fn(other),
-                                                         variant_get_deleter_fn(other));
+        case VariantNull: return variant_create_null_base(*variant_get_container_base(other));
+        case VariantBoolean: return variant_create_boolean_base(variant_get_boolean(other), *variant_get_container_base(other));
+        case VariantInteger: return variant_create_int64_base(variant_get_int64(other), *variant_get_container_base(other));
+        case VariantUnsignedInteger: return variant_create_uint64_base(variant_get_uint64(other), *variant_get_container_base(other));
+        case VariantFloat: return variant_create_float_base(variant_get_float(other), *variant_get_container_base(other));
+        case VariantString: return variant_create_string_base(variant_get_string(other), *variant_get_container_base(other));
+        case VariantBinary: return variant_create_binary_string_binary_base(variant_get_binary(other), *variant_get_container_base(other));
+        case VariantCustom: return variant_create_custom_base(variant_get_custom(other),
+                                                              variant_get_compare_fn(other),
+                                                              variant_get_copier_fn(other),
+                                                              variant_get_deleter_fn(other),
+                                                              *variant_get_container_base(other));
     }
 }
 
@@ -268,6 +330,22 @@ Deleter variant_get_deleter_fn(Variant var) {
     return var->d.custom.deleter;
 }
 
+VariantParser variant_get_parser_fn(Variant var) {
+    return (VariantParser) var->base.parse;
+}
+
+VariantSerializer variant_get_serializer_fn(Variant var) {
+    return (VariantSerializer) var->base.serialize;
+}
+
+void variant_set_parser_fn(Variant var, VariantParser parse) {
+    var->base.parse = (Parser) parse;
+}
+
+void variant_set_serializer_fn(Variant var, VariantSerializer serialize) {
+    var->base.serialize = (Serializer) serialize;
+}
+
 int variant_is_null(Variant var) {
     return variant_get_type(var) == VariantNull;
 }
@@ -323,70 +401,63 @@ int variant_is_custom(Variant var) {
 }
 
 int variant_set_null(Variant var) {
-    variant_clear(var);
+    variant_clear_to(var, VariantNull);
     return 0;
 }
 
 int variant_set_boolean(Variant var, int b) {
-    variant_clear(var);
+    variant_clear_to(var, VariantBoolean);
 
     var->d.atom.d.boolean = !!b;
-    var->type = VariantBoolean;
 
     return 0;
 }
 
 int variant_set_int(Variant var, int value) {
-    variant_clear(var);
+    variant_clear_to(var, VariantInteger);
 
     var->d.atom.d.integer = value;
-    var->type = VariantInteger;
 
     return 0;
 }
 
 int variant_set_uint(Variant var, unsigned int value) {
-    variant_clear(var);
+    variant_clear_to(var, VariantUnsignedInteger);
 
     var->d.atom.d.unsigned_integer = value;
-    var->type = VariantUnsignedInteger;
 
     return 0;
 }
 
 int variant_set_int64(Variant var, long long value) {
-    variant_clear(var);
+    variant_clear_to(var, VariantInteger);
 
     var->d.atom.d.integer = value;
-    var->type = VariantInteger;
 
     return 0;
 }
 
 int variant_set_uint64(Variant var, unsigned long long value) {
-    variant_clear(var);
+    variant_clear_to(var, VariantUnsignedInteger);
 
     var->d.atom.d.unsigned_integer = value;
-    var->type = VariantUnsignedInteger;
 
     return 0;
 }
 
 int variant_set_float(Variant var, double value) {
-    variant_clear(var);
+    variant_clear_to(var, VariantFloat);
 
     var->d.atom.d.floating = value;
-    var->type = VariantFloat;
 
     return 0;
 }
 
 int variant_set_string_move(Variant var, char *value) {
-    variant_clear(var);
+    variant_clear_to(var, VariantString);
 
     var->d.atom.string.data = value;
-    var->d.atom.string.length = strlen(value);
-    var->type = VariantString;
+    var->d.atom.string.length = 0;
 
     return 0;
 }
@@ -404,11 +475,10 @@ int variant_set_string(Variant var, const char *value) {
 }
 
 int variant_set_binary_string_move(Variant var, char *value, size_t value_len) {
-    variant_clear(var);
+    variant_clear_to(var, VariantBinary);
 
     var->d.atom.string.data = value;
     var->d.atom.string.length = value_len;
-    var->type = VariantBinary;
 
     return 0;
 }
@@ -438,21 +508,29 @@ int variant_set_binary_string_binary(Variant var, const Binary value) {
 }
 
 int variant_set_custom_move(Variant var, void *item, Compare compare, Copier copier, Deleter deleter) {
+    return variant_set_custom_move_base(var, item, compare, copier, deleter, empty_container_base());
+}
+
+int variant_set_custom_move_base(Variant var, void *item, Compare compare, Copier copier, Deleter deleter, CommonContainerBase base) {
     if (compare == NULL || copier == NULL)
         return CC_EINVAL;
 
-    variant_clear(var);
+    variant_clear_to(var, VariantCustom);
 
     var->d.custom.compare = compare;
     var->d.custom.copy = copier;
     var->d.custom.deleter = deleter? deleter: (Deleter) FREE;
     var->d.custom.data = item;
-    var->type = VariantCustom;
+    var->base = base;
 
     return 0;
 }
 
 int variant_set_custom(Variant var, const void *item, Compare compare, Copier copier, Deleter deleter) {
+    return variant_set_custom_base(var, item, compare, copier, deleter, empty_container_base());
+}
+
+int variant_set_custom_base(Variant var, const void *item, Compare compare, Copier copier, Deleter deleter, CommonContainerBase base) {
     if (compare == NULL || copier == NULL)
         return CC_EINVAL;
 
@@ -460,14 +538,34 @@ int variant_set_custom(Variant var, const void *item, Compare compare, Copier co
     if (duplicate == NULL && item != NULL)
         return CC_ENOMEM;
 
-    variant_clear(var);
+    variant_clear_to(var, VariantCustom);
 
     var->d.custom.compare = compare;
     var->d.custom.copy = copier;
     var->d.custom.deleter = deleter? deleter: (Deleter) FREE;
     var->d.custom.data = duplicate;
-    var->type = VariantCustom;
+    var->base = base;
 
+    return 0;
+}
+
+int variant_set_variant(Variant var, const Variant other) {
+    Variant temp = variant_copy(other);
+    if (temp == NULL && other != NULL)
+        return CC_ENOMEM;
+
+    return variant_set_variant_move(var, temp);
+}
+
+int variant_set_variant_move(Variant var, Variant other) {
+    if (other == NULL)
+        return variant_set_null(var);
+
+    struct VariantStruct tempstruct = *var;
+    *var = *other;
+    *other = tempstruct;
+
+    variant_destroy(other);
     return 0;
 }
 
@@ -482,7 +580,7 @@ int variant_get_int(Variant var) {
     if (!variant_is_int(var) || var->d.atom.d.integer < INT_MIN || var->d.atom.d.integer > INT_MAX)
         return 0;
 
-    return var->d.atom.d.integer;
+    return (int) var->d.atom.d.integer;
 }
 
 long long variant_get_int64(Variant var) {
@@ -496,7 +594,7 @@ unsigned int variant_get_uint(Variant var) {
     if (!variant_is_uint(var) || var->d.atom.d.unsigned_integer > UINT_MAX)
         return 0;
 
-    return var->d.atom.d.unsigned_integer;
+    return (unsigned int) var->d.atom.d.unsigned_integer;
 }
 
 unsigned long long variant_get_uint64(Variant var) {
@@ -654,7 +752,7 @@ long long variant_to_int64(Variant var, int *error) {
         case VariantBoolean: return var->d.atom.d.boolean;
         case VariantInteger: return var->d.atom.d.integer;
         case VariantUnsignedInteger:
-            if (var->d.atom.d.unsigned_integer > LONG_LONG_MAX) {
+            if (var->d.atom.d.unsigned_integer > LLONG_MAX) {
                 if (error)
                     *error = CC_ERANGE;
                 return 0;
@@ -726,8 +824,22 @@ double variant_to_float(Variant var, int *error) {
         default:
         case VariantNull: return 0;
         case VariantBoolean: return var->d.atom.d.boolean;
-        case VariantInteger: return var->d.atom.d.integer;
-        case VariantUnsignedInteger: return var->d.atom.d.unsigned_integer;
+        case VariantInteger:
+            if ((long long) (double) var->d.atom.d.integer != var->d.atom.d.integer) {
+                if (error)
+                    *error = CC_ERANGE;
+                return 0.0;
+            }
+
+            return (double) var->d.atom.d.integer;
+        case VariantUnsignedInteger:
+            if ((unsigned long long) (double) var->d.atom.d.integer != var->d.atom.d.integer) {
+                if (error)
+                    *error = CC_ERANGE;
+                return 0.0;
+            }
+
+            return (double) var->d.atom.d.unsigned_integer;
         case VariantFloat: return var->d.atom.d.floating;
         case VariantString:
         case VariantBinary: {
@@ -736,7 +848,7 @@ double variant_to_float(Variant var, int *error) {
             if (errno) {
                 if (error)
                     *error = CC_ERANGE;
-                return 0;
+                return 0.0;
             }
 
             return result;
@@ -790,10 +902,10 @@ const char *variant_to_string(Variant var, int *error) {
             break;
         }
         case VariantFloat: {
-            size_t len = snprintf(NULL, 0, "%.*g", __DBL_DECIMAL_DIG__-1, var->d.atom.d.floating);
+            size_t len = snprintf(NULL, 0, "%.*g", DECIMAL_DIG-1, var->d.atom.d.floating);
             string = MALLOC(len+1);
             if (string)
-                snprintf(string, len+1, "%.*g", __DBL_DECIMAL_DIG__-1, var->d.atom.d.floating);
+                snprintf(string, len+1, "%.*g", DECIMAL_DIG-1, var->d.atom.d.floating);
             break;
         }
     }
@@ -828,14 +940,7 @@ Binary variant_to_binary(Variant var, int *error) {
 }
 
 void variant_clear(Variant var) {
-    if (variant_get_type(var) == VariantCustom)
-        var->d.custom.deleter(var->d.custom.data);
-    else
-        FREE(var->d.atom.string.data);
-
-    var->d.atom.string.data = NULL;
-    var->d.atom.string.length = 0;
-    var->type = VariantNull;
+    variant_clear_to(var, VariantNull);
 }
 
 void variant_destroy(Variant var) {
@@ -847,5 +952,33 @@ void variant_destroy(Variant var) {
         }
 
         FREE(var);
+    }
+}
+
+CommonContainerBase *variant_get_container_base(Variant var) {
+    return &var->base;
+}
+
+int variant_serialize(void *output, Variant var, struct SerializerIdentity *type) {
+    if (var == NULL)
+        return CC_EINVAL;
+
+    const CommonContainerBase *base = variant_get_container_base(var);
+    Serializer serialize = base->serialize;
+    if (serialize == NULL)
+        return CC_EINVAL;
+
+    if (base->cvt_expects_variant)
+        return serialize(output, var, type);
+
+    switch (var->type) {
+        case VariantNull: return serialize(output, NULL, type);
+        case VariantBoolean: return serialize(output, &var->d.atom.d.boolean, type);
+        case VariantInteger: return serialize(output, &var->d.atom.d.integer, type);
+        case VariantUnsignedInteger: return serialize(output, &var->d.atom.d.unsigned_integer, type);
+        case VariantFloat: return serialize(output, &var->d.atom.d.floating, type);
+        case VariantString: return serialize(output, &var->d.atom.string.data, type);
+        case VariantBinary: return serialize(output, &var->d.atom.string, type);
+        default: return CC_ENOTSUP;
     }
 }

@@ -39,5 +39,6 @@ BinaryCompare binaryset_get_compare_fn(BinarySet set);
 void binaryset_set_compare_fn(BinarySet set, BinaryCompare compare);
 void binaryset_clear(BinarySet set);
 void binaryset_destroy(BinarySet set);
+CommonContainerBase *binaryset_get_container_base(BinarySet set);
 
 #endif // BINARYSET_H

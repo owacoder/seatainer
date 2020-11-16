@@ -15,8 +15,8 @@
 #include "genericmap.h"
 #include "stringmap.h"
 
-Variant variant_from_stringlist(StringList set) {
-    return variant_create_custom(set, (Compare) stringlist_compare, (Copier) stringlist_copy, (Deleter) stringlist_destroy);
+Variant variant_from_stringlist(StringList list) {
+    return variant_create_custom_base(list, (Compare) stringlist_compare, (Copier) stringlist_copy, (Deleter) stringlist_destroy, *stringlist_get_container_base(list));
 }
 
 int variant_is_stringlist(Variant var) {
@@ -30,12 +30,12 @@ StringList variant_get_stringlist(Variant var) {
     return variant_get_custom(var);
 }
 
-int variant_set_stringlist_move(Variant var, StringList set) {
-    return variant_set_custom_move(var, set, (Compare) stringlist_compare, (Copier) stringlist_copy, (Deleter) stringlist_destroy);
+int variant_set_stringlist_move(Variant var, StringList list) {
+    return variant_set_custom_move_base(var, list, (Compare) stringlist_compare, (Copier) stringlist_copy, (Deleter) stringlist_destroy, *stringlist_get_container_base(list));
 }
 
-int variant_set_stringlist(Variant var, const StringList set) {
-    return variant_set_custom(var, set, (Compare) stringlist_compare, (Copier) stringlist_copy, (Deleter) stringlist_destroy);
+int variant_set_stringlist(Variant var, const StringList list) {
+    return variant_set_custom_base(var, list, (Compare) stringlist_compare, (Copier) stringlist_copy, (Deleter) stringlist_destroy, *stringlist_get_container_base(list));
 }
 
 StringList stringlist_create() {
@@ -425,4 +425,8 @@ void stringlist_clear(StringList list) {
 
 void stringlist_destroy(StringList list) {
     genericlist_destroy((GenericList) list);
+}
+
+CommonContainerBase *stringlist_get_container_base(StringList list) {
+    return genericlist_get_container_base((GenericList) list);
 }

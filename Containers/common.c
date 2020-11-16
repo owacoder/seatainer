@@ -15,7 +15,7 @@
  *
  * container.c:
  *
- *      struct ContainerStruct {}; // Dummy struct just for type-safety warnings
+ *      struct ContainerStruct {char dummy;}; // Dummy struct just for type-safety warnings
  *
  *      void container_function(Container c) {
  *          generic_function((GenericContainer) c); // Cast to generic container type when it needs to be used
@@ -24,8 +24,26 @@
  * This prevents the user from unknowningly assigning one "type" of void * to another variable.
  */
 #if 0
-struct ContainerStruct {};
+struct ContainerStruct {char dummy;};
 #endif
+
+CommonContainerBase empty_container_base(void) {
+    CommonContainerBase base;
+
+    memset(&base, 0, sizeof(base));
+
+    return base;
+}
+
+CommonContainerBase build_container_base(Parser parse, Serializer serialize, int cvt_expects_variant) {
+    CommonContainerBase base = {
+        .parse = parse,
+        .serialize = serialize,
+        .cvt_expects_variant = cvt_expects_variant
+    };
+
+    return base;
+}
 
 int generictypes_compatible_compare(Compare compare_lhs, Compare compare_rhs, Copier copier_lhs, Copier copier_rhs, Deleter deleter_lhs, Deleter deleter_rhs) {
     /* If copiers and deleters are the same, it's the same type */
@@ -83,4 +101,8 @@ const char *binstr_search(const char *string, size_t *string_len, const char *to
     }
 
     return NULL;
+}
+
+void generic_nofree(void *p) {
+    UNUSED(p)
 }

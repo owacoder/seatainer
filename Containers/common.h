@@ -40,6 +40,61 @@ typedef struct GenericMapStruct *GenericMap; /* Ordered map of binary strings, c
 typedef struct StringMapStruct *StringMap; /* Simple exclusive map of NUL-terminated string keys with values, each element only appears once. Elements are NUL-terminated strings. Elements are in ascending order */
 typedef void *Iterator; /* Simple iterator, does not need to be freed */
 
+/** Returns a new custom datatype from an IO device
+ *
+ * @param io The IO device to read from and set errors to
+ * @return A custom container dynamically allocated from the parsed data, or NULL if an error occurred
+ */
+typedef void *(*Parser)(void *io);
+
+/** @brief Structure containing the identity of a Serializer function. See `Serializer` for details. */
+struct SerializerIdentity {
+    const char *type;
+    int is_utf8;
+};
+
+/** @brief Declares serializer inside of a serializer function.
+ *
+ * Example usage:
+ *
+ *     int serializer(IO output, const void *data, struct SerializerIdentity *type) {
+ *         SERIALIZER_DECLARE("JSON", 1);
+ *
+ *         ...
+ *     }
+ *
+ * @param serializer_type String type of serializer to return in the `type` field of the SerializerIdentity.
+ * @param serializer_is_utf8 Whether the serializer is UTF-8 output (1) or not (0).
+ */
+#define SERIALIZER_DECLARE(serializer_type, serializer_is_utf8) \
+    if (output == NULL) { \
+        if (type) { \
+            type->type = (serializer_type); \
+            type->is_utf8 = (serializer_is_utf8); \
+        } \
+        return 0; \
+    }
+
+/** Serializes a container or datatype to an IO device
+ *
+ * The special case with @p output == NULL passed to this function is treated as a request for the serializing function to identify itself.
+ * Any implementations of this function *MUST* comply with this convention.
+ *
+ * @param output The IO device to read from and set errors to. If this parameter is NULL, it is treated as a request for the serializing function to identify itself.
+ * @param data The custom container or datatype to serialize
+ * @param type A pointer to a `struct SerializerIdentity` that receives the type of this serializer (e.g. {type: 'JSON', is_utf8: 1}) if @p type is not NULL. If an error occurs, the value placed in @p type is undefined.
+ * @return An error that occurred while serializing or identifying the serializer, or 0 on success.
+ */
+typedef int (*Serializer)(void *output, const void *data, struct SerializerIdentity *type);
+
+typedef struct CommonContainerBaseStruct {
+    Parser parse;
+    Serializer serialize;
+    char cvt_expects_variant; /* Whether the parser and serializer expect Variant values (1) or work with raw (possibly custom) data instead (0) */
+} CommonContainerBase;
+
+CommonContainerBase build_container_base(Parser parse, Serializer serialize, int cvt_expects_variant);
+
 typedef struct BinaryStruct {
     size_t length;
     char *data;
@@ -50,6 +105,8 @@ typedef int (*BinaryCompare)(const Binary *a, const Binary *b);
 typedef int (*StringCompare)(const char *a, const char *b);
 typedef void *(*Copier)(const void *p);
 typedef void (*Deleter)(void *p);
+
+CommonContainerBase empty_container_base(void);
 
 int generictypes_compatible_compare(Compare compare_lhs, Compare compare_rhs,
                                     Copier copier_lhs, Copier copier_rhs,
@@ -68,5 +125,11 @@ int binary_compare(const Binary *a, const Binary *b);
  * @return Returns the location where token was found, or NULL if @p token was not found. If a non-NULL value is returned, the value pointed to by @p string_len is updated with the length to the end of the string from the return value.
  */
 const char *binstr_search(const char *string, size_t *string_len, const char *token, size_t token_len);
+
+/** @brief A destructor function that does nothing to its argument
+ *
+ * Use this function as a destructor when you don't want generic containers to free() their objects
+ */
+void generic_nofree(void *p);
 
 #endif // COMMON_H

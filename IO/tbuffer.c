@@ -4,42 +4,42 @@
  *  @copyright Copyright (C) 2019
  */
 
-#include "buffer.h"
+#include "tbuffer.h"
 #include "../seaerror.h"
 
 #include <string.h>
 
-struct Buffer {
+struct ThreadBuffer {
     char *data;
     size_t capacity, pos, endpos; /* pos points to first character in buffer, endpos points past last character in buffer, if equal, buffer is empty */
 };
 
-static size_t buffer_size_used(struct Buffer *buf) {
+static size_t buffer_size_used(struct ThreadBuffer *buf) {
     if (buf->pos <= buf->endpos)
         return buf->endpos - buf->pos;
     else /* buf->pos > buf->endpos */
         return buf->capacity - (buf->pos - buf->endpos);
 }
 
-static size_t buffer_size_empty(struct Buffer *buf) {
+static size_t buffer_size_empty(struct ThreadBuffer *buf) {
     return buf->capacity - buffer_size_used(buf);
 }
 
-static size_t buffer_contiguous_space_available_at_end(struct Buffer *buf) {
+static size_t buffer_contiguous_space_available_at_end(struct ThreadBuffer *buf) {
     if (buf->pos <= buf->endpos)
         return buf->capacity - buf->endpos;
     else
         return buf->pos - buf->endpos;
 }
 
-static size_t buffer_contiguous_space_used_at_end(struct Buffer *buf) {
+static size_t buffer_contiguous_space_used_at_end(struct ThreadBuffer *buf) {
     if (buf->pos <= buf->endpos)
         return buf->endpos - buf->pos;
     else
         return buf->capacity - buf->pos;
 }
 
-static int buffer_grow(struct Buffer *buf, size_t size_of_data_to_append) {
+static int buffer_grow(struct ThreadBuffer *buf, size_t size_of_data_to_append) {
     size_of_data_to_append += 1;
 
     if (buffer_size_empty(buf) < size_of_data_to_append) {
@@ -78,7 +78,7 @@ static int buffer_grow(struct Buffer *buf, size_t size_of_data_to_append) {
 }
 
 /* Buffer must have at least `size` available space for data before this function is called */
-static void buffer_append(struct Buffer *buf, const void *data, size_t size) {
+static void buffer_append(struct ThreadBuffer *buf, const void *data, size_t size) {
     const char *cptr = data;
     const size_t contiguous_to_end = buffer_contiguous_space_available_at_end(buf);
 
@@ -98,7 +98,7 @@ static void buffer_append(struct Buffer *buf, const void *data, size_t size) {
 static size_t buffer_read(void *ptr, size_t size, size_t count, void *userdata, IO io) {
     UNUSED(io)
 
-    struct Buffer *buffer = userdata;
+    struct ThreadBuffer *buffer = userdata;
 
     char *cptr = ptr;
     size_t max = size*count;
@@ -123,7 +123,7 @@ static size_t buffer_read(void *ptr, size_t size, size_t count, void *userdata, 
 }
 
 static size_t buffer_write(const void *ptr, size_t size, size_t count, void *userdata, IO io) {
-    struct Buffer *buffer = userdata;
+    struct ThreadBuffer *buffer = userdata;
 
     size_t max = size*count;
     int error = buffer_grow(buffer, max);
@@ -175,7 +175,7 @@ static const struct InputOutputDeviceCallbacks buffer_callbacks = {
 };
 
 IO io_open_thread_buffer() {
-    struct Buffer *buffer = CALLOC(1, sizeof(*buffer));
+    struct ThreadBuffer *buffer = CALLOC(1, sizeof(*buffer));
     if (buffer == NULL)
         return NULL;
 

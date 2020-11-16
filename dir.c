@@ -18,6 +18,20 @@
 #include <dirent.h>
 #elif WINDOWS_OS
 #include <windows.h>
+/* Windows device names/paths are really hard to work with, see https://googleprojectzero.blogspot.com/2016/02/the-definitive-guide-on-win32-to-nt.html
+ * The current status:
+ *
+ *  - Fully qualified DOS paths (e.g. C:\example.txt) will pass through fine, and support long filenames (greater than MAX_PATH). Users will never see the leading '\\?\'
+ *  - Device paths (e.g. '\\.\COM1') will pass through fine, and the user will see the leading '\\.\'.
+ *  - Network paths (e.g. '\\SERVER\Share\') will pass through fine, but the user will not see long paths (greater than MAX_PATH) in this form. Instead, they'll see a long paths in the form '\\?\UNC\SERVER\Share'.
+ *  - Any other path is passed through as is, whether beginning with '\\?\', '\\.\', or a relative path. Native reserved device names, such as 'COM1', are not modified to begin with '\\.\'.
+ */
+
+#define LONG_PATH_PREFIX "\\\\?\\"
+#define LONG_PATH_UNC_PREFIX "\\\\?\\UNC\\"
+#define LONG_PATH_PREFIX_LEN strlen(LONG_PATH_PREFIX)
+#define LONG_PATH_UNC_PREFIX_LEN strlen(LONG_PATH_UNC_PREFIX);
+#define LONG_PATH_EXTRA_SPACE 8
 #else
 #define NATIVE_DIR 1
 #endif
@@ -472,14 +486,21 @@ void path_destroy(Path path) {
 }
 
 char *path_up_cstr(char *pathStr) {
+    char *save = pathStr;
     char *npath = pathStr;
     char *minAddr = pathStr;
 
 #if WINDOWS_OS
+    if (str_starts_with(pathStr, LONG_PATH_PREFIX)) {
+        pathStr += LONG_PATH_PREFIX_LEN;
+        npath = pathStr;
+        minAddr = pathStr;
+    }
+
     if (pathStr[0] == '\\' && pathStr[1] == '\\') {
         minAddr = strchr(pathStr + 2, '\\');
         if (minAddr == NULL)
-            return pathStr;
+            return save;
     }
 
     npath = pathStr + strlen(pathStr) - 1;
@@ -494,7 +515,7 @@ char *path_up_cstr(char *pathStr) {
         /* Don't strip the name of resources of the form "\\.\name" (resources of this type won't have a trailing slash either) */
         if (pathStr[2] != '.' || pathStr[3] != '\\')
             minAddr[1] = 0;
-        return pathStr;
+        return save;
     }
 
     if (npath <= pathStr + 2 && pathStr[0] && pathStr[1] == ':') /* Absolute drive path, cannot go up */
@@ -509,7 +530,7 @@ char *path_up_cstr(char *pathStr) {
         else if (minAddr[1] == '/') /* Resource locator has two slashes (i.e. "smb://"), so look for the next slash */ {
             minAddr = strchr(minAddr + 2, '/');
             if (minAddr == NULL)
-                return pathStr;
+                return save;
         }
     }
 
@@ -523,7 +544,7 @@ char *path_up_cstr(char *pathStr) {
     /* Allow for proper resource locators (don't take the trailing '\' after "\\resource\") */
     if (npath <= minAddr && minAddr != pathStr) {
         minAddr[1] = 0;
-        return pathStr;
+        return save;
     }
 
     if (npath == pathStr && *pathStr == '/') /* Traversed up to root, do not remove slash */
@@ -532,7 +553,7 @@ char *path_up_cstr(char *pathStr) {
         npath[0] = 0;
 #endif
 
-    return pathStr;
+    return save;
 }
 
 /* Removes the last directory from the (either relative or absolute) path and returns `path` */
@@ -559,6 +580,12 @@ char *path_normalize_cstr(char *pathStr) {
     for (; *npath; ++npath)
         if (*npath == altPathSep)
             *npath = pathSep;
+
+#if WINDOWS_OS
+    if (str_starts_with(pathStr, LONG_PATH_PREFIX)) {
+        pathStr += LONG_PATH_PREFIX_LEN;
+    }
+#endif
 
     int unknownParent = 1;
 
@@ -686,6 +713,20 @@ const char *path_ext(Path path) {
     return path_ext_cstr(path_data(path));
 }
 
+#if WINDOWS_OS
+int path_is_device_cstr(const char *pathStr) {
+    return path_check_separator(pathStr[0]) && path_check_separator(pathStr[1]) && (pathStr[2] == '.' || pathStr[2] == '?');
+}
+
+int path_is_unc_cstr(const char *pathStr) {
+    return path_check_separator(pathStr[0]) && path_check_separator(pathStr[1]) && pathStr[2] != '.' && pathStr[2] != '?';
+}
+
+int path_is_dos_path_cstr(const char *pathStr) {
+    return isalpha(pathStr[0]) && pathStr[1] == ':' && path_check_separator(pathStr[2]);
+}
+#endif
+
 int path_is_relative_cstr(const char *pathStr) {
 #if WINDOWS_OS
     return !(pathStr[0] == path_separator() ||
@@ -777,10 +818,10 @@ int path_set_current_working_dir(Path path) {
 
 struct SortedDirStruct {
     DirectoryEntry *entries;
-    unsigned int next;
-    unsigned int count;
-    unsigned int capacity;
-    unsigned int in_use;
+    size_t next;
+    size_t count;
+    size_t capacity;
+    size_t in_use;
 };
 
 static int sorted_dir_add_entry(struct SortedDirStruct *s, DirectoryEntry entry) {
@@ -950,6 +991,7 @@ struct DirEntryStruct {
                     * independently of a dir_next() call, i.e. using dirent_open()
                     * This is because a Directory object is always needed for a DirectoryEntry to exist */
     char name[MAX_PATH * 4]; /* contains UTF-8 encoding of name if is_wide is true */
+    LPWSTR wname; /* Contains wide encoding of name if non-NULL, owns copy of name */
 };
 
 struct DirStruct {
@@ -959,7 +1001,9 @@ struct DirStruct {
     enum DirectoryFilter filter;
     struct SortedDirStruct sorted;
     size_t path_len;
-    char path[MAX_PATH + 1]; /* Owned copy of path */
+    size_t wpath_len;
+    LPWSTR wpath_unc; /* Owned wide copy of path, prefixed with '\\?\', plus MAX_PATH space at end for name of file */
+    char path[]; /* Owned copy of path */
 };
 
 void filetime_to_time_t(FILETIME *time, time_t *t) {
@@ -1030,7 +1074,9 @@ Directory dir_open_with_mode(const char *dir, const char *mode, enum DirectoryFi
         return NULL;
 
     /* Copy to new Directory object and ensure path ends with directory separator */
-    memcpy(result->path, dir, len);
+    memcpy(result->path, dir, len+1);
+    len = strlen(path_normalize_cstr(result->path));
+
     if (len && result->path[len-1] != '/')
         result->path[len++] = '/';
     result->path[len] = 0;
@@ -1054,38 +1100,48 @@ Directory dir_open_with_mode(const char *dir, const char *mode, enum DirectoryFi
         result->error = errno;
     }
 #elif WINDOWS_OS
-    char name[MAX_PATH + 3];
+    const char *prefix = LONG_PATH_PREFIX;
+    size_t prefix_len = 0;
     size_t len = strlen(dir);
 
-    if (len > MAX_PATH - 2)
-        return NULL;
+    if (!path_is_device_cstr(dir)) {
+        if (path_is_unc_cstr(dir) && len >= MAX_PATH) {
+            prefix = LONG_PATH_UNC_PREFIX;
+            prefix_len = LONG_PATH_UNC_PREFIX_LEN;
+            dir += 2;
+            len -= 2;
+        } else if (path_is_dos_path_cstr(dir)) {
+            prefix_len = LONG_PATH_PREFIX_LEN;
+        }
+    }
 
-    memcpy(name, dir, len);
-
-    /* Ensure path ends with directory separator */
-    if (len && name[len-1] != '\\' && name[len-1] != '/')
-        name[len++] = '\\';
-    name[len] = 0;
-
-    result = CALLOC(1, sizeof(*result));
+    result = CALLOC(1, sizeof(*result) + len + MAX_PATH + LONG_PATH_EXTRA_SPACE);
     if (result == NULL)
         return NULL;
 
-    /* Copy to new Directory object */
-    strcpy(result->path, name);
+    /* Copy to new Directory object and ensure path ends with directory separator */
+    memcpy(result->path, prefix, prefix_len);
+    memcpy(result->path + prefix_len, dir, len+1);
+    len = strlen(path_normalize_cstr(result->path + prefix_len)) + prefix_len;
+
+    /* Ensure path ends with directory separator */
+    if (len && result->path[len-1] != '\\' && result->path[len-1] != '/')
+        result->path[len++] = '\\';
+    result->path[len] = 0;
     result->path_len = len;
+
     result->findData.parent = result->lastFoundData.parent = result;
 
     /* Finish adding glob to end of path */
-    name[len++] = '*';
-    name[len] = 0;
+    result->path[len++] = '*';
+    result->path[len] = 0;
 
     if (strstr(mode, "@ncp") != NULL) {
-        result->findFirstHandle = FindFirstFileA(name, &result->findData.fdata.data);
+        result->findFirstHandle = FindFirstFileA(result->path, &result->findData.fdata.data);
 
         result->findData.is_wide = result->lastFoundData.is_wide = 0;
     } else {
-        LPWSTR wide = utf8_to_wide_alloc(name);
+        LPWSTR wide = utf8_to_wide_alloc_additional(result->path, MAX_PATH);
         if (!wide) {
             FREE(result);
             return NULL;
@@ -1093,8 +1149,8 @@ Directory dir_open_with_mode(const char *dir, const char *mode, enum DirectoryFi
 
         result->findFirstHandle = FindFirstFileW(wide, &result->findData.fdata.wdata);
 
-        FREE(wide);
-
+        result->wpath_unc = wide;
+        result->wpath_len = wcslen(wide) - 1; /* Remove '*' at end of path */
         result->findData.is_wide = result->lastFoundData.is_wide = 1;
     }
 
@@ -1117,9 +1173,6 @@ Directory dir_open_with_mode(const char *dir, const char *mode, enum DirectoryFi
         sorted.in_use = 1;
 
         while ((entry = dir_next(result)) != NULL) {
-            if (!dir_entry_present_with_filter(entry, filter))
-                continue;
-
             DirectoryEntry copy = dirent_copy(entry);
             if (!copy || sorted_dir_add_entry(&sorted, copy)) {
                 sorted_dir_free(&sorted);
@@ -1129,13 +1182,7 @@ Directory dir_open_with_mode(const char *dir, const char *mode, enum DirectoryFi
             }
         }
 
-        for (size_t i = 0; i < sorted.count; ++i)
-            printf("Unsorted %s\n", dirent_name(sorted.entries[i]));
-
         sorted_dir_sort(&sorted, sort);
-
-        for (size_t i = 0; i < sorted.count; ++i)
-            printf("Sorted %s\n", dirent_name(sorted.entries[i]));
 
         result->sorted = sorted;
         result->filter = DirFilterNone; /* Since we already filtered, don't do it again */
@@ -1227,9 +1274,46 @@ DirectoryEntry dir_next(Directory dir) {
 }
 
 const char *dir_path(Directory dir) {
+#if WINDOWS_OS
+    const char *path = dir_path_unc(dir);
+    if (str_starts_with(path, LONG_PATH_PREFIX) && path_is_dos_path_cstr(path + LONG_PATH_PREFIX_LEN))
+        path += LONG_PATH_PREFIX_LEN;
+
+    return path;
+#else
+    dir->path[dir->path_len] = 0;
+    return dir->path;
+#endif
+}
+
+#if WINDOWS_OS
+const char *dir_path_unc(Directory dir) {
     dir->path[dir->path_len] = 0;
     return dir->path;
 }
+
+LPCWSTR dir_path_wide(Directory dir) {
+    LPCWSTR str = dir_path_wide_unc(dir);
+    if (str && str_starts_with(dir->path, LONG_PATH_PREFIX) && path_is_dos_path_cstr(dir->path + LONG_PATH_PREFIX_LEN))
+        str += LONG_PATH_PREFIX_LEN;
+
+    return str;
+}
+
+LPCWSTR dir_path_wide_unc(Directory dir) {
+    if (dir->wpath_unc) {
+        dir->wpath_unc[dir->wpath_len] = 0;
+        return dir->wpath_unc;
+    }
+
+    dir->wpath_unc = utf8_to_wide_alloc_additional(dir_path_unc(dir), MAX_PATH);
+    if (dir->wpath_unc == NULL)
+        return NULL;
+
+    dir->wpath_len = wcslen(dir->wpath_unc);
+    return dir->wpath_unc;
+}
+#endif
 
 void dir_close(Directory dir) {
     if (dir == NULL)
@@ -1243,6 +1327,12 @@ void dir_close(Directory dir) {
     if (dir->handle != NULL)
         closedir(dir->handle);
 #elif WINDOWS_OS
+    if (dir->lastFoundData.wname)
+        FREE(dir->lastFoundData.wname);
+
+    if (dir->wpath_unc)
+        FREE(dir->wpath_unc);
+
     if (dir->findFirstHandle != INVALID_HANDLE_VALUE)
         FindClose(dir->findFirstHandle);
 #endif
@@ -1263,63 +1353,92 @@ DirectoryEntry dirent_open_with_mode(const char *path, const char *mode) {
     if (!entry)
         return NULL;
 
-#if WINDOWS_OS
-    if (pathLen > MAX_PATH)
-        goto cleanup;
-
-    dir = CALLOC(1, sizeof(*dir));
-    if (!dir)
-        goto cleanup;
-#else
+#if LINUX_OS
     dir = CALLOC(1, sizeof(*dir) + pathLen + 1);
     if (!dir)
         goto cleanup;
-#endif
 
     strcpy(dir->path, path);
+    path_normalize_cstr(dir->path);
 
     const char *name = path_name_cstr(dir->path);
 
     /* Extract file/directory name from path and insert into status field */
     size_t name_len = strlen(name);
 
-#if LINUX_OS
     if (name_len > 255)
         goto cleanup;
     strcpy(entry->data.d_name, name);
 #elif WINDOWS_OS
-    if (strstr(mode, "@ncp") != NULL) {
-        if (name_len > MAX_PATH - 1)
-            goto cleanup;
+    dir = CALLOC(1, sizeof(*dir) + pathLen + LONG_PATH_EXTRA_SPACE);
+    if (!dir)
+        goto cleanup;
 
+    const char *prefix = LONG_PATH_PREFIX;
+    size_t prefix_len = 0;
+    size_t len = strlen(path);
+
+    if (!path_is_device_cstr(path)) {
+        if (path_is_unc_cstr(path) && len >= MAX_PATH) {
+            prefix = LONG_PATH_UNC_PREFIX;
+            prefix_len = LONG_PATH_UNC_PREFIX_LEN;
+            path += 2;
+            len -= 2;
+        } else if (path_is_dos_path_cstr(path)) {
+            prefix_len = LONG_PATH_PREFIX_LEN;
+        }
+    }
+
+    memcpy(dir->path, prefix, prefix_len);
+    memcpy(dir->path + prefix_len, path, len);
+    path_normalize_cstr(dir->path);
+
+    const char *name = path_name_cstr(dir->path);
+    dir->path_len = name - dir->path;
+
+    if (strstr(mode, "@ncp") != NULL) {
         dir->findFirstHandle = FindFirstFileA(dir->path, &entry->fdata.data);
         strcpy(entry->fdata.data.cFileName, name);
 
         entry->is_wide = 0;
     } else {
-        LPWSTR wide = utf8_to_wide_alloc(dir->path);
+        LPWSTR wide = utf8_to_wide_alloc_additional(dir->path, MAX_PATH);
         if (!wide)
             goto cleanup;
 
         LPWSTR wideName = utf8_to_wide_alloc(name);
-        if (!wideName || wcslen(wideName) > MAX_PATH - 1) {
+        size_t wideNameLen = wcslen(wideName);
+        if (!wideName || wideNameLen >= MAX_PATH) {
             FREE(wide);
             FREE(wideName);
             goto cleanup;
         }
 
         dir->findFirstHandle = FindFirstFileW(wide, &entry->fdata.wdata);
+        dir->wpath_unc = wide;
+        dir->wpath_len = wcslen(wide) - wideNameLen;
+        if (dir->wpath_unc[dir->wpath_len-1] != path_separator()) {
+            dir->wpath_unc[dir->wpath_len-1] = path_separator();
+            dir->wpath_unc[dir->wpath_len++] = 0;
+        } else
+            dir->wpath_unc[dir->wpath_len] = 0;
         wcscpy(entry->fdata.wdata.cFileName, wideName);
 
-        FREE(wide);
-        FREE(wideName);
-
+        entry->wname = wideName;
         entry->is_wide = 1;
     }
 
     if (dir->findFirstHandle == INVALID_HANDLE_VALUE)
         dir->error = GetLastError();
 #else
+    strcpy(dir->path, path);
+    path_normalize_cstr(dir->path);
+
+    const char *name = path_name_cstr(dir->path);
+
+    /* Extract file/directory name from path and insert into status field */
+    size_t name_len = strlen(name);
+
     if (name_len > 255)
         goto cleanup;
     strcpy(entry->name, name);
@@ -1330,6 +1449,8 @@ DirectoryEntry dirent_open_with_mode(const char *path, const char *mode) {
     dir->path_len = strlen(dir->path);
     dir->path[dir->path_len++] = path_separator();
     dir->path[dir->path_len] = 0;
+
+    ("Opened direntry %s\n", dir->path);
 
     entry->parent = dir;
     entry->ownedDir = 1;
@@ -1351,6 +1472,11 @@ DirectoryEntry dirent_copy(DirectoryEntry entry) {
 }
 
 void dirent_close(DirectoryEntry entry) {
+#if WINDOWS_OS
+    if (entry->wname)
+        FREE(entry->wname);
+#endif
+
     if (entry && entry->ownedDir) {
         dir_close(entry->parent);
         FREE(entry);
@@ -1379,13 +1505,11 @@ int dirent_refresh(DirectoryEntry entry) {
         if (!entry->is_wide) {
             entry->parent->findFirstHandle = FindFirstFileA(dirent_fullname(entry), &entry->fdata.data);
         } else {
-            LPWSTR wide = utf8_to_wide_alloc(dirent_fullname(entry));
+            LPCWSTR wide = dirent_fullname_wide(entry);
             if (!wide)
                 return entry->parent->error = CC_ENOMEM;
 
             entry->parent->findFirstHandle = FindFirstFileW(wide, &entry->fdata.wdata);
-
-            FREE(wide);
         }
 
         if (entry->parent->findFirstHandle == INVALID_HANDLE_VALUE)
@@ -1402,14 +1526,56 @@ int dirent_refresh(DirectoryEntry entry) {
 }
 
 const char *dirent_path(DirectoryEntry entry) {
-    entry->parent->path[entry->parent->path_len] = 0;
-    return entry->parent->path;
+    return dir_path(entry->parent);
 }
 
+#if WINDOWS_OS
+const char *dirent_path_unc(DirectoryEntry entry) {
+    return dir_path_unc(entry->parent);
+}
+
+LPCWSTR dirent_path_wide(DirectoryEntry entry) {
+    return dir_path_wide(entry->parent);
+}
+
+LPCWSTR dirent_path_wide_unc(DirectoryEntry entry) {
+    return dir_path_wide_unc(entry->parent);
+}
+#endif
+
 const char *dirent_fullname(DirectoryEntry entry) {
+#if WINDOWS_OS
+    const char *path = dirent_fullname_unc(entry);
+    if (str_starts_with(path, LONG_PATH_PREFIX) && path_is_dos_path_cstr(path + LONG_PATH_PREFIX_LEN))
+        path += LONG_PATH_PREFIX_LEN;
+
+    return path;
+#else
+    strcpy(entry->parent->path + entry->parent->path_len, dirent_name(entry));
+    return entry->parent->path;
+#endif
+}
+
+#if WINDOWS_OS
+const char *dirent_fullname_unc(DirectoryEntry entry) {
     strcpy(entry->parent->path + entry->parent->path_len, dirent_name(entry));
     return entry->parent->path;
 }
+
+LPCWSTR dirent_fullname_wide(DirectoryEntry entry) {
+    LPCWSTR str = dirent_fullname_wide_unc(entry);
+    if (str && str_starts_with(dirent_fullname_unc(entry), LONG_PATH_PREFIX) && path_is_dos_path_cstr(dirent_fullname_unc(entry) + LONG_PATH_PREFIX_LEN))
+        str += LONG_PATH_PREFIX_LEN;
+
+    return str;
+}
+
+LPCWSTR dirent_fullname_wide_unc(DirectoryEntry entry) {
+    LPWSTR wpath = (LPWSTR) dirent_path_wide_unc(entry);
+    wcscpy(wpath + entry->parent->wpath_len, dirent_name_wide(entry));
+    return wpath;
+}
+#endif
 
 const char *dirent_name(DirectoryEntry entry) {
 #if LINUX_OS
@@ -1425,6 +1591,18 @@ const char *dirent_name(DirectoryEntry entry) {
     return entry->name;
 #endif
 }
+
+#if WINDOWS_OS
+LPCWSTR dirent_name_wide(DirectoryEntry entry) {
+    if (entry->wname)
+        return entry->wname;
+
+    if (entry->is_wide)
+        return entry->fdata.wdata.cFileName;
+
+    return entry->wname = utf8_to_wide_alloc(dirent_name(entry));
+}
+#endif
 
 long long dirent_size(DirectoryEntry entry) {
 #if LINUX_OS
@@ -1481,6 +1659,77 @@ int dirent_exists(DirectoryEntry entry) {
         fclose(file);
         return 1;
     }
+
+    return 0;
+#endif
+}
+
+int dirent_remove(DirectoryEntry entry, int recursive) {
+#if LINUX_OS
+
+#elif WINDOWS_OS
+    if (dirent_is_directory(entry)) {
+        int err = 0;
+
+        if (!dirent_is_subdirectory(entry))
+            return entry->parent->error = CC_ENOTSUP;
+
+        if (recursive) {
+            Directory dir = dir_open_with_mode(dirent_fullname(entry), entry->is_wide? "": "@ncp", DirFilterNone, DirSortNone);
+            if (dir == NULL)
+                return entry->parent->error = CC_ENOMEM;
+
+            if (dir_error(dir)) {
+                entry->parent->error = dir_error(dir);
+                dir_close(dir);
+
+                return entry->parent->error;
+            }
+
+            for (DirectoryEntry entry = dir_next(dir); entry; entry = dir_next(dir)) {
+                if (dirent_is_directory(entry) && !dirent_is_subdirectory(entry))
+                    continue;
+
+                err = dirent_remove(entry, 1);
+                if (err)
+                    return entry->parent->error = err;
+            }
+
+            dir_close(dir);
+        }
+    }
+
+    /* https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-deletefilea
+     *
+     * To delete a read-only file, you must remove the read-only attribute.
+     */
+    if (dirent_is_readonly(entry)) {
+        unsigned long attributes = dirent_get_attributes(entry);
+
+        int err = dirent_set_attributes(entry, attributes & ~DIRENT_ATTRIBUTE_READONLY);
+        if (err)
+            return err;
+    }
+
+    if (entry->is_wide) {
+        LPCWSTR wide = dirent_fullname_wide(entry);
+        if (wide == NULL)
+            return entry->parent->error = CC_ENOMEM;
+
+        if (dirent_is_directory(entry)? !RemoveDirectoryW(wide): !DeleteFileW(wide))
+            return entry->parent->error = GetLastError();
+
+        return 0;
+    } else {
+        if (dirent_is_directory(entry)? !RemoveDirectoryA(dirent_fullname(entry)): !DeleteFileA(dirent_fullname(entry)))
+            return entry->parent->error = GetLastError();
+
+        return 0;
+    }
+#else
+    UNUSED(recursive)
+    if (remove(dirent_fullname(entry)))
+        return errno;
 
     return 0;
 #endif
@@ -1736,9 +1985,13 @@ unsigned long dirent_get_attributes(DirectoryEntry entry) {
 
 int dirent_set_attributes(DirectoryEntry entry, unsigned long attributes) {
 #if WINDOWS_OS
-    LPWSTR wide = utf8_to_wide_alloc(dirent_fullname(entry));
-    if (wide == NULL)
-        return entry->parent->error = CC_ENOMEM;
+    LPCWSTR wide = NULL;
+
+    if (entry->is_wide) {
+        wide = dirent_fullname_wide(entry);
+        if (wide == NULL)
+            return entry->parent->error = CC_ENOMEM;
+    }
 
     /* Change to directory */
     if (!!(attributes & DIRENT_ATTRIBUTE_DIRECTORY) != dirent_is_directory(entry))
@@ -1751,7 +2004,9 @@ int dirent_set_attributes(DirectoryEntry entry, unsigned long attributes) {
     /* Change to compression or sparsity */
     if ((    attributes                   & (DIRENT_ATTRIBUTE_COMPRESSED | DIRENT_ATTRIBUTE_SPARSE)) !=
             (dirent_get_attributes(entry) & (DIRENT_ATTRIBUTE_COMPRESSED | DIRENT_ATTRIBUTE_SPARSE))) {
-        HANDLE handle = CreateFileW(wide, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+        HANDLE handle = entry->is_wide?
+                    CreateFileW(wide, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL):
+                    CreateFileA(dirent_fullname(entry), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
         if (handle == INVALID_HANDLE_VALUE)
             goto cleanup;
 
@@ -1779,10 +2034,10 @@ int dirent_set_attributes(DirectoryEntry entry, unsigned long attributes) {
     /* Change to encryption */
     if (!!(attributes & DIRENT_ATTRIBUTE_ENCRYPTED) != dirent_is_encrypted(entry)) {
         if (attributes & DIRENT_ATTRIBUTE_ENCRYPTED) {
-            if (EncryptFileW(wide) == 0)
+            if (0 == (entry->is_wide? EncryptFileW(wide): EncryptFileA(dirent_fullname(entry))))
                 goto cleanup;
         } else {
-            if (DecryptFileW(wide, 0) == 0)
+            if (0 == (entry->is_wide? DecryptFileW(wide, 0): DecryptFileA(dirent_fullname(entry), 0)))
                 goto cleanup;
         }
     }
@@ -1797,14 +2052,17 @@ int dirent_set_attributes(DirectoryEntry entry, unsigned long attributes) {
             DIRENT_ATTRIBUTE_SYSTEM |
             DIRENT_ATTRIBUTE_TEMPORARY;
 
-    if (SetFileAttributesW(wide, attributes) == 0)
+    if (0 == (entry->is_wide? SetFileAttributesW(wide, attributes): SetFileAttributesA(dirent_fullname(entry), attributes)))
         goto cleanup;
 
-    FREE(wide);
-    return dirent_refresh(entry); /* TODO: if entry is returned from dir_next(), it will return an error and will not reflect changes to the directory entry, since such entries cannot be refreshed. */
+    if (entry->is_wide)
+        entry->fdata.wdata.dwFileAttributes = attributes;
+    else
+        entry->fdata.data.dwFileAttributes = attributes;
+
+    return 0;
 
 cleanup:
-    FREE(wide);
     return entry->parent->error = GetLastError();
 #else
     UNUSED(attributes)

@@ -9,11 +9,12 @@
 
 #include "common.h"
 
-Variant variant_from_genericlist(GenericList map);
+Variant variant_from_genericlist(GenericList list);
 int variant_is_genericlist(Variant var);
+int variant_is_variantlist(Variant var);
 GenericList variant_get_genericlist(Variant var);
-int variant_set_genericlist(Variant var, const GenericList set);
-int variant_set_genericlist_move(Variant var, GenericList set);
+int variant_set_genericlist(Variant var, const GenericList list);
+int variant_set_genericlist_move(Variant var, GenericList list);
 GenericList genericlist_create(Compare compare, Copier copy, Deleter deleter);
 GenericList genericlist_create_reserve(size_t reserve, Compare compare, Copier copy, Deleter deleter);
 GenericList genericlist_copy(GenericList other);
@@ -59,5 +60,6 @@ Deleter genericlist_get_deleter_fn(GenericList list);
 void genericlist_set_deleter_fn(GenericList list, Deleter deleter);
 void genericlist_clear(GenericList list);
 void genericlist_destroy(GenericList list);
+CommonContainerBase *genericlist_get_container_base(GenericList list);
 
 #endif // GENERICLIST_H

@@ -11,14 +11,18 @@
 #include "variant.h"
 
 /* See common.c for reasoning behind this empty struct */
-struct GenericMapStruct {};
+struct GenericMapStruct {char dummy;};
 
-Variant variant_from_genericmap(GenericMap set) {
-    return variant_create_custom(set, (Compare) genericmap_compare, (Copier) genericmap_copy, (Deleter) genericmap_destroy);
+Variant variant_from_genericmap(GenericMap map) {
+    return variant_create_custom_base(map, (Compare) genericmap_compare, (Copier) genericmap_copy, (Deleter) genericmap_destroy, *genericmap_get_container_base(map));
 }
 
 int variant_is_genericmap(Variant var) {
     return variant_get_copier_fn(var) == (Copier) genericmap_copy;
+}
+
+int variant_is_variantmap(Variant var) {
+    return variant_is_genericmap(var) && genericmap_get_copier_fn((GenericMap) variant_get_custom(var)) == (Copier) variant_copy;
 }
 
 GenericMap variant_get_genericmap(Variant var) {
@@ -28,12 +32,12 @@ GenericMap variant_get_genericmap(Variant var) {
     return variant_get_custom(var);
 }
 
-int variant_set_genericmap_move(Variant var, GenericMap set) {
-    return variant_set_custom_move(var, set, (Compare) genericmap_compare, (Copier) genericmap_copy, (Deleter) genericmap_destroy);
+int variant_set_genericmap_move(Variant var, GenericMap map) {
+    return variant_set_custom_move_base(var, map, (Compare) genericmap_compare, (Copier) genericmap_copy, (Deleter) genericmap_destroy, *genericmap_get_container_base(map));
 }
 
-int variant_set_genericmap(Variant var, const GenericMap set) {
-    return variant_set_custom(var, set, (Compare) genericmap_compare, (Copier) genericmap_copy, (Deleter) genericmap_destroy);
+int variant_set_genericmap(Variant var, const GenericMap map) {
+    return variant_set_custom_base(var, map, (Compare) genericmap_compare, (Copier) genericmap_copy, (Deleter) genericmap_destroy, *genericmap_get_container_base(map));
 }
 
 GenericMap genericmap_create(BinaryCompare key_compare, Compare value_compare, Copier copy, Deleter deleter) {
@@ -196,4 +200,8 @@ void genericmap_clear(GenericMap map) {
 
 void genericmap_destroy(GenericMap map) {
     avltree_destroy((struct AVLTree *) map);
+}
+
+CommonContainerBase *genericmap_get_container_base(GenericMap map) {
+    return avltree_get_container_base((struct AVLTree *) map);
 }

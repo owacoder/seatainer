@@ -620,7 +620,12 @@ void thread_sleep(unsigned long long tm) {
 
     while (nanosleep(&t, &t) == EINTR);
 #elif WINDOWS_OS
-    Sleep(tm);
+    do {
+        DWORD amt = (DWORD) MIN(tm, 0xffffffffu);
+        Sleep(amt);
+
+        tm -= amt;
+    } while (tm);
 #endif
 }
 
@@ -831,6 +836,14 @@ char *strupper(char *str) {
         *ptr = toupper(*ptr & UCHAR_MAX);
 
     return str;
+}
+
+int str_starts_with(const char *str, const char *substr) {
+    while (*str && *substr)
+        if (*str++ != *substr++)
+            return 0;
+
+    return *substr == 0;
 }
 
 int strcmp_no_case(const char *lhs, const char *rhs) {
@@ -1243,12 +1256,16 @@ int str_is_codepage_safe(LPCSTR utf8) {
 }
 
 LPWSTR utf8_to_wide_alloc(LPCSTR utf8) {
+    return utf8_to_wide_alloc_additional(utf8, 0);
+}
+
+LPWSTR utf8_to_wide_alloc_additional(LPCSTR utf8, size_t additional) {
     if (utf8 == NULL)
         return NULL;
 
     int chars = MultiByteToWideChar(CP_UTF8, MB_PRECOMPOSED, utf8, -1, NULL, 0);
 
-    LPWSTR result = MALLOC(sizeof(*result) * chars);
+    LPWSTR result = MALLOC(sizeof(*result) * (chars + additional));
     if (!result)
         return NULL;
 

@@ -17,6 +17,8 @@
 #include <float.h>
 
 #include "io_core.h"
+
+#include "../Containers/sbuffer.h"
 #include "../utility.h"
 #include "../seaerror.h"
 
@@ -106,7 +108,7 @@ struct InputOutputDevice {
     int error;
 
     unsigned char ungetAvail;
-    unsigned char ungetBuf[7];
+    unsigned char ungetBuf[15];
 };
 
 #ifdef CC_IO_STATIC_INSTANCES
@@ -196,7 +198,7 @@ static IO io_alloc(enum IO_Type type) {
             return io;
     }
 
-    io = MALLOC(sizeof(struct InputOutputDevice));
+    io = CALLOC(1, sizeof(struct InputOutputDevice));
     if (io == NULL)
         return NULL;
 
@@ -204,8 +206,6 @@ static IO io_alloc(enum IO_Type type) {
     io->type = type;
     io->flags = IO_FLAG_IN_USE | IO_FLAG_DYNAMIC;
     io->callbacks = NULL;
-    io->ungetAvail = 0;
-    io->read_timeout = io->write_timeout = 0;
 
     io_hint_next_open(io_permanent_open_hint(), 0);
 
@@ -261,6 +261,32 @@ static int io_grow(IO io, size_t size) {
 
     io->sizes.ptr2 = io->ptr = new_data;
     io->sizes.capacity = growth;
+
+    return 0;
+}
+
+static int io_begin_read(IO io) {
+    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_READABLE | IO_FLAG_ERROR):
+                                                   (IO_FLAG_READABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_WRITTEN)) & io->flags) != IO_FLAG_READABLE)
+    {
+        io->flags |= IO_FLAG_ERROR;
+        return io->error = CC_EREAD;
+    }
+
+    io->flags |= IO_FLAG_HAS_JUST_READ;
+
+    return 0;
+}
+
+static int io_begin_write(IO io) {
+    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_WRITABLE | IO_FLAG_ERROR):
+                                                   (IO_FLAG_WRITABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ)) & io->flags) != IO_FLAG_WRITABLE)
+    {
+        io->flags |= IO_FLAG_ERROR;
+        return io->error = CC_EWRITE;
+    }
+
+    io->flags |= IO_FLAG_HAS_JUST_WRITTEN;
 
     return 0;
 }
@@ -345,6 +371,8 @@ static int io_close_without_destroying(IO io) {
     return result;
 }
 
+static int io_getc_internal(IO io);
+static int io_putc_internal(int ch, IO io);
 /* TODO: these internal functions only do binary data transferral, maybe add some wrappers that support text mode as well without checking flags? */
 static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io);
 static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO io);
@@ -584,9 +612,9 @@ int io_resize(IO io, long long int size) {
                 return EOF;
             }
 
-            return io_seek(io, size, SEEK_SET)? EOF: 0;
+            return io_seek64(io, size, SEEK_SET)? EOF: 0;
 #elif WINDOWS_OS
-            if (io_seek(io, size, SEEK_SET) != 0)
+            if (io_seek64(io, size, SEEK_SET) != 0)
                 return EOF;
 
             HANDLE osfhandle = (HANDLE) _get_osfhandle(_fileno(io->ptr));
@@ -613,9 +641,9 @@ int io_resize(IO io, long long int size) {
                 return EOF;
             }
 
-            return io_seek(io, size, SEEK_SET)? EOF: 0;
+            return io_seek64(io, size, SEEK_SET)? EOF: 0;
 #elif WINDOWS_OS
-            if (io_seek(io, size, SEEK_SET) != 0)
+            if (io_seek64(io, size, SEEK_SET) != 0)
                 return EOF;
 
             if (!SetEndOfFile(io->ptr)) {
@@ -783,15 +811,8 @@ static int io_getc_internal(IO io) {
 }
 
 int io_getc(IO io) {
-    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_READABLE | IO_FLAG_ERROR):
-                                                   (IO_FLAG_READABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_WRITTEN)) & io->flags) != IO_FLAG_READABLE)
-    {
-        io->flags |= IO_FLAG_ERROR;
-        io->error = CC_EREAD;
+    if (io_begin_read(io))
         return EOF;
-    }
-
-    io->flags |= IO_FLAG_HAS_JUST_READ;
 
     return io_getc_internal(io);
 }
@@ -822,17 +843,7 @@ char *io_gets(char *str, int num, IO io) {
     char *oldstr = str;
     int oldnum = num;
 
-    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_READABLE | IO_FLAG_ERROR):
-                                                   (IO_FLAG_READABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_WRITTEN)) & io->flags) != IO_FLAG_READABLE)
-    {
-        io->flags |= IO_FLAG_ERROR;
-        io->error = CC_EREAD;
-        return NULL;
-    }
-
-    io->flags |= IO_FLAG_HAS_JUST_READ;
-
-    if (io->flags & IO_FLAG_EOF)
+    if (io_begin_read(io) || (io->flags & IO_FLAG_EOF))
         return NULL;
 
     switch (io->type) {
@@ -1287,16 +1298,16 @@ typedef struct {
         }                                                           \
                                                                     \
         if (isinf(mval)) {                                          \
-            (state)->buffer = (unsigned char *) (((fmt) == 'F')? "INFINITY": "infinity"); \
+            (state)->buffer = (unsigned char *) (isupper((fmt) & UCHAR_MAX)? "INFINITY": "infinity"); \
             (state)->bufferLength = 8;                              \
         } else if (isnan(mval)) {                                   \
-            (state)->buffer = (unsigned char *) (((fmt) == 'F')? "NAN": "nan"); \
+            (state)->buffer = (unsigned char *) (isupper((fmt) & UCHAR_MAX)? "NAN": "nan"); \
             (state)->bufferLength = 3;                              \
         } else {                                                    \
             if ((len) == PRINTF_LEN_BIG_L)                          \
                 io_printf_f_long(mval, fmt, fmt_flags, prec, len, state); \
             else                                                    \
-                io_printf_f(mval, fmt, fmt_flags, prec, len, state); \
+                io_printf_f(mval, fmt, fmt_flags, prec, len, state);\
         }                                                           \
     } while (0)
 
@@ -1308,27 +1319,33 @@ typedef struct {
                                                                     \
         (value) = 0;                                                \
                                                                     \
-        if ((chr = io_getc(io)) == EOF)                             \
+        if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
         if (++read > width) {io_ungetc(chr, io); return --read;}    \
                                                                     \
         if (chr == '+' || chr == '-') {                             \
             neg = (chr == '-');                                     \
-            chr = io_getc(io);                                      \
-            if (++read > width) {io_ungetc(chr, io); return --read;}\
+            chr = io_getc_internal(io);                             \
+            if (++read > width || !isdigit(chr)) {io_ungetc(chr, io); return UINT_MAX;}\
         }                                                           \
                                                                     \
         if (chr == '0') {                                           \
-            chr = io_getc(io);                                      \
+            chr = io_getc_internal(io);                             \
             if (chr == 'x' || chr == 'X')                           \
                 base = 16;                                          \
             else                                                    \
                 base = 8;                                           \
             if (++read > width) {io_ungetc(chr, io); return --read;}\
+            if (base == 16) {                                       \
+                chr = io_getc_internal(io);                         \
+                if (!isxdigit(chr))                                 \
+                    return UINT_MAX;                                \
+                if (++read > width) {io_ungetc(chr, io); return UINT_MAX;}\
+            }                                                       \
         }                                                           \
                                                                     \
         while (chr != EOF) {                                        \
-            char *str = strchr(alpha, chr);                         \
+            char *str = strchr(alpha, tolower(chr));                \
             if (str == NULL || (str - alpha) >= base) {             \
                 io_ungetc(chr, io);                                 \
                 break;                                              \
@@ -1338,7 +1355,7 @@ typedef struct {
                                                                     \
             (value) = (value) * base + (neg? -chr: chr);            \
                                                                     \
-            chr = io_getc(io);                                      \
+            chr = io_getc_internal(io);                             \
             if (++read > width) {io_ungetc(chr, io); return --read;}\
         }                                                           \
                                                                     \
@@ -1352,14 +1369,14 @@ typedef struct {
                                                                     \
         (value) = 0;                                                \
                                                                     \
-        if ((chr = io_getc(io)) == EOF)                             \
+        if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
         if (++read > width) {io_ungetc(chr, io); return --read;}    \
                                                                     \
         if (chr == '+' || chr == '-') {                             \
             neg = (chr == '-');                                     \
-            chr = io_getc(io);                                      \
-            if (++read > width) {io_ungetc(chr, io); return --read;}\
+            chr = io_getc_internal(io);                             \
+            if (++read > width || !isdigit(chr)) {io_ungetc(chr, io); return UINT_MAX;}\
         }                                                           \
                                                                     \
         while (chr != EOF) {                                        \
@@ -1372,7 +1389,7 @@ typedef struct {
                                                                     \
             (value) = (value) * 10 + (neg? -chr: chr);              \
                                                                     \
-            chr = io_getc(io);                                      \
+            chr = io_getc_internal(io);                             \
             if (++read > width) {io_ungetc(chr, io); return --read;}\
         }                                                           \
                                                                     \
@@ -1386,7 +1403,7 @@ typedef struct {
                                                                     \
         (value) = 0;                                                \
                                                                     \
-        if ((chr = io_getc(io)) == EOF)                             \
+        if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
         if (++read > width) {io_ungetc(chr, io); return --read;}    \
                                                                     \
@@ -1398,7 +1415,7 @@ typedef struct {
                                                                     \
             (value) = (value) * 10 + (chr - '0');                   \
                                                                     \
-            chr = io_getc(io);                                      \
+            chr = io_getc_internal(io);                             \
             if (++read > width) {io_ungetc(chr, io); return --read;}\
         }                                                           \
                                                                     \
@@ -1412,14 +1429,14 @@ typedef struct {
                                                                     \
         (value) = 0;                                                \
                                                                     \
-        if ((chr = io_getc(io)) == EOF)                             \
+        if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
         if (++read > width) {io_ungetc(chr, io); return --read;}    \
                                                                     \
         if (chr == '+' || chr == '-') {                             \
             neg = (chr == '-');                                     \
-            chr = io_getc(io);                                      \
-            if (++read > width) {io_ungetc(chr, io); return --read;}\
+            chr = io_getc_internal(io);                             \
+            if (++read > width || !isdigit(chr)) {io_ungetc(chr, io); return UINT_MAX;}\
         }                                                           \
                                                                     \
         while (chr != EOF) {                                        \
@@ -1432,7 +1449,7 @@ typedef struct {
                                                                     \
             (value) = (value) * 8 + (neg? -chr: chr);               \
                                                                     \
-            chr = io_getc(io);                                      \
+            chr = io_getc_internal(io);                             \
             if (++read > width) {io_ungetc(chr, io); return --read;}\
         }                                                           \
                                                                     \
@@ -1447,24 +1464,24 @@ typedef struct {
                                                                     \
         (value) = 0;                                                \
                                                                     \
-        if ((chr = io_getc(io)) == EOF)                             \
+        if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
         if (++read > width) {io_ungetc(chr, io); return --read;}    \
                                                                     \
         if (chr == '+' || chr == '-') {                             \
             neg = (chr == '-');                                     \
-            chr = io_getc(io);                                      \
-            if (++read > width) {io_ungetc(chr, io); return --read;}\
+            chr = io_getc_internal(io);                             \
+            if (++read > width || !isdigit(chr)) {io_ungetc(chr, io); return UINT_MAX;}\
         }                                                           \
                                                                     \
         if (chr == '0') {                                           \
-            chr = io_getc(io);                                      \
+            chr = io_getc_internal(io);                             \
             if (++read > width) {io_ungetc(chr, io); return --read;}\
             if (chr == 'x' || chr == 'X') {                         \
-                chr = io_getc(io);                                  \
+                chr = io_getc_internal(io);                         \
                 if (!isxdigit(chr))                                 \
                     return UINT_MAX;                                \
-                if (++read > width) {io_ungetc(chr, io); return --read;}\
+                if (++read > width) {io_ungetc(chr, io); return UINT_MAX;}\
             }                                                       \
         }                                                           \
                                                                     \
@@ -1478,12 +1495,61 @@ typedef struct {
                                                                     \
             (value) = (value) * 16 + (neg? -chr: chr);              \
                                                                     \
-            chr = io_getc(io);                                      \
+            chr = io_getc_internal(io);                             \
             if (++read > width) {io_ungetc(chr, io); return --read;}\
         }                                                           \
                                                                     \
         return --read;                                              \
     } while (0)
+
+#define SCANF_F(type, value, width, len, io)                        \
+    do {                                                            \
+        Buffer buffer;                                              \
+        unsigned read = 0;                                          \
+        int chr, neg = 0, dec = 0;                                  \
+                                                                    \
+        buffer_init(&buffer);                                       \
+        (value) = 0;                                                \
+                                                                    \
+        if ((chr = io_getc_internal(io)) == EOF)                    \
+            return UINT_MAX;                                        \
+        if (++read > width) {io_ungetc(chr, io); buffer_destroy(&buffer); return --read;}    \
+                                                                    \
+        if (chr == '+' || chr == '-') {                             \
+            neg = (chr == '-');                                     \
+            chr = io_getc_internal(io);                             \
+            if (++read > width) {io_ungetc(chr, io); buffer_destroy(&buffer); return --read;}\
+        }                                                           \
+                                                                    \
+        while (chr != EOF) {                                        \
+            if (!isdigit(chr) && (chr != '.' || dec)) {             \
+                io_ungetc(chr, io);                                 \
+                break;                                              \
+            }                                                       \
+                                                                    \
+            if (chr == '.') dec = 1;                                \
+                                                                    \
+            /* Append to buffer */                                  \
+                                                                    \
+            chr = io_getc_internal(io);                             \
+            if (++read > width) {io_ungetc(chr, io); buffer_destroy(&buffer); return --read;}\
+        }                                                           \
+                                                                    \
+        if (chr == 'i' || chr == 'I') {                             \
+            /* Parse INFINITY */                                    \
+        } else if (chr == 'n' || chr == 'N') {                      \
+            /* Parse NAN */                                         \
+        } else if (chr == 'e' || chr == 'E') {                      \
+            /* Parse <number>E<exponent> */                         \
+        }                                                           \
+                                                                    \
+        buffer_destroy(&buffer);                                    \
+        return --read;                                              \
+    } while (0)
+
+#define SCANF_E(type, value, width, len, io) SCANF_F(type, value, width, len, io)
+#define SCANF_G(type, value, width, len, io) SCANF_F(type, value, width, len, io)
+#define SCANF_A(type, value, width, len, io) SCANF_F(type, value, width, len, io)
 
 static void io_printf_f_long(long double value, unsigned char fmt_char, unsigned flags, unsigned prec, unsigned len, struct io_printf_state *state) {
     UNUSED(len)
@@ -1671,7 +1737,7 @@ static unsigned io_scanf_int_no_arg(char fmt, IO io, unsigned width) {
         case 'i': SCANF_I(int, dummy, width, PRINTF_LEN_NONE, io); break;
         case 'o': SCANF_O(int, dummy, width, PRINTF_LEN_NONE, io); break;
         case 'u': SCANF_U(int, dummy, width, PRINTF_LEN_NONE, io); break;
-        case 'x': SCANF_X(int, dummy, width, PRINTF_LEN_NONE, io); break;
+        case 'x': case 'X': SCANF_X(int, dummy, width, PRINTF_LEN_NONE, io); break;
         default: return UINT_MAX;
     }
 }
@@ -1687,7 +1753,7 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
                 case 'i': {signed int *val = va_arg(args->args, signed int *); SCANF_I(signed int, *val, width, len, io); break;}
                 case 'o': {unsigned int *val = va_arg(args->args, unsigned int *); SCANF_O(unsigned int, *val, width, len, io); break;}
                 case 'u': {unsigned int *val = va_arg(args->args, unsigned int *); SCANF_U(unsigned int, *val, width, len, io); break;}
-                case 'x': {unsigned int *val = va_arg(args->args, unsigned int *); SCANF_X(unsigned int, *val, width, len, io); break;}
+                case 'x': case 'X': {unsigned int *val = va_arg(args->args, unsigned int *); SCANF_X(unsigned int, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
@@ -1699,7 +1765,7 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
                 case 'i': {signed short *val = va_arg(args->args, signed short *); SCANF_I(signed short, *val, width, len, io); break;}
                 case 'o': {unsigned short *val = va_arg(args->args, unsigned short *); SCANF_O(unsigned short, *val, width, len, io); break;}
                 case 'u': {unsigned short *val = va_arg(args->args, unsigned short *); SCANF_U(unsigned short, *val, width, len, io); break;}
-                case 'x': {unsigned short *val = va_arg(args->args, unsigned short *); SCANF_X(unsigned short, *val, width, len, io); break;}
+                case 'x': case 'X': {unsigned short *val = va_arg(args->args, unsigned short *); SCANF_X(unsigned short, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
@@ -1711,7 +1777,7 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
                 case 'i': {signed char *val = va_arg(args->args, signed char *); SCANF_I(signed char, *val, width, len, io); break;}
                 case 'o': {unsigned char *val = va_arg(args->args, unsigned char *); SCANF_O(unsigned char, *val, width, len, io); break;}
                 case 'u': {unsigned char *val = va_arg(args->args, unsigned char *); SCANF_U(unsigned char, *val, width, len, io); break;}
-                case 'x': {unsigned char *val = va_arg(args->args, unsigned char *); SCANF_X(unsigned char, *val, width, len, io); break;}
+                case 'x': case 'X': {unsigned char *val = va_arg(args->args, unsigned char *); SCANF_X(unsigned char, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
@@ -1723,7 +1789,7 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
                 case 'i': {signed long *val = va_arg(args->args, signed long *); SCANF_I(signed long, *val, width, len, io); break;}
                 case 'o': {unsigned long *val = va_arg(args->args, unsigned long *); SCANF_O(unsigned long, *val, width, len, io); break;}
                 case 'u': {unsigned long *val = va_arg(args->args, unsigned long *); SCANF_U(unsigned long, *val, width, len, io); break;}
-                case 'x': {unsigned long *val = va_arg(args->args, unsigned long *); SCANF_X(unsigned long, *val, width, len, io); break;}
+                case 'x': case 'X': {unsigned long *val = va_arg(args->args, unsigned long *); SCANF_X(unsigned long, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
@@ -1735,7 +1801,7 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
                 case 'i': {signed long long *val = va_arg(args->args, signed long long *); SCANF_I(signed long long, *val, width, len, io); break;}
                 case 'o': {unsigned long long *val = va_arg(args->args, unsigned long long *); SCANF_O(unsigned long long, *val, width, len, io); break;}
                 case 'u': {unsigned long long *val = va_arg(args->args, unsigned long long *); SCANF_U(unsigned long long, *val, width, len, io); break;}
-                case 'x': {unsigned long long *val = va_arg(args->args, unsigned long long *); SCANF_X(unsigned long long, *val, width, len, io); break;}
+                case 'x': case 'X': {unsigned long long *val = va_arg(args->args, unsigned long long *); SCANF_X(unsigned long long, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
@@ -1747,7 +1813,7 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
                 case 'i': {intmax_t *val = va_arg(args->args, intmax_t *); SCANF_I(intmax_t, *val, width, len, io); break;}
                 case 'o': {uintmax_t *val = va_arg(args->args, uintmax_t *); SCANF_O(uintmax_t, *val, width, len, io); break;}
                 case 'u': {uintmax_t *val = va_arg(args->args, uintmax_t *); SCANF_U(uintmax_t, *val, width, len, io); break;}
-                case 'x': {uintmax_t *val = va_arg(args->args, uintmax_t *); SCANF_X(uintmax_t, *val, width, len, io); break;}
+                case 'x': case 'X': {uintmax_t *val = va_arg(args->args, uintmax_t *); SCANF_X(uintmax_t, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
@@ -1760,7 +1826,7 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
                 case 'i': SCANF_I(size_t, *val, width, len, io); break;
                 case 'o': SCANF_O(size_t, *val, width, len, io); break;
                 case 'u': SCANF_U(size_t, *val, width, len, io); break;
-                case 'x': SCANF_X(size_t, *val, width, len, io); break;
+                case 'x': case 'X': SCANF_X(size_t, *val, width, len, io); break;
                 default: return UINT_MAX;
             }
             break;
@@ -1773,7 +1839,408 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
                 case 'i': SCANF_I(ptrdiff_t, *val, width, len, io); break;
                 case 'o': SCANF_O(ptrdiff_t, *val, width, len, io); break;
                 case 'u': SCANF_U(ptrdiff_t, *val, width, len, io); break;
-                case 'x': SCANF_X(ptrdiff_t, *val, width, len, io); break;
+                case 'x': case 'X': SCANF_X(ptrdiff_t, *val, width, len, io); break;
+                default: return UINT_MAX;
+            }
+            break;
+        }
+    }
+
+    return UINT_MAX;
+}
+
+static unsigned io_scanf_float_f(IO io, unsigned width, float *f) {
+    Buffer buffer;
+    unsigned read = 0;
+    int chr, neg = 0, dec = 0;
+
+    buffer_init(&buffer);
+
+    if ((chr = io_getc_internal(io)) == EOF)
+        return UINT_MAX;
+
+    if (++read > width)
+        goto finish_early;
+
+    if (chr == '+' || chr == '-') {
+        neg = (chr == '-');
+        chr = io_getc_internal(io);
+        if (++read > width)
+            goto finish_early;
+    }
+
+    while (chr != EOF) {
+        if (!isdigit(chr) && (chr != '.' || dec))
+            break;
+
+        if (chr == '.')
+            dec = 1;
+
+        if (buffer_append_chr(&buffer, chr))
+            goto cleanup;
+
+        chr = io_getc_internal(io);
+        if (++read > width)
+            goto finish_early;
+    }
+
+    if ((chr == 'i' || chr == 'I') && buffer.length == 0) {
+        const char *word = "infinity";
+
+        while (chr != EOF) {
+            if (buffer_append_chr(&buffer, tolower(chr)))
+                goto cleanup;
+
+            chr = io_getc_internal(io);
+            if (++read > width)
+                goto finish_early;
+
+            ++word;
+            if (!*word || *word != tolower(chr)) {
+                io_ungetc(chr, io);
+                break;
+            }
+        }
+
+        if (buffer.length != 3 && buffer.length != 8)
+            goto cleanup;
+    } else if ((chr == 'n' || chr == 'N') && buffer.length == 0) {
+        /* TODO: Parse NAN */
+    } else if (chr == 'e' || chr == 'E') {
+        /* Parse <number>E<exponent> */
+        if (buffer_append_chr(&buffer, chr))
+            goto cleanup;
+
+        chr = io_getc_internal(io);
+        if (++read > width || (!isdigit(chr) && chr != '+' && chr != '-'))
+            goto cleanup;
+
+        if (chr == '+' || chr == '-') {
+            if (buffer_append_chr(&buffer, chr))
+                goto cleanup;
+
+            chr = io_getc_internal(io);
+            if (++read > width || !isdigit(chr))
+                goto cleanup;
+        }
+
+        while (chr != EOF) {
+            if (!isdigit(chr)) {
+                io_ungetc(chr, io);
+                break;
+            }
+
+            if (buffer_append_chr(&buffer, chr))
+                goto cleanup;
+
+            chr = io_getc_internal(io);
+            if (++read > width)
+                goto finish_early;
+        }
+    } else {
+        io_ungetc(chr, io);
+    }
+
+finish:
+    /* Assign to float and return error if bad parsing */
+    char *end;
+    float val = strtof(buffer.data, &end);
+    printf("\nParsing %s\n", buffer.data);
+
+    if (*end != 0) {
+        buffer_destroy(&buffer);
+        return UINT_MAX;
+    }
+
+    if (f)
+        *f = neg? -val: val;
+
+    buffer_destroy(&buffer);
+    return --read;
+
+finish_early:
+    io_ungetc(chr, io);
+    goto finish;
+
+cleanup:
+    buffer_destroy(&buffer);
+    return UINT_MAX;
+}
+
+static unsigned io_scanf_float_d(IO io, unsigned width, double *f) {
+    Buffer buffer;
+    unsigned read = 0;
+    int chr, neg = 0, dec = 0;
+
+    buffer_init(&buffer);
+
+    if ((chr = io_getc_internal(io)) == EOF)
+        return UINT_MAX;
+
+    if (++read > width)
+        goto finish_early;
+
+    if (chr == '+' || chr == '-') {
+        neg = (chr == '-');
+        chr = io_getc_internal(io);
+        if (++read > width)
+            goto finish_early;
+    }
+
+    while (chr != EOF) {
+        if (!isdigit(chr) && (chr != '.' || dec))
+            break;
+
+        if (chr == '.')
+            dec = 1;
+
+        if (buffer_append_chr(&buffer, chr))
+            goto cleanup;
+
+        chr = io_getc_internal(io);
+        if (++read > width)
+            goto finish_early;
+    }
+
+    if ((chr == 'i' || chr == 'I') && buffer.length == 0) {
+        const char *word = "infinity";
+
+        while (chr != EOF) {
+            if (buffer_append_chr(&buffer, tolower(chr)))
+                goto cleanup;
+
+            chr = io_getc_internal(io);
+            if (++read > width)
+                goto finish_early;
+
+            ++word;
+            if (!*word || *word != tolower(chr)) {
+                io_ungetc(chr, io);
+                break;
+            }
+        }
+
+        if (buffer.length != 3 && buffer.length != 8)
+            goto cleanup;
+    } else if ((chr == 'n' || chr == 'N') && buffer.length == 0) {
+        /* TODO: Parse NAN */
+    } else if (chr == 'e' || chr == 'E') {
+        /* Parse <number>E<exponent> */
+        chr = io_getc_internal(io);
+        if (++read > width || (!isdigit(chr) && chr != '+' && chr != '-'))
+            goto cleanup;
+
+        if (chr == '+' || chr == '-') {
+            if (buffer_append_chr(&buffer, chr))
+                goto cleanup;
+
+            chr = io_getc_internal(io);
+            if (++read > width || !isdigit(chr))
+                goto cleanup;
+        }
+
+        while (chr != EOF) {
+            if (!isdigit(chr)) {
+                io_ungetc(chr, io);
+                break;
+            }
+
+            if (buffer_append_chr(&buffer, chr))
+                goto cleanup;
+
+            chr = io_getc_internal(io);
+            if (++read > width)
+                goto finish_early;
+        }
+    } else {
+        io_ungetc(chr, io);
+    }
+
+finish:
+    /* Assign to float and return error if bad parsing */
+    char *end;
+    double val = strtod(buffer.data, &end);
+
+    if (*end != 0) {
+        buffer_destroy(&buffer);
+        return UINT_MAX;
+    }
+
+    if (f)
+        *f = neg? -val: val;
+
+    buffer_destroy(&buffer);
+    return --read;
+
+finish_early:
+    io_ungetc(chr, io);
+    goto finish;
+
+cleanup:
+    buffer_destroy(&buffer);
+    return UINT_MAX;
+}
+
+static unsigned io_scanf_float_ld(IO io, unsigned width, long double *f) {
+    Buffer buffer;
+    unsigned read = 0;
+    int chr, neg = 0, dec = 0;
+
+    buffer_init(&buffer);
+
+    if ((chr = io_getc_internal(io)) == EOF)
+        return UINT_MAX;
+
+    if (++read > width)
+        goto finish_early;
+
+    if (chr == '+' || chr == '-') {
+        neg = (chr == '-');
+        chr = io_getc_internal(io);
+        if (++read > width)
+            goto finish_early;
+    }
+
+    while (chr != EOF) {
+        if (!isdigit(chr) && (chr != '.' || dec))
+            break;
+
+        if (chr == '.')
+            dec = 1;
+
+        if (buffer_append_chr(&buffer, chr))
+            goto cleanup;
+
+        chr = io_getc_internal(io);
+        if (++read > width)
+            goto finish_early;
+    }
+
+    if ((chr == 'i' || chr == 'I') && buffer.length == 0) {
+        const char *word = "infinity";
+
+        while (chr != EOF) {
+            if (buffer_append_chr(&buffer, tolower(chr)))
+                goto cleanup;
+
+            chr = io_getc_internal(io);
+            if (++read > width)
+                goto finish_early;
+
+            ++word;
+            if (!*word || *word != tolower(chr)) {
+                io_ungetc(chr, io);
+                break;
+            }
+        }
+
+        if (buffer.length != 3 && buffer.length != 8)
+            goto cleanup;
+    } else if ((chr == 'n' || chr == 'N') && buffer.length == 0) {
+        /* TODO: Parse NAN */
+    } else if (chr == 'e' || chr == 'E') {
+        /* Parse <number>E<exponent> */
+        chr = io_getc_internal(io);
+        if (++read > width || (!isdigit(chr) && chr != '+' && chr != '-'))
+            goto cleanup;
+
+        if (chr == '+' || chr == '-') {
+            if (buffer_append_chr(&buffer, chr))
+                goto cleanup;
+
+            chr = io_getc_internal(io);
+            if (++read > width || !isdigit(chr))
+                goto cleanup;
+        }
+
+        while (chr != EOF) {
+            if (!isdigit(chr)) {
+                io_ungetc(chr, io);
+                break;
+            }
+
+            if (buffer_append_chr(&buffer, chr))
+                goto cleanup;
+
+            chr = io_getc_internal(io);
+            if (++read > width)
+                goto finish_early;
+        }
+    } else {
+        io_ungetc(chr, io);
+    }
+
+finish:
+    /* Assign to float and return error if bad parsing */
+    char *end;
+    long double val = strtold(buffer.data, &end);
+
+    if (*end != 0) {
+        buffer_destroy(&buffer);
+        return UINT_MAX;
+    }
+
+    if (f)
+        *f = neg? -val: val;
+
+    buffer_destroy(&buffer);
+    return --read;
+
+finish_early:
+    io_ungetc(chr, io);
+    goto finish;
+
+cleanup:
+    buffer_destroy(&buffer);
+    return UINT_MAX;
+}
+
+/* fmt must be one of "fega", returns UINT_MAX on failure, number of characters read on success */
+static unsigned io_scanf_float_no_arg(char fmt, IO io, unsigned width) {
+    float dummy;
+    UNUSED(dummy)
+    switch (fmt) {
+        case 'f': case 'F':
+        case 'e': case 'E':
+        case 'g': case 'G': return io_scanf_float_f(io, width, &dummy);
+        case 'a': case 'A':
+        default: return UINT_MAX;
+    }
+}
+
+/* fmt must be one of "fega", returns UINT_MAX on failure, number of characters read on success */
+static unsigned io_scanf_float(char fmt, IO io, unsigned width, unsigned len, va_list_wrapper *args) {
+    switch (len) {
+        default: return UINT_MAX;
+        case PRINTF_LEN_NONE:
+        {
+            switch (fmt) {
+                case 'f': case 'F':
+                case 'e': case 'E':
+                case 'g': case 'G': {float *val = va_arg(args->args, float *); return io_scanf_float_f(io, width, val);}
+                case 'a': case 'A':
+                default: return UINT_MAX;
+            }
+            break;
+        }
+        case PRINTF_LEN_L:
+        {
+            switch (fmt) {
+                case 'f': case 'F':
+                case 'e': case 'E':
+                case 'g': case 'G': {double *val = va_arg(args->args, double *); return io_scanf_float_d(io, width, val);}
+                case 'a': case 'A':
+                default: return UINT_MAX;
+            }
+            break;
+        }
+        case PRINTF_LEN_BIG_L:
+        {
+            switch (fmt) {
+                case 'f': case 'F':
+                case 'e': case 'E':
+                case 'g': case 'G': {long double *val = va_arg(args->args, long double *); return io_scanf_float_ld(io, width, val);}
+                case 'a': case 'A':
                 default: return UINT_MAX;
             }
             break;
@@ -1785,7 +2252,6 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
 
 #define CLEANUP(x) do {result = (x); goto cleanup;} while (0)
 
-/* TODO: handle hexadecimal floating point format */
 int io_vprintf(IO io, const char *fmt, va_list args) {
     int result = 0;
     int written = 0;
@@ -1798,12 +2264,8 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
     state.bufferLength = 0;
     state.flags = 0;
 
-    if (!(io->flags & IO_FLAG_WRITABLE))
-    {
-        io->flags |= IO_FLAG_ERROR;
-        io->error = CC_EWRITE;
+    if (io_begin_write(io))
         return -1;
-    }
 
     switch (io->type) {
         case IO_File:
@@ -1816,7 +2278,7 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
                     ++fmt;
 
                     if (*fmt == '%') {
-                        if (io_putc('%', io) == EOF)
+                        if (io_putc_internal('%', io) == EOF)
                             CLEANUP(-1);
                         ++written;
                         continue;
@@ -1934,7 +2396,7 @@ done_with_flags:
                                 case PRINTF_LEN_L: *(va_arg(args_copy.args, long *)) = written; break;
                                 case PRINTF_LEN_LL: *(va_arg(args_copy.args, long long *)) = written; break;
                                 case PRINTF_LEN_J: *(va_arg(args_copy.args, intmax_t *)) = written; break;
-                                case PRINTF_LEN_Z:
+                                case PRINTF_LEN_Z: *(va_arg(args_copy.args, size_t *)) = written; break;
                                 case PRINTF_LEN_T: *(va_arg(args_copy.args, ptrdiff_t *)) = written; break;
                                 default: CLEANUP(-2);
                             }
@@ -1976,6 +2438,8 @@ done_with_flags:
                                 state.flags |= PRINTF_STATE_ADD_0X;
 
                             break;
+                        case 'a':
+                        case 'A':
                         case 'f':
                         case 'F':
                         case 'e':
@@ -2055,22 +2519,22 @@ done_with_flags:
                     /* if right aligned, output field fill */
                     if (!(fmt_flags & PRINTF_FLAG_MINUS)) /* right-align field */ {
                         for (; fillCount; --fillCount)
-                            if (io_putc(' ', io) == EOF)
+                            if (io_putc_internal(' ', io) == EOF)
                                 CLEANUP(-1);
                     }
 
                     /* add addon characters */
                     if (state.flags & PRINTF_STATE_ADD_0X) {
-                        if (io_putc('0', io) == EOF || io_putc(*fmt == 'X'? 'X': 'x', io) == EOF)
+                        if (io_putc_internal('0', io) == EOF || io_putc_internal(isupper(*fmt & 0xff)? 'X': 'x', io) == EOF)
                             CLEANUP(-1);
                     } else if (addonChar) {
-                        if (io_putc(addonChar, io) == EOF)
+                        if (io_putc_internal(addonChar, io) == EOF)
                             CLEANUP(-1);
                     }
 
                     /* output precision fill */
                     for (; precCount; --precCount)
-                        if (io_putc('0', io) == EOF)
+                        if (io_putc_internal('0', io) == EOF)
                             CLEANUP(-1);
 
                     /* output field itself */
@@ -2079,12 +2543,12 @@ done_with_flags:
 
                     /* if left aligned, output field fill (this is a NOP if field was right aligned, since fillCount is now 0) */
                     for (; fillCount; --fillCount)
-                        if (io_putc(' ', io) == EOF)
+                        if (io_putc_internal(' ', io) == EOF)
                             CLEANUP(-1);
 
                     if (state.flags & PRINTF_STATE_FREE_BUFFER)
                         FREE(state.buffer);
-                } else if (io_putc(*fmt, io) == EOF)
+                } else if (io_putc_internal(*fmt, io) == EOF)
                     return -1;
                 else
                     ++written;
@@ -2161,15 +2625,8 @@ static int io_putc_internal(int ch, IO io) {
 }
 
 int io_putc(int ch, IO io) {
-    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_WRITABLE | IO_FLAG_ERROR):
-                                                   (IO_FLAG_WRITABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ)) & io->flags) != IO_FLAG_WRITABLE)
-    {
-        io->flags |= IO_FLAG_ERROR;
-        io->error = CC_EWRITE;
+    if (io_begin_write(io))
         return EOF;
-    }
-
-    io->flags |= IO_FLAG_HAS_JUST_WRITTEN;
 
     return io_putc_internal(ch, io);
 }
@@ -2281,7 +2738,7 @@ static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO
     } while (max);
 #elif WINDOWS_OS
     do {
-        DWORD amount = max > 0xffffffffu? 0xffffffffu: max;
+        DWORD amount = max > 0xffffffffu? 0xffffffffu: (DWORD) max;
         DWORD amountRead = 0;
 
         if (!ReadFile(io->ptr, ptr, amount, &amountRead, NULL)) {
@@ -2435,16 +2892,8 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
         return 0;
     }
 
-    /* Not readable or not switched over to reading yet */
-    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_READABLE | IO_FLAG_ERROR):
-                                                   (IO_FLAG_READABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_WRITTEN)) & io->flags) != IO_FLAG_READABLE) {
-        io->flags |= IO_FLAG_ERROR;
-        if (0 == (io->flags & IO_FLAG_ERROR)) /* Don't overwrite error code if already present */
-            io->error = CC_EREAD;
+    if (io_begin_read(io))
         return 0;
-    }
-
-    io->flags |= IO_FLAG_HAS_JUST_READ;
 
     if (io->flags & IO_FLAG_BINARY)
         return io_read_internal(ptr, size, count, io);
@@ -2506,6 +2955,9 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
 
     va_copy(args_copy.args, args);
 
+    if (io_begin_read(io))
+        return EOF;
+
     for (; *fmt; ++fmt) {
         unsigned char chr = *fmt;
 
@@ -2558,7 +3010,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
             if (*fmt != '[' && *fmt != 'c' && *fmt != 'n') {
                 int chr = 0;
                 do {
-                    chr = io_getc(io);
+                    chr = io_getc_internal(io);
                 } while (chr != EOF && isspace(chr));
                 io_ungetc(chr, io);
             }
@@ -2569,27 +3021,47 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                 case 'd':
                 case 'u':
                 case 'o':
-                case 'x': {
+                case 'x':
+                case 'X': {
                     unsigned result = discardResult? io_scanf_int_no_arg(*fmt, io, fmt_width):
                                                      io_scanf_int(*fmt, io, fmt_width, fmt_len, &args_copy);
                     if (result == UINT_MAX || result == 0) {
-                        bytes += result == 0;
+                        bytes += !io_eof(io) && !io_error(io);
                         goto cleanup;
                     }
                     bytes += result;
                     break;
                 }
-                /* TODO: floating point scanning "fega" */
+                case 'f':
+                case 'F':
+                case 'e':
+                case 'E':
+                case 'g':
+                case 'G':
+                case 'a':
+                case 'A': {
+                    unsigned result = discardResult? io_scanf_float_no_arg(*fmt, io, fmt_width):
+                                                     io_scanf_float(*fmt, io, fmt_width, fmt_len, &args_copy);
+                    if (result == UINT_MAX || result == 0) {
+                        bytes += !io_eof(io) && !io_error(io);
+                        goto cleanup;
+                    }
+                    bytes += result;
+                    break;
+                }
                 case 'c': {
                     if (noWidth)
                         fmt_width = 1;
 
                     if (discardResult) {
+                        unsigned saved_width = fmt_width;
+
                         for (; fmt_width; --fmt_width) {
-                            if (io_getc(io) == EOF)
+                            if (io_getc_internal(io) == EOF)
                                 goto cleanup;
-                            ++bytes;
                         }
+
+                        bytes += saved_width;
                     } else {
                         char *cptr = va_arg(args_copy.args, char *);
                         size_t read = 0;
@@ -2607,7 +3079,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                     char *dst = discardResult? NULL: va_arg(args_copy.args, char *);
 
                     for (; fmt_width; --fmt_width) {
-                        int chr = io_getc(io);
+                        int chr = io_getc_internal(io);
                         if (chr == EOF || isspace(chr)) {
                             io_ungetc(chr, io);
                             break;
@@ -2653,7 +3125,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                     for (; fmt_width; --fmt_width) {
                         fmt = oldfmt;
 
-                        match = io_getc(io);
+                        match = io_getc_internal(io);
                         if (match == EOF)
                             break;
 
@@ -2699,6 +3171,8 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
 
                         if (cptr)
                             *cptr++ = match;
+
+                        ++bytes;
                     }
 
                     fmt = lastCharInSet + 1;
@@ -2728,7 +3202,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
             int charRead;
 
             do {
-                charRead = io_getc(io);
+                charRead = io_getc_internal(io);
                 if (charRead != EOF)
                     ++bytes;
             } while (charRead != EOF && isspace(charRead));
@@ -2743,7 +3217,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                 ++fmt; /* Skip one of two '%' characters */
 
             /* Read exact match */
-            int charRead = io_getc(io);
+            int charRead = io_getc_internal(io);
 
             if (charRead == EOF)
                 goto cleanup;
@@ -3494,16 +3968,8 @@ size_t io_write(const void *ptr, size_t size, size_t count, IO io) {
         return 0;
     }
 
-    /* Not writable or not switched over to writing yet */
-    if (((io->flags & IO_FLAG_SUPPORTS_NO_STATE_SWITCH? (IO_FLAG_WRITABLE | IO_FLAG_ERROR):
-                                                   (IO_FLAG_WRITABLE | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ)) & io->flags) != IO_FLAG_WRITABLE) {
-        io->flags |= IO_FLAG_ERROR;
-        if (0 == (io->flags & IO_FLAG_ERROR))
-            io->error = CC_EWRITE;
+    if (io_begin_write(io))
         return 0;
-    }
-
-    io->flags |= IO_FLAG_HAS_JUST_WRITTEN;
 
     if (io->flags & IO_FLAG_BINARY)
         return io_write_internal(ptr, size, count, io);

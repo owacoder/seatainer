@@ -4,8 +4,8 @@
  *  @copyright Copyright (C) 2020
  */
 
-#ifndef BUFFER_H
-#define BUFFER_H
+#ifndef IO_TBUFFER_H
+#define IO_TBUFFER_H
 
 #include "io_core.h"
 
@@ -21,4 +21,4 @@
  */
 IO io_open_thread_buffer();
 
-#endif // BUFFER_H
+#endif // IO_TBUFFER_H

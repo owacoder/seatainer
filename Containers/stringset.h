@@ -36,5 +36,6 @@ BinaryCompare stringset_get_compare_fn(StringSet set);
 void stringset_set_compare_fn(StringSet set, BinaryCompare compare);
 void stringset_clear(StringSet set);
 void stringset_destroy(StringSet set);
+CommonContainerBase *stringset_get_container_base(StringSet set);
 
 #endif // STRINGSET_H

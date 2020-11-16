@@ -12,10 +12,10 @@
 #include "binarylist.h"
 
 /* See common.c for reasoning behind this empty struct */
-struct BinarySetStruct {};
+struct BinarySetStruct {char dummy;};
 
 Variant variant_from_binaryset(BinarySet set) {
-    return variant_create_custom(set, (Compare) binaryset_compare, (Copier) binaryset_copy, (Deleter) binaryset_destroy);
+    return variant_create_custom_base(set, (Compare) binaryset_compare, (Copier) binaryset_copy, (Deleter) binaryset_destroy, *binaryset_get_container_base(set));
 }
 
 int variant_is_binaryset(Variant var) {
@@ -30,11 +30,11 @@ BinarySet variant_get_binaryset(Variant var) {
 }
 
 int variant_set_binaryset_move(Variant var, BinarySet set) {
-    return variant_set_custom_move(var, set, (Compare) binaryset_compare, (Copier) binaryset_copy, (Deleter) binaryset_destroy);
+    return variant_set_custom_move_base(var, set, (Compare) binaryset_compare, (Copier) binaryset_copy, (Deleter) binaryset_destroy, *binaryset_get_container_base(set));
 }
 
 int variant_set_binaryset(Variant var, const BinarySet set) {
-    return variant_set_custom(var, set, (Compare) binaryset_compare, (Copier) binaryset_copy, (Deleter) binaryset_destroy);
+    return variant_set_custom_base(var, set, (Compare) binaryset_compare, (Copier) binaryset_copy, (Deleter) binaryset_destroy, *binaryset_get_container_base(set));
 }
 
 BinarySet binaryset_create() {
@@ -315,4 +315,8 @@ void binaryset_clear(BinarySet set) {
 
 void binaryset_destroy(BinarySet set) {
     avltree_destroy((struct AVLTree *) set);
+}
+
+CommonContainerBase *binaryset_get_container_base(BinarySet set) {
+    return avltree_get_container_base((struct AVLTree *) set);
 }

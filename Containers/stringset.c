@@ -12,10 +12,10 @@
 #include "stringlist.h"
 
 /* See common.c for reasoning behind this empty struct */
-struct StringSetStruct {};
+struct StringSetStruct {char dummy;};
 
 Variant variant_from_stringset(StringSet set) {
-    return variant_create_custom(set, (Compare) stringset_compare, (Copier) stringset_copy, (Deleter) stringset_destroy);
+    return variant_create_custom_base(set, (Compare) stringset_compare, (Copier) stringset_copy, (Deleter) stringset_destroy, *stringset_get_container_base(set));
 }
 
 int variant_is_stringset(Variant var) {
@@ -30,11 +30,11 @@ StringSet variant_get_stringset(Variant var) {
 }
 
 int variant_set_stringset_move(Variant var, StringSet set) {
-    return variant_set_custom_move(var, set, (Compare) stringset_compare, (Copier) stringset_copy, (Deleter) stringset_destroy);
+    return variant_set_custom_move_base(var, set, (Compare) stringset_compare, (Copier) stringset_copy, (Deleter) stringset_destroy, *stringset_get_container_base(set));
 }
 
 int variant_set_stringset(Variant var, StringSet set) {
-    return variant_set_custom(var, set, (Compare) stringset_compare, (Copier) stringset_copy, (Deleter) stringset_destroy);
+    return variant_set_custom_base(var, set, (Compare) stringset_compare, (Copier) stringset_copy, (Deleter) stringset_destroy, *stringset_get_container_base(set));
 }
 
 StringSet stringset_create() {
@@ -138,4 +138,8 @@ void stringset_clear(StringSet set) {
 
 void stringset_destroy(StringSet set) {
     binaryset_destroy((BinarySet) set);
+}
+
+CommonContainerBase *stringset_get_container_base(StringSet set) {
+    return binaryset_get_container_base((BinarySet) set);
 }

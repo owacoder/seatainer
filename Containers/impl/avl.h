@@ -42,5 +42,6 @@ struct AVLNode *avltree_delete(struct AVLTree *tree, const char *key, size_t key
 int avltree_compare(struct AVLTree *left, struct AVLTree *right);
 void avltree_clear(struct AVLTree *tree);
 size_t avltree_size(struct AVLTree *tree);
+CommonContainerBase *avltree_get_container_base(struct AVLTree *tree);
 
 #endif /* AVL_H */

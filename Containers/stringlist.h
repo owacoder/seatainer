@@ -10,11 +10,11 @@
 #include "common.h"
 
 /* The Compare function for a StringList is `int (*)(const char *, const char *)` */
-Variant variant_from_stringlist(StringList map);
+Variant variant_from_stringlist(StringList list);
 int variant_is_stringlist(Variant var);
 StringList variant_get_stringlist(Variant var);
-int variant_set_stringlist(Variant var, const StringList set);
-int variant_set_stringlist_move(Variant var, StringList set);
+int variant_set_stringlist(Variant var, const StringList list);
+int variant_set_stringlist_move(Variant var, StringList list);
 StringList stringlist_create();
 StringList stringlist_create_custom(StringCompare compare);
 StringList stringlist_create_reserve(size_t reserve, StringCompare compare);
@@ -67,5 +67,6 @@ void stringlist_set_compare_fn(StringList list, StringCompare compare);
 void stringlist_clear(StringList list);
 void stringlist_destroy(StringList list);
 char *stringlist_join(StringList list, const char *separator);
+CommonContainerBase *stringlist_get_container_base(StringList list);
 
 #endif // STRINGLIST_H

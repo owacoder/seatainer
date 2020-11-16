@@ -12,6 +12,7 @@
 #include "genericmap.h"
 
 struct GenericListStruct {
+    CommonContainerBase base;
     void **array;
     Compare compare;
     Copier copy;
@@ -20,12 +21,16 @@ struct GenericListStruct {
     size_t array_capacity;
 };
 
-Variant variant_from_genericlist(GenericList set) {
-    return variant_create_custom(set, (Compare) genericlist_compare, (Copier) genericlist_copy, (Deleter) genericlist_destroy);
+Variant variant_from_genericlist(GenericList list) {
+    return variant_create_custom_base(list, (Compare) genericlist_compare, (Copier) genericlist_copy, (Deleter) genericlist_destroy, *genericlist_get_container_base(list));
 }
 
 int variant_is_genericlist(Variant var) {
     return variant_get_copier_fn(var) == (Copier) genericlist_copy;
+}
+
+int variant_is_variantlist(Variant var) {
+    return variant_is_genericlist(var) && genericlist_get_copier_fn((GenericList) variant_get_custom(var)) == (Copier) variant_copy;
 }
 
 GenericList variant_get_genericlist(Variant var) {
@@ -35,12 +40,12 @@ GenericList variant_get_genericlist(Variant var) {
     return variant_get_custom(var);
 }
 
-int variant_set_genericlist_move(Variant var, GenericList set) {
-    return variant_set_custom_move(var, set, (Compare) genericlist_compare, (Copier) genericlist_copy, (Deleter) genericlist_destroy);
+int variant_set_genericlist_move(Variant var, GenericList list) {
+    return variant_set_custom_move_base(var, list, (Compare) genericlist_compare, (Copier) genericlist_copy, (Deleter) genericlist_destroy, *genericlist_get_container_base(list));
 }
 
-int variant_set_genericlist(Variant var, const GenericList set) {
-    return variant_set_custom(var, set, (Compare) genericlist_compare, (Copier) genericlist_copy, (Deleter) genericlist_destroy);
+int variant_set_genericlist(Variant var, const GenericList list) {
+    return variant_set_custom_base(var, list, (Compare) genericlist_compare, (Copier) genericlist_copy, (Deleter) genericlist_destroy, *genericlist_get_container_base(list));
 }
 
 GenericList genericlist_create(Compare compare, Copier copy, Deleter deleter) {
@@ -769,4 +774,8 @@ void genericlist_destroy(GenericList list) {
         FREE(list->array);
         FREE(list);
     }
+}
+
+CommonContainerBase *genericlist_get_container_base(GenericList list) {
+    return &list->base;
 }

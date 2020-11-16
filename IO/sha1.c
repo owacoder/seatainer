@@ -373,7 +373,7 @@ static size_t sha1_read(void *ptr, size_t size, size_t count, void *userdata, IO
     u32cpy_be(&state[16], sha1->state[4]);
 
     memcpy(ptr, state + sha1->read, max);
-    usersha1->read += max;
+    usersha1->read += (int) max;
 
     return max / size;
 }

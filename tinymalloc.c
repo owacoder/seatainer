@@ -136,7 +136,7 @@ void *tiny_realloc(void *ptr, size_t size) {
     size_t available = tiny_space_available_after_block(header);
 
     if (header->size + available >= size) {
-        header->size = size;
+        header->size = (unsigned int) size;
         return ptr;
     }
 
@@ -174,8 +174,8 @@ void *tiny_malloc(size_t size) {
 #endif
 
             newHeader->nextBlock = first->nextBlock;
-            newHeader->size = size;
-            first->nextBlock = (unsigned char *) newHeader - tiny_pool;
+            newHeader->size = (unsigned int) size;
+            first->nextBlock = (unsigned int) ((unsigned char *) newHeader - tiny_pool);
 
 #ifdef TINY_DEBUG
             printf("\nAllocated at %p\n", newHeader->data);

@@ -247,6 +247,8 @@ struct InputOutputDeviceCallbacks {
      *    - IO_DynamicBuffer: "dynamic_buffer"
      *    - IO_Custom: "custom"
      *
+     * By convention, the returned string is normally lowercase.
+     *
      * @param userdata The userdata stored in @p io.
      * @param io The IO device being closed. Reads from or writes to the device are allowed.
      * @return A machine-friendly string identifying the type of the IO device.
@@ -546,7 +548,21 @@ int io_getc(IO io);
  */
 int io_getpos(IO io, IO_Pos *pos);
 
+/** @brief Reads up to @p num characters from @p io, stopping if a newline or EOF is reached.
+ *
+ * @param str The buffer to read into. This only needs to be as large as @p num, since only num-1 characters are written at most. The final character is a terminating NUL.
+ * @param num The maximum number of characters to read. The maximum number of characters that will be consumed is equal to num-1.
+ * @param io The IO device to read from.
+ * @return Equal to @p str on success, NULL if an error occurred while reading or if no data was read.
+ */
 char *io_gets(char *str, int num, IO io);
+
+/** @brief Opens a file with the provided mode.
+ *
+ * @param The name of the local file to open.
+ * @param mode The mode with which to open the file.
+ * @return A new IO device referencing the opened file, or NULL if an error occurred.
+ */
 IO io_open(const char *filename, const char *mode);
 /* If `mode` contains "@ncp" on Windows, the [n]ative [c]ode [p]age is used, instead of UTF-8 */
 IO io_open_native(const char *filename, const char *mode);
@@ -662,7 +678,25 @@ int io_puts(const char *str, IO io);
  * @return The number of elements successfully read.
  */
 size_t io_read(void *ptr, size_t size, size_t count, IO io);
+
+/** @brief Sets a read timeout for an IO device
+ *
+ * This function only applies to platform-defined networking sockets.
+ *
+ * @param io The IO device that is being operated on.
+ * @param usecs The number of microseconds to timeout after attempting a read.
+ * @return 0 on success, an error code if something went wrong.
+ */
 int io_set_read_timeout(IO io, long long usecs);
+
+/** @brief Sets a write timeout for an IO device
+ *
+ * This function only applies to platform-defined networking sockets.
+ *
+ * @param io The IO device that is being operated on.
+ * @param usecs The number of microseconds to timeout after attempting a write.
+ * @return 0 on success, an error code if something went wrong.
+ */
 int io_set_write_timeout(IO io, long long usecs);
 long long io_read_timeout(IO io);
 long long io_write_timeout(IO io);

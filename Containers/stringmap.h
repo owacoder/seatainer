@@ -12,8 +12,8 @@
 Variant variant_from_stringmap(StringMap map);
 int variant_is_stringmap(Variant var);
 StringMap variant_get_stringmap(Variant var);
-int variant_set_stringmap(Variant var, const StringMap set);
-int variant_set_stringmap_move(Variant var, StringMap set);
+int variant_set_stringmap(Variant var, const StringMap map);
+int variant_set_stringmap_move(Variant var, StringMap map);
 StringMap stringmap_create();
 StringMap stringmap_create_custom(BinaryCompare compare, StringCompare value_compare);
 StringMap stringmap_copy(StringMap other);
@@ -40,5 +40,6 @@ StringCompare stringmap_get_value_compare_fn(StringMap map);
 void stringmap_set_value_compare_fn(StringMap map, StringCompare compare);
 void stringmap_clear(StringMap map);
 void stringmap_destroy(StringMap map);
+CommonContainerBase *stringmap_get_container_base(StringMap map);
 
 #endif // STRINGMAP_H

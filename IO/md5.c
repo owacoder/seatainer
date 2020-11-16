@@ -193,7 +193,7 @@ static size_t md5_read(void *ptr, size_t size, size_t count, void *userdata, IO 
     u32cpy_le(&state[12], md5->state[3]);
 
     memcpy(ptr, state + md5->read, max);
-    md5->read += max;
+    md5->read += (int) max;
 
     return max;
 }

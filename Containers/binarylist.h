@@ -10,11 +10,11 @@
 #include "common.h"
 
 /* If binary data is passed to a function that adopts the allocated data (e.g. the `move` functions), the user MUST ensure that data[length] == 0 */
-Variant variant_from_binarylist(BinaryList map);
+Variant variant_from_binarylist(BinaryList list);
 int variant_is_binarylist(Variant var);
 BinaryList variant_get_binarylist(Variant var);
-int variant_set_binarylist(Variant var, const BinaryList set);
-int variant_set_binarylist_move(Variant var, BinaryList set);
+int variant_set_binarylist(Variant var, const BinaryList list);
+int variant_set_binarylist_move(Variant var, BinaryList list);
 BinaryList binarylist_create();
 BinaryList binarylist_create_custom(BinaryCompare compare);
 BinaryList binarylist_create_reserve(size_t reserve, BinaryCompare compare);
@@ -69,5 +69,6 @@ BinaryCompare binarylist_get_compare_fn(BinaryList list);
 void binarylist_set_compare_fn(BinaryList list, BinaryCompare compare);
 void binarylist_clear(BinaryList list);
 void binarylist_destroy(BinaryList list);
+CommonContainerBase *binarylist_get_container_base(BinaryList list);
 
 #endif // BINARYLIST_H

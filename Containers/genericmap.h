@@ -11,9 +11,10 @@
 
 Variant variant_from_genericmap(GenericMap map);
 int variant_is_genericmap(Variant var);
+int variant_is_variantmap(Variant var);
 GenericMap variant_get_genericmap(Variant var);
-int variant_set_genericmap(Variant var, const GenericMap set);
-int variant_set_genericmap_move(Variant var, GenericMap set);
+int variant_set_genericmap(Variant var, const GenericMap map);
+int variant_set_genericmap_move(Variant var, GenericMap map);
 GenericMap genericmap_create(BinaryCompare key_compare, Compare value_compare, Copier copy, Deleter deleter);
 GenericMap genericmap_copy(GenericMap other);
 int genericmap_insert_move(GenericMap map, const char *key, size_t key_len, void *item);
@@ -42,5 +43,6 @@ Deleter genericmap_get_deleter_fn(GenericMap map);
 void genericmap_set_deleter_fn(GenericMap map, Deleter deleter);
 void genericmap_clear(GenericMap map);
 void genericmap_destroy(GenericMap map);
+CommonContainerBase *genericmap_get_container_base(GenericMap map);
 
 #endif // GENERICMAP_H

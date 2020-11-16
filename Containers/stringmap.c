@@ -7,14 +7,17 @@
 #include "stringmap.h"
 #include "genericmap.h"
 
+/* For strdup */
+#include "../utility.h"
+
 /* For conversions */
 #include "variant.h"
 
 /* See common.c for reasoning behind this empty struct */
-struct StringMapStruct {};
+struct StringMapStruct {char dummy;};
 
-Variant variant_from_stringmap(StringMap set) {
-    return variant_create_custom(set, (Compare) stringmap_compare, (Copier) stringmap_copy, (Deleter) stringmap_destroy);
+Variant variant_from_stringmap(StringMap map) {
+    return variant_create_custom_base(map, (Compare) stringmap_compare, (Copier) stringmap_copy, (Deleter) stringmap_destroy, *stringmap_get_container_base(map));
 }
 
 int variant_is_stringmap(Variant var) {
@@ -28,12 +31,12 @@ StringMap variant_get_stringmap(Variant var) {
     return variant_get_custom(var);
 }
 
-int variant_set_stringmap_move(Variant var, StringMap set) {
-    return variant_set_custom_move(var, set, (Compare) stringmap_compare, (Copier) stringmap_copy, (Deleter) stringmap_destroy);
+int variant_set_stringmap_move(Variant var, StringMap map) {
+    return variant_set_custom_move_base(var, map, (Compare) stringmap_compare, (Copier) stringmap_copy, (Deleter) stringmap_destroy, *stringmap_get_container_base(map));
 }
 
-int variant_set_stringmap(Variant var, const StringMap set) {
-    return variant_set_custom(var, set, (Compare) stringmap_compare, (Copier) stringmap_copy, (Deleter) stringmap_destroy);
+int variant_set_stringmap(Variant var, const StringMap map) {
+    return variant_set_custom_base(var, map, (Compare) stringmap_compare, (Copier) stringmap_copy, (Deleter) stringmap_destroy, *stringmap_get_container_base(map));
 }
 
 StringMap stringmap_create() {
@@ -172,4 +175,8 @@ void stringmap_clear(StringMap map) {
 
 void stringmap_destroy(StringMap map) {
     genericmap_destroy((GenericMap) map);
+}
+
+CommonContainerBase *stringmap_get_container_base(StringMap map) {
+    return genericmap_get_container_base((GenericMap) map);
 }

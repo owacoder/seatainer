@@ -15,14 +15,15 @@
 #include "stringmap.h"
 
 struct BinaryListStruct {
+    CommonContainerBase base;
     Binary *array;
     BinaryCompare compare;
     size_t array_size;
     size_t array_capacity;
 };
 
-Variant variant_from_binarylist(BinaryList set) {
-    return variant_create_custom(set, (Compare) binarylist_compare, (Copier) binarylist_copy, (Deleter) binarylist_destroy);
+Variant variant_from_binarylist(BinaryList list) {
+    return variant_create_custom_base(list, (Compare) binarylist_compare, (Copier) binarylist_copy, (Deleter) binarylist_destroy, *binarylist_get_container_base(list));
 }
 
 int variant_is_binarylist(Variant var) {
@@ -36,12 +37,12 @@ BinaryList variant_get_binarylist(Variant var) {
     return variant_get_custom(var);
 }
 
-int variant_set_binarylist_move(Variant var, BinaryList set) {
-    return variant_set_custom_move(var, set, (Compare) binarylist_compare, (Copier) binarylist_copy, (Deleter) binarylist_destroy);
+int variant_set_binarylist_move(Variant var, BinaryList list) {
+    return variant_set_custom_move_base(var, list, (Compare) binarylist_compare, (Copier) binarylist_copy, (Deleter) binarylist_destroy, *binarylist_get_container_base(list));
 }
 
-int variant_set_binarylist(Variant var, const BinaryList set) {
-    return variant_set_custom(var, set, (Compare) binarylist_compare, (Copier) binarylist_copy, (Deleter) binarylist_destroy);
+int variant_set_binarylist(Variant var, const BinaryList list) {
+    return variant_set_custom_base(var, list, (Compare) binarylist_compare, (Copier) binarylist_copy, (Deleter) binarylist_destroy, *binarylist_get_container_base(list));
 }
 
 static int binarylist_grow(BinaryList list, size_t added) {
@@ -901,4 +902,8 @@ void binarylist_destroy(BinaryList list) {
         FREE(list->array);
         FREE(list);
     }
+}
+
+CommonContainerBase *binarylist_get_container_base(BinaryList list) {
+    return &list->base;
 }

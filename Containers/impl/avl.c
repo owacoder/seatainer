@@ -14,6 +14,7 @@ typedef struct AVLNode {
 } AVLNode;
 
 typedef struct AVLTree {
+    CommonContainerBase base;
     struct AVLNode *root;
     BinaryCompare key_compare;
     Compare value_compare;
@@ -646,4 +647,8 @@ void avltree_clear(AVLTree *tree) {
 
 size_t avltree_size(AVLTree *tree) {
     return tree->size;
+}
+
+CommonContainerBase *avltree_get_container_base(AVLTree *tree) {
+    return &tree->base;
 }

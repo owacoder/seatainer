@@ -278,6 +278,11 @@ Directory dir_open_with_mode(const char *dir, const char *mode, enum DirectoryFi
  * @return The UTF-8 path of @p dir, including the terminating path separator.
  */
 const char *dir_path(Directory dir);
+#if WINDOWS_OS
+const char *dir_path_unc(Directory dir);
+LPCWSTR dir_path_wide_unc(Directory dir);
+LPCWSTR dir_path_wide(Directory dir);
+#endif
 
 /** @brief Returns zero if no error occured while opening the directory, or an IO error otherwise
  *
@@ -360,6 +365,11 @@ void dirent_close(DirectoryEntry entry);
  * @return The UTF-8 path of @p entry, including the trailing path separator.
  */
 const char *dirent_path(DirectoryEntry entry);
+#if WINDOWS_OS
+const char *dirent_path_unc(DirectoryEntry entry);
+LPCWSTR dirent_path_wide(DirectoryEntry entry);
+LPCWSTR dirent_path_wide_unc(DirectoryEntry entry);
+#endif
 
 /** @brief Returns the full UTF-8 path of the directory entry, including the entry name.
  *
@@ -367,6 +377,11 @@ const char *dirent_path(DirectoryEntry entry);
  * @return The complete UTF-8 path of @p entry, including the name of the entry.
  */
 const char *dirent_fullname(DirectoryEntry entry);
+#if WINDOWS_OS
+const char *dirent_fullname_unc(DirectoryEntry entry);
+LPCWSTR dirent_fullname_wide(DirectoryEntry entry);
+LPCWSTR dirent_fullname_wide_unc(DirectoryEntry entry);
+#endif
 
 /** @brief Returns the UTF-8 name of the directory entry, without any part of the path.
  *
@@ -374,6 +389,9 @@ const char *dirent_fullname(DirectoryEntry entry);
  * @return The UTF-8 name of @p entry. No part of the path is returned.
  */
 const char *dirent_name(DirectoryEntry entry);
+#if WINDOWS_OS
+LPCWSTR dirent_name_wide(DirectoryEntry entry);
+#endif
 
 /** @brief Returns the size of the directory entry in bytes.
  *
@@ -395,6 +413,16 @@ int dirent_exists(DirectoryEntry entry);
  * @return 0 on success, or what error occured on failure.
  */
 int dirent_refresh(DirectoryEntry entry);
+
+/** @brief Attempts to delete the directory entry from disk.
+ *
+ * Attempts to delete directories with something in them will fail unless @p recursive is non-zero.
+ *
+ * @param entry The entry to delete, either a directory or a file on disk
+ * @param recursive Whether to force deleting of a directory that still has contents.
+ * @return 0 on success, or what error occured on failure.
+ */
+int dirent_remove(DirectoryEntry entry, int recursive);
 
 /* Flags to describe the directory entry attributes */
 #if WINDOWS_OS
@@ -431,6 +459,7 @@ int dirent_is_symlink(DirectoryEntry entry);
 int dirent_is_system(DirectoryEntry entry);
 int dirent_is_temporary(DirectoryEntry entry);
 
+unsigned long dirent_get_attributes(DirectoryEntry entry);
 int dirent_set_attributes(DirectoryEntry entry, unsigned long attributes);
 
 /* Obtain the local time of file traits */

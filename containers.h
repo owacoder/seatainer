@@ -9,6 +9,7 @@
 
 #include "Containers/binarylist.h"
 #include "Containers/binaryset.h"
+#include "Containers/sbuffer.h"
 #include "Containers/genericlist.h"
 #include "Containers/genericmap.h"
 #include "Containers/stringlist.h"

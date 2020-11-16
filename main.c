@@ -23,7 +23,7 @@
 #include "IO/padding/pkcs7.h"
 #include "IO/repeat.h"
 #include "IO/limiter.h"
-#include "IO/buffer.h"
+#include "IO/tbuffer.h"
 #include "IO/base64.h"
 
 void test_io() {
@@ -226,6 +226,7 @@ void walk_dir(IO out, Directory directory) {
 #include <stdlib.h>
 
 #include "containers.h"
+#include "container_io.h"
 
 int printer(void *arg) {
     int value = *((int *) arg);
@@ -234,8 +235,70 @@ int printer(void *arg) {
     return value;
 }
 
+#include <math.h>
+
+void json() {
+    GenericMap map = genericmap_create(binary_compare, variant_compare, variant_copy, variant_destroy);
+    Variant v = variant_create_custom_move(map, genericmap_compare, genericmap_copy, genericmap_destroy);
+
+    genericmap_insert_move(map, "test1", 5, variant_create_boolean(1));
+    genericmap_insert_move(map, "test2", 5, variant_create_string("This is a value\"\b"));
+    genericmap_insert_move(map, "test3", 5, variant_create_string("Hi to you too!"));
+
+    *variant_get_container_base(v) = build_container_base(NULL, json_serialize_variant, 1);
+
+    IO out = io_open_file(stdout);
+    printf("\nJSON error: %s\n", error_description(variant_serialize(out, v, NULL)));
+}
+
 int main(int argc, char **argv, const char **envp)
 {
+    if (1) {
+        json();
+        return 0;
+    }
+
+    if (1)
+    {
+        DirectoryEntry entry = dirent_open("\\\\OLIVER-CODE\\Fast/Test_Data/Test - Copy");
+        //DirectoryEntry entry = dirent_open("Y:/Test_Data/Test - Copy");
+
+        printf("Item: %s\nExists: %s\n", dirent_fullname(entry), dirent_exists(entry)? "yes": "no");
+        printf("Result: %s\n", error_description(dirent_remove(entry, 1)));
+        return 0;
+    }
+
+    if (0)
+    {
+        IO out = io_open_file(stdout);
+        io_printf(out, "%g\n", NAN);
+        return 0;
+    }
+
+    {
+        const char *test = "-inf";
+        IO io = io_open_cstring(test, "rb");
+        float result1 = 0, result2 = 0;
+        char c1 = 0, c2 = 0;
+        printf("String: %s\nResult sscanf(): %d\nResult io_scanf(): %d\n", test, sscanf(test, "%g%1c", &result1, &c1), io_scanf(io, "%g%1c", &result2, &c2));
+        printf("Value sscanf(): %g, %c\nValue io_scanf(): %g, %c\n", result1, c1, result2, c2);
+        return 0;
+    }
+
+    {
+        IO cstrio = io_open_cstring("First\r\nSecond\r\nThird\r\nFourth\r\n", "r");
+
+        StringList cstrlist = stringlist_split_io(cstrio, "\n", 1);
+
+        for (size_t i = 0; i < stringlist_size(cstrlist); ++i) {
+            printf("Item %u: '%s'\n", (unsigned) i, stringlist_array(cstrlist)[i]);
+        }
+
+        stringlist_destroy(cstrlist);
+        io_close(cstrio);
+        return 0;
+    }
+
     {
         StringList list = stringlist_split("How are you doing  all today", " ", 1);
 
@@ -332,9 +395,6 @@ int main(int argc, char **argv, const char **envp)
         stringset_remove(set, "Q");
         //stringset_remove(set, "I");
         //stringset_remove(set, "P");
-
-        avltree_print(set);
-        printf("Valid AVL tree: %d\n", avltree_is_avl(set));
 
         StringSet copy = stringset_copy(set);
 

@@ -149,7 +149,7 @@ static const struct InputOutputDeviceCallbacks limiter_callbacks = {
 };
 
 IO io_open_limiter(IO io, long long offset, long long length, const char *mode) {
-    struct Limiter *limiter = MALLOC(sizeof(*limiter));
+    struct Limiter *limiter = CALLOC(1, sizeof(*limiter));
     if (limiter == NULL)
         return NULL;
 

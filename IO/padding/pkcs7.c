@@ -103,7 +103,8 @@ size_t pkcs7_padding_encode_read(void *ptr, size_t size, size_t count, void *use
 
         size_t more = padding->written % padding->block_size;
         if (padding->pad_value < 0) {
-            more = padding->pad_value = padding->block_size - padding->written % padding->block_size;
+            more = padding->block_size - padding->written % padding->block_size;
+            padding->pad_value = (int) more;
         }
 
         more = more > max? max: more;
@@ -166,7 +167,7 @@ size_t pkcs7_padding_decode_read(void *ptr, size_t size, size_t count, void *use
                 goto cleanup;
 
             /* Ensure that all padding actually is set to the correct value */
-            for (pos = padding->block_size - 1; i < pad_value; ++i, --pos) {
+            for (pos = (int) padding->block_size - 1; i < pad_value; ++i, --pos) {
                 if (padding->buffer[pos] != pad_value)
                     goto cleanup;
             }
