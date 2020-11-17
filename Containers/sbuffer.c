@@ -6,6 +6,7 @@
 
 #include "sbuffer.h"
 #include "utility.h"
+#include <limits.h>
 
 void buffer_init(Buffer *buf) {
     memset(buf, 0, sizeof(*buf));

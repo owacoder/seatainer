@@ -404,7 +404,7 @@ int json_serialize_variant(IO output, Variant data, struct SerializerIdentity *t
         case VariantUnsignedInteger: io_printf(output, "%llu", variant_get_uint64(data)); return io_error(output);
         case VariantFloat: {
             double flt = variant_get_float(data);
-            if (fabs(flt) == INFINITY || isnan(flt))
+            if (fabs(flt) == (double) INFINITY || isnan(flt))
                 return CC_ENOTSUP;
 
             int err;
@@ -805,7 +805,7 @@ int serialize_variant_was_serialized(IO output, const Variant data, const char *
                 return 1;
             }
 
-            /* - Expects a variant, but outputs a different format. We need to run the serializer anyway, or
+            /* - Expects a variant, but outputs a different format. We need to run the serializer anyway, or */
             /* - Expects raw data from variant. Outputs in a different format, so we need to run the serializer */
             error = variant_serialize(sub_output, data, NULL);
 

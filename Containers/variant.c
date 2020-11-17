@@ -833,7 +833,7 @@ double variant_to_float(Variant var, int *error) {
 
             return (double) var->d.atom.d.integer;
         case VariantUnsignedInteger:
-            if ((unsigned long long) (double) var->d.atom.d.integer != var->d.atom.d.integer) {
+            if ((unsigned long long) (double) var->d.atom.d.unsigned_integer != var->d.atom.d.unsigned_integer) {
                 if (error)
                     *error = CC_ERANGE;
                 return 0.0;

@@ -5,6 +5,7 @@
  */
 
 #include "common.h"
+#include <stdint.h>
 
 /* These structs really aren't used at all, they're just present to emit compiler warnings if assigning one container type to another.
  * Custom extensions of the generic types should use the same pattern:
@@ -39,7 +40,7 @@ CommonContainerBase build_container_base(Parser parse, Serializer serialize, int
     CommonContainerBase base = {
         .parse = parse,
         .serialize = serialize,
-        .cvt_expects_variant = cvt_expects_variant
+        .cvt_expects_variant = !!cvt_expects_variant
     };
 
     return base;

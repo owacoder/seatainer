@@ -1940,7 +1940,7 @@ static unsigned io_scanf_float_f(IO io, unsigned width, float *f) {
         io_ungetc(chr, io);
     }
 
-finish:
+finish: ;
     /* Assign to float and return error if bad parsing */
     char *end;
     float val = strtof(buffer.data, &end);
@@ -2055,7 +2055,7 @@ static unsigned io_scanf_float_d(IO io, unsigned width, double *f) {
         io_ungetc(chr, io);
     }
 
-finish:
+finish: ;
     /* Assign to float and return error if bad parsing */
     char *end;
     double val = strtod(buffer.data, &end);
@@ -2169,7 +2169,7 @@ static unsigned io_scanf_float_ld(IO io, unsigned width, long double *f) {
         io_ungetc(chr, io);
     }
 
-finish:
+finish: ;
     /* Assign to float and return error if bad parsing */
     char *end;
     long double val = strtold(buffer.data, &end);
