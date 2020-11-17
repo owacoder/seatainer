@@ -23,8 +23,9 @@ struct ProcessListStruct {
 
 struct ProcessStruct {
     ProcessNativeHandle info;
-    int fdStdin, fdStdout, fdStderr;
+    int nativeStdin, nativeStdout, nativeStderr;
     IO ioStdin, ioStdout, ioStderr;
+    IO publicStdin, publicStdout, publicStderr;
     int error;
 };
 
@@ -129,8 +130,9 @@ struct ProcessListStruct {
 
 struct ProcessStruct {
     ProcessNativeHandle info;
-    HANDLE hStdin, hStdout, hStderr;
-    IO ioStdin, ioStdout, ioStderr;
+    HANDLE nativeStdin, nativeStdout, nativeStderr; /* Internal IO handles used by ioStdin, ioStdout, ioStderr */
+    IO ioStdin, ioStdout, ioStderr; /* Internal IO devices that don't clean up the Process struct when just using io_close(), used by publicStdin, publicStdout, publicStderr */
+    IO publicStdin, publicStdout, publicStderr; /* Public-facing IO devices that handle cleanup properly when just using io_close() */
     int error;
 };
 
@@ -324,6 +326,249 @@ static void register_proc_funcs() {
 
 }
 #endif
+
+static int process_stdin_io_write(void *data, size_t size, size_t count, void *userdata, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+    return io_write(data, size, count, process->ioStdin);
+}
+
+static int process_stdin_io_close(void *userdata, IO io) {
+    struct ProcessStruct *p = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+#if LINUX_OS
+    if (p->nativeStdin >= 0) {
+        p->publicStdin = NULL;
+        io_close(p->ioStdin);
+        p->ioStdin = NULL;
+        close(p->nativeStdin);
+        p->nativeStdin = -1;
+    }
+#else
+    if (p->nativeStdin) {
+        p->publicStdin = NULL;
+        io_close(p->ioStdin);
+        p->ioStdin = NULL;
+        CloseHandle(p->nativeStdin);
+        p->nativeStdin = NULL;
+    }
+#endif
+    return 0;
+}
+
+static int process_stdin_io_flush(void *userdata, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+    return io_flush(process->ioStdin);
+}
+
+static void process_stdin_io_clearerr(void *userdata, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+    io_clearerr(process->ioStdin);
+}
+
+static long long process_stdin_io_tell64(void *userdata, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+    return io_tell64(process->ioStdin);
+}
+
+static int process_stdin_io_seek64(void *userdata, long long offset, int origin, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+
+    return io_seek64(process->ioStdin, offset, origin);
+}
+
+static const char *process_stdin_io_what(void *userdata, IO io) {
+    UNUSED(userdata)
+    UNUSED(io)
+
+    return "process_stdin";
+}
+
+static const struct InputOutputDeviceCallbacks process_stdin_io_callbacks = {
+    .read = NULL,
+    .write = process_stdin_io_write,
+    .open = NULL,
+    .close = process_stdin_io_close,
+    .flush = process_stdin_io_flush,
+    .clearerr = process_stdin_io_clearerr,
+    .stateSwitch = NULL,
+    .tell = NULL,
+    .tell64 = process_stdin_io_tell64,
+    .seek = NULL,
+    .seek64 = process_stdin_io_seek64,
+    .flags = NULL,
+    .what = process_stdin_io_what
+};
+
+static int process_stdout_io_read(void *data, size_t size, size_t count, void *userdata, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+    return io_read(data, size, count, process->ioStdout);
+}
+
+static int process_stdout_io_close(void *userdata, IO io) {
+    struct ProcessStruct *p = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+#if LINUX_OS
+    if (p->nativeStdout >= 0) {
+        p->publicStdout = NULL;
+        io_close(p->ioStdout);
+        p->ioStdout = NULL;
+        close(p->nativeStdout);
+        p->nativeStdout = -1;
+    }
+#else
+    if (p->nativeStdout) {
+        p->publicStdout = NULL;
+        io_close(p->ioStdout);
+        p->ioStdout = NULL;
+        CloseHandle(p->nativeStdout);
+        p->nativeStdout = NULL;
+    }
+#endif
+    return 0;
+}
+
+static int process_stdout_io_flush(void *userdata, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+    return io_flush(process->ioStdout);
+}
+
+static void process_stdout_io_clearerr(void *userdata, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+    io_clearerr(process->ioStdout);
+}
+
+static long long process_stdout_io_tell64(void *userdata, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+    return io_tell64(process->ioStdout);
+}
+
+static int process_stdout_io_seek64(void *userdata, long long offset, int origin, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+
+    return io_seek64(process->ioStdout, offset, origin);
+}
+
+static const char *process_stdout_io_what(void *userdata, IO io) {
+    UNUSED(userdata)
+    UNUSED(io)
+
+    return "process_stdout";
+}
+
+static const struct InputOutputDeviceCallbacks process_stdout_io_callbacks = {
+    .read = process_stdout_io_read,
+    .write = NULL,
+    .open = NULL,
+    .close = process_stdout_io_close,
+    .flush = process_stdout_io_flush,
+    .clearerr = process_stdout_io_clearerr,
+    .stateSwitch = NULL,
+    .tell = NULL,
+    .tell64 = process_stdout_io_tell64,
+    .seek = NULL,
+    .seek64 = process_stdout_io_seek64,
+    .flags = NULL,
+    .what = process_stdout_io_what
+};
+
+static int process_stderr_io_read(void *data, size_t size, size_t count, void *userdata, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+    return io_read(data, size, count, process->ioStderr);
+}
+
+static int process_stderr_io_close(void *userdata, IO io) {
+    struct ProcessStruct *p = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+#if LINUX_OS
+    if (p->nativeStderr >= 0) {
+        p->publicStderr = NULL;
+        io_close(p->ioStderr);
+        p->ioStderr = NULL;
+        close(p->nativeStderr);
+        p->nativeStderr = -1;
+    }
+#else
+    if (p->nativeStderr) {
+        p->publicStderr = NULL;
+        io_close(p->ioStderr);
+        p->ioStderr = NULL;
+        CloseHandle(p->nativeStderr);
+        p->nativeStderr = NULL;
+    }
+#endif
+    return 0;
+}
+
+static int process_stderr_io_flush(void *userdata, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+    return io_flush(process->ioStderr);
+}
+
+static void process_stderr_io_clearerr(void *userdata, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+    io_clearerr(process->ioStderr);
+}
+
+static long long process_stderr_io_tell64(void *userdata, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
+
+    return io_tell64(process->ioStderr);
+}
+
+static int process_stderr_io_seek64(void *userdata, long long offset, int origin, IO io) {
+    struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+
+    return io_seek64(process->ioStderr, offset, origin);
+}
+
+static const char *process_stderr_io_what(void *userdata, IO io) {
+    UNUSED(userdata)
+    UNUSED(io)
+
+    return "process_stderr";
+}
+
+static const struct InputOutputDeviceCallbacks process_stderr_io_callbacks = {
+    .read = process_stderr_io_read,
+    .write = NULL,
+    .open = NULL,
+    .close = process_stderr_io_close,
+    .flush = process_stderr_io_flush,
+    .clearerr = process_stderr_io_clearerr,
+    .stateSwitch = NULL,
+    .tell = NULL,
+    .tell64 = process_stderr_io_tell64,
+    .seek = NULL,
+    .seek64 = process_stderr_io_seek64,
+    .flags = NULL,
+    .what = process_stderr_io_what
+};
 
 int process_start_sync(const char *process, const char * const args[], int *exit_status) {
     const char * const temp_args[] = {process, NULL};
@@ -629,7 +874,7 @@ Process process_start(const char *process, const char *args[]) {
     register_proc_funcs();
 
 #if LINUX_OS
-    p->fdStdin = p->fdStdout = p->fdStderr = -1;
+    p->nativeStdin = p->nativeStdout = p->nativeStderr = -1;
 
     int pipefd[2] = {-1, -1};
     int stdinfd[2] = {-1, -1};
@@ -641,7 +886,7 @@ Process process_start(const char *process, const char *args[]) {
     if (pipe2(pipefd, O_CLOEXEC) != 0 ||
         pipe2(stdinfd, O_CLOEXEC) != 0 ||
         pipe2(stdoutfd, O_CLOEXEC) != 0 ||
-        pipe2(stderrfd, O_CLOEXEC))
+        pipe2(stderrfd, O_CLOEXEC) != 0)
         goto error_handler;
 
     pid_t child = fork();
@@ -694,9 +939,9 @@ Process process_start(const char *process, const char *args[]) {
             goto error_handler;
         } else {
             p->info = child;
-            p->fdStdin = stdinfd[1];
-            p->fdStdout = stdoutfd[0];
-            p->fdStderr = stderrfd[0];
+            p->nativeStdin = stdinfd[1];
+            p->nativeStdout = stdoutfd[0];
+            p->nativeStderr = stderrfd[0];
         }
 
         return p;
@@ -731,12 +976,12 @@ error_handler: {
     security.bInheritHandle = TRUE;
     security.lpSecurityDescriptor = NULL;
 
-    if (!CreatePipe(&startupinfo.hStdInput, &p->hStdin, &security, 0) ||
-            !SetHandleInformation(p->hStdin, HANDLE_FLAG_INHERIT, 0) ||
-            !CreatePipe(&p->hStdout, &startupinfo.hStdOutput, &security, 0) ||
-            !SetHandleInformation(p->hStdout, HANDLE_FLAG_INHERIT, 0) ||
-            !CreatePipe(&p->hStderr, &startupinfo.hStdError, &security, 0) ||
-            !SetHandleInformation(p->hStderr, HANDLE_FLAG_INHERIT, 0))
+    if (!CreatePipe(&startupinfo.hStdInput, &p->nativeStdin, &security, 0) ||
+            !SetHandleInformation(p->nativeStdin, HANDLE_FLAG_INHERIT, 0) ||
+            !CreatePipe(&p->nativeStdout, &startupinfo.hStdOutput, &security, 0) ||
+            !SetHandleInformation(p->nativeStdout, HANDLE_FLAG_INHERIT, 0) ||
+            !CreatePipe(&p->nativeStderr, &startupinfo.hStdError, &security, 0) ||
+            !SetHandleInformation(p->nativeStderr, HANDLE_FLAG_INHERIT, 0))
         goto error;
 
     startupinfo.cb = sizeof(startupinfo);
@@ -747,10 +992,8 @@ error_handler: {
 
     BOOL success = CreateProcessW(proc, wcommandline, NULL, NULL, TRUE, 0, NULL, NULL, &startupinfo, &procinfo);
 
-    if (success) {
-        if (proclist_add(&proclist, procinfo))
-            goto out_of_memory;
-    }
+    if (success && proclist_add(&proclist, procinfo))
+        goto out_of_memory;
 
     FREE(proc);
     FREE(commandline);
@@ -894,9 +1137,9 @@ int process_destroy(Process p) {
 #if WINDOWS_OS
     int error = 0;
 
-    CloseHandle(p->hStdin);
-    CloseHandle(p->hStdout);
-    CloseHandle(p->hStderr);
+    CloseHandle(p->nativeStdin);
+    CloseHandle(p->nativeStdout);
+    CloseHandle(p->nativeStderr);
     io_close(p->ioStdin);
     io_close(p->ioStdout);
     io_close(p->ioStderr);
@@ -917,72 +1160,58 @@ int process_destroy(Process p) {
 #endif
 }
 
-IO process_stdin(Process p) {
-#if LINUX_OS
-    if (!p->ioStdin && p->fdStdin >= 0)
-        return p->ioStdin = io_open_native_file(p->fdStdin, "wb");
+IO process_stdin(Process p, const char *mode) {
+    if (mode == NULL)
+        mode = "wb";
 
-    return p->ioStdin;
-#elif WINDOWS_OS
-    if (!p->ioStdin && p->hStdin)
-        return p->ioStdin = io_open_native_file(p->hStdin, "wb");
+    if (!p->publicStdin && p->nativeStdin) {
+        p->ioStdin = io_open_native_file(p->nativeStdin, mode);
+        p->publicStdin = io_open_custom(&process_stdin_io_callbacks, p, mode);
 
-    return p->ioStdin;
-#else
-    return NULL;
-#endif
-}
-
-void process_close_stdin(Process p) {
-#if LINUX_OS
-    if (p->fdStdin >= 0) {
-        io_close(p->ioStdin);
-        p->ioStdin = NULL;
-        close(p->fdStdin);
-        p->fdStdin = -1;
+        if (p->publicStdin == NULL || p->ioStdin == NULL) {
+            io_close(p->ioStdin);
+            io_close(p->publicStdin);
+            return NULL;
+        }
     }
-#elif WINDOWS_OS
-    if (p->hStdin) {
-        io_close(p->ioStdin);
-        p->ioStdin = NULL;
-        CloseHandle(p->hStdin);
-        p->hStdin = NULL;
+
+    return p->publicStdin;
+}
+
+IO process_stdout(Process p, const char *mode) {
+    if (mode == NULL)
+        mode = "rb";
+
+    if (!p->publicStdout && p->nativeStdout) {
+        p->ioStdout = io_open_native_file(p->nativeStdout, mode);
+        p->publicStdout = io_open_custom(&process_stdout_io_callbacks, p, mode);
+
+        if (p->publicStdout == NULL || p->ioStdout == NULL) {
+            io_close(p->ioStdout);
+            io_close(p->publicStdout);
+            return NULL;
+        }
     }
-#else
-    UNUSED(p)
-#endif
+
+    return p->publicStdout;
 }
 
-IO process_stdout(Process p) {
-#if LINUX_OS
-    if (!p->ioStdout && p->fdStdout >= 0)
-        return p->ioStdout = io_open_native_file(p->fdStdout, "rb");
+IO process_stderr(Process p, const char *mode) {
+    if (mode == NULL)
+        mode = "rb";
 
-    return p->ioStdout;
-#elif WINDOWS_OS
-    if (!p->ioStdout && p->hStdout)
-        return p->ioStdout = io_open_native_file(p->hStdout, "rb");
+    if (!p->publicStderr && p->nativeStderr) {
+        p->ioStderr = io_open_native_file(p->nativeStderr, mode);
+        p->publicStderr = io_open_custom(&process_stderr_io_callbacks, p, mode);
 
-    return p->ioStdout;
-#else
-    return NULL;
-#endif
-}
+        if (p->publicStderr == NULL || p->ioStderr == NULL) {
+            io_close(p->ioStderr);
+            io_close(p->publicStderr);
+            return NULL;
+        }
+    }
 
-IO process_stderr(Process p) {
-#if LINUX_OS
-    if (!p->ioStderr && p->fdStderr >= 0)
-        return p->ioStderr = io_open_native_file(p->fdStderr, "rb");
-
-    return p->ioStderr;
-#elif WINDOWS_OS
-    if (!p->ioStderr && p->hStderr)
-        return p->ioStderr = io_open_native_file(p->hStderr, "rb");
-
-    return p->ioStderr;
-#else
-    return NULL;
-#endif
+    return p->publicStderr;
 }
 
 #if LINUX_OS

@@ -373,7 +373,6 @@ static int io_close_without_destroying(IO io) {
 
 static int io_getc_internal(IO io);
 static int io_putc_internal(int ch, IO io);
-/* TODO: these internal functions only do binary data transferral, maybe add some wrappers that support text mode as well without checking flags? */
 static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io);
 static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO io);
 

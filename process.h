@@ -71,10 +71,9 @@ void process_wait_for_finish(Process p);
 
 char *process_arglist_to_string(const char * const args[]);
 
-IO process_stdin(Process p); /* writable */
-void process_close_stdin(Process p);
-IO process_stdout(Process p); /* readable */
-IO process_stderr(Process p); /* readable */
+IO process_stdin(Process p, const char *mode); /* writable */
+IO process_stdout(Process p, const char *mode); /* readable */
+IO process_stderr(Process p, const char *mode); /* readable */
 
 const char *environment_get_variable(const char *name);
 int environment_set_variable(const char *name, const char *value);

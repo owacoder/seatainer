@@ -238,14 +238,14 @@ int printer(void *arg) {
 #include <math.h>
 
 void json() {
-    GenericMap map = genericmap_create(binary_compare, variant_compare, variant_copy, variant_destroy);
-    Variant v = variant_create_custom_move(map, genericmap_compare, genericmap_copy, genericmap_destroy);
+    GenericMap map = genericmap_create(binary_compare, (Compare) variant_compare, (Copier) variant_copy, (Deleter) variant_destroy);
+    Variant v = variant_create_custom_move(map, (Compare) genericmap_compare, (Copier) genericmap_copy, (Deleter) genericmap_destroy);
 
     genericmap_insert_move(map, "test1", 5, variant_create_boolean(1));
     genericmap_insert_move(map, "test2", 5, variant_create_string("This is a value\"\b"));
     genericmap_insert_move(map, "test3", 5, variant_create_string("Hi to you too!"));
 
-    *variant_get_container_base(v) = build_container_base(NULL, json_serialize_variant, 1);
+    *variant_get_container_base(v) = build_container_base(NULL, (Serializer) json_serialize_variant, 1);
 
     IO out = io_open_file(stdout);
     printf("\nJSON error: %s\n", error_description(variant_serialize(out, v, NULL)));
@@ -253,6 +253,40 @@ void json() {
 
 int main(int argc, char **argv, const char **envp)
 {
+    {
+        Process p = process_start("Y:/Test_Data/CmdTest.exe", NULL);
+
+        printf("Start error: %s\n", error_description(process_error(p)));
+
+        io_puts("Test 11111\n", process_stdin(p, NULL));
+        io_close(process_stdin(p, NULL));
+        io_copy(process_stdout(p, NULL), io_open_file(stdout));
+        printf("EOF: %d\n", io_eof(process_stdout(p, NULL)));
+        printf("Read error: %s\n", error_description(io_error(process_stdout(p, NULL))));
+
+        printf("Stop error: %s\n", error_description(process_destroy(p)));
+
+        return 0;
+
+        int exit = 0;
+        ProcessNativeHandle handle;
+        int success = process_start_async("C:\\Windows\\system32\\cmd.exe", NULL, &handle);
+
+        // printf("Handle %d\n", handle);
+        if (success == 0)
+            success = process_native_kill_normal(handle);
+
+        if (success == 0) {
+            printf("Result code: %d\n", exit);
+        } else {
+            printf("Error occurred: %s\n", error_description(success));
+        }
+
+        thread_sleep(4000);
+
+        return 0;
+    }
+
     if (1) {
         json();
         return 0;
@@ -535,11 +569,11 @@ int main(int argc, char **argv, const char **envp)
 
         printf("Start error: %s\n", error_description(process_error(p)));
 
-        io_puts("Test 1\n", process_stdin(p));
-        process_close_stdin(p);
-        io_copy(process_stdout(p), io_open_file(stdout));
-        printf("EOF: %d\n", io_eof(process_stdout(p)));
-        printf("Read error: %s\n", error_description(io_error(process_stdout(p))));
+        io_puts("Test 1\n", process_stdin(p, NULL));
+        io_close(process_stdin(p, NULL));
+        io_copy(process_stdout(p, NULL), io_open_file(stdout));
+        printf("EOF: %d\n", io_eof(process_stdout(p, NULL)));
+        printf("Read error: %s\n", error_description(io_error(process_stdout(p, NULL))));
 
         printf("Stop error: %s\n", error_description(process_destroy(p)));
 
