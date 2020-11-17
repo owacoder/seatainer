@@ -225,29 +225,55 @@ int memxor(void *dst, void *src, size_t size);
  */
 int utf8size(uint32_t codepoint);
 
-/** @brief Gets the length of the UTF-8 string in characters
+/** @brief Gets the length of the NUL-terminated UTF-8 string in characters
  *
  * @param utf8 The UTF-8 string to get the length of.
  * @return The length of @p utf8 in UTF-8 characters.
  */
 size_t utf8len(const char *utf8);
 
-/** @brief Determines if and where an encoding error appears in a UTF-8 string.
+/** @brief Gets the length of the length-specified UTF-8 string in characters
+ *
+ * @param utf8 The UTF-8 string to get the length of.
+ * @return The length of @p utf8 in UTF-8 characters.
+ */
+size_t utf8len_n(const char *utf8, size_t utf8length);
+
+/** @brief Determines if and where an encoding error appears in a NUL-terminated UTF-8 string.
  *
  * @param utf8 The UTF-8 string to check for an error.
  * @return If an error is found, a pointer to the error location is returned. On success, NULL is returned.
  */
 const char *utf8error(const char *utf8);
 
-/** @brief Finds a UTF-8 character in a UTF-8 string.
+/** @brief Determines if and where an encoding error appears in a length-specified UTF-8 string.
+ *
+ * @param utf8 The UTF-8 string to check for an error.
+ * @param utf8 The length in bytes of @p utf8.
+ * @return If an error is found, a pointer to the error location is returned. On success, NULL is returned.
+ */
+const char *utf8error_n(const char *utf8, size_t utf8length);
+
+/** @brief Finds a UTF-8 character in a NUL-terminated UTF-8 string.
  *
  * @param utf8 The UTF-8 string to search.
  * @param chr The UTF-8 character codepoint to search for.
  * @return Same as `strchr`. If the character is found, a pointer to the first instance of that character is returned, otherwise NULL is returned.
+ *    If @p chr is 0, a pointer to the terminating NUL is returned.
  */
 const char *utf8chr(const char *utf8, uint32_t chr);
 
-/** @brief Gets the codepoint of the first character in a UTF-8 string.
+/** @brief Finds a UTF-8 character in a length-specified UTF-8 string.
+ *
+ * @param utf8 The UTF-8 string to search.
+ * @param utf8length The length in bytes of @p utf8.
+ * @param chr The UTF-8 character codepoint to search for.
+ * @return Same as `strchr`, except if @p chr is 0. If the character is found, a pointer to the first instance of that character is returned, otherwise NULL is returned.
+ *    If @p chr is 0, the search is performed like any other character, since there could be a NUL embedded in valid UTF-8.
+ */
+const char *utf8chr_n(const char *utf8, size_t utf8length, uint32_t chr);
+
+/** @brief Gets the codepoint of the first character in a NUL-terminated UTF-8 string.
  *
  * @param utf8 The UTF-8 string to extract the first character from.
  * @param next A reference to a pointer that stores the position of the character following the one extracted. Can be NULL if unused.
@@ -256,6 +282,17 @@ const char *utf8chr(const char *utf8, uint32_t chr);
  *    and providing the Unicode replacement character 0xfffd if masked with UTF8_MASK.
  */
 uint32_t utf8next(const char *utf8, const char **next);
+
+/** @brief Gets the codepoint of the first character in a length-specified UTF-8 string.
+ *
+ * @param utf8 The UTF-8 string to extract the first character from.
+ * @param remainingBytes A pointer to the number of bytes remaining in the buffer, not including a NUL character. This field will be updated with the new number of remaining bytes. This field cannot be NULL.
+ * @param next A reference to a pointer that stores the position of the character following the one extracted. Can be NULL if unused.
+ * @return The codepoint of the first UTF-8 character in @p utf8, or 0x8000fffd on error.
+ *    This constant allows detection of error by performing `result > UTF8_MAX`,
+ *    and providing the Unicode replacement character 0xfffd if masked with UTF8_MASK.
+ */
+uint32_t utf8next_n(const char *utf8, size_t *remainingBytes, const char **next);
 
 /** @brief Attempts to concatenate a codepoint to a UTF-8 string.
  *

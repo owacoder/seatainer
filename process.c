@@ -716,7 +716,7 @@ error_handler: {
         return p;
     }
 #elif WINDOWS_OS
-    PWSTR proc = utf8_to_wide_alloc(process);
+    LPWSTR proc = utf8_to_wide_alloc(process);
     char *commandline = process_arglist_to_string(args? args: temp_args);
     LPWSTR wcommandline = utf8_to_wide_alloc(commandline);
     STARTUPINFO startupinfo;
@@ -772,6 +772,9 @@ out_of_memory:
     FREE(proc);
     FREE(commandline);
     FREE(wcommandline);
+    process_native_kill_immediate(procinfo);
+    CloseHandle(procinfo.hProcess);
+    CloseHandle(procinfo.hThread);
     p->error = CC_ENOMEM;
 
     return p;

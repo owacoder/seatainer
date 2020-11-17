@@ -638,7 +638,7 @@ void thread_usleep(unsigned long long tm) {
 
     while (nanosleep(&t, &t) == EINTR);
 #elif WINDOWS_OS
-    Sleep(tm / 1000);
+    thread_sleep(tm / 1000);
 #endif
 }
 
@@ -651,7 +651,7 @@ void thread_nsleep(unsigned long long tm) {
 
     while (nanosleep(&t, &t) == EINTR);
 #elif WINDOWS_OS
-    Sleep(tm / 1000000);
+    thread_sleep(tm / 1000000);
 #endif
 }
 
@@ -703,10 +703,36 @@ const char *utf8error(const char *utf8) {
     return NULL;
 }
 
+const char *utf8error_n(const char *utf8, size_t utf8length) {
+    while (utf8length) {
+        const char *current = utf8;
+        if (utf8next_n(utf8, &utf8length, &utf8) > UTF8_MAX)
+            return current;
+    }
+
+    return NULL;
+}
+
 const char *utf8chr(const char *utf8, uint32_t chr) {
+    if (chr < 0x80)
+        return strchr(utf8, chr);
+
     while (*utf8) {
         const char *current = utf8;
         if (utf8next(utf8, &utf8) == chr)
+            return current;
+    }
+
+    return NULL;
+}
+
+const char *utf8chr_n(const char *utf8, size_t utf8length, uint32_t chr) {
+    if (chr < 0x80)
+        return memchr(utf8, chr, utf8length);
+
+    while (utf8length) {
+        const char *current = utf8;
+        if (utf8next_n(utf8, &utf8length, &utf8) == chr)
             return current;
     }
 
@@ -718,49 +744,61 @@ size_t utf8len(const char *utf8) {
 
     while (*utf8) {
         utf8next(utf8, &utf8);
+        ++len;
     }
 
     return len;
 }
 
-uint32_t utf8next(const char *utf8, const char **next) {
-    static const unsigned char high5BitsToByteCount[32] = {
-        1, /* 00000, valid single byte */
-        1, /* 00001, valid single byte */
-        1, /* 00010, valid single byte */
-        1, /* 00011, valid single byte */
-        1, /* 00100, valid single byte */
-        1, /* 00101, valid single byte */
-        1, /* 00110, valid single byte */
-        1, /* 00111, valid single byte */
-        1, /* 01000, valid single byte */
-        1, /* 01001, valid single byte */
-        1, /* 01010, valid single byte */
-        1, /* 01011, valid single byte */
-        1, /* 01100, valid single byte */
-        1, /* 01101, valid single byte */
-        1, /* 01110, valid single byte */
-        1, /* 01111, valid single byte */
-        0, /* 10000, invalid continuation byte */
-        0, /* 10001, invalid continuation byte */
-        0, /* 10010, invalid continuation byte */
-        0, /* 10011, invalid continuation byte */
-        0, /* 10100, invalid continuation byte */
-        0, /* 10101, invalid continuation byte */
-        0, /* 10110, invalid continuation byte */
-        0, /* 10111, invalid continuation byte */
-        2, /* 11000, 2-byte code */
-        2, /* 11001, 2-byte code */
-        2, /* 11010, 2-byte code */
-        2, /* 11011, 2-byte code */
-        3, /* 11100, 3-byte code */
-        3, /* 11101, 3-byte code */
-        4, /* 11110, 4-byte code */
-        0, /* 11111, invalid byte (should never be seen) */
-    };
+size_t utf8len_n(const char *utf8, size_t utf8length) {
+    size_t len = 0;
 
+    while (utf8length) {
+        utf8next_n(utf8, &utf8length, &utf8);
+        ++len;
+    }
+
+    return len;
+}
+
+static const unsigned char utf8High5BitsToByteCount[32] = {
+    1, /* 00000, valid single byte */
+    1, /* 00001, valid single byte */
+    1, /* 00010, valid single byte */
+    1, /* 00011, valid single byte */
+    1, /* 00100, valid single byte */
+    1, /* 00101, valid single byte */
+    1, /* 00110, valid single byte */
+    1, /* 00111, valid single byte */
+    1, /* 01000, valid single byte */
+    1, /* 01001, valid single byte */
+    1, /* 01010, valid single byte */
+    1, /* 01011, valid single byte */
+    1, /* 01100, valid single byte */
+    1, /* 01101, valid single byte */
+    1, /* 01110, valid single byte */
+    1, /* 01111, valid single byte */
+    0, /* 10000, invalid continuation byte */
+    0, /* 10001, invalid continuation byte */
+    0, /* 10010, invalid continuation byte */
+    0, /* 10011, invalid continuation byte */
+    0, /* 10100, invalid continuation byte */
+    0, /* 10101, invalid continuation byte */
+    0, /* 10110, invalid continuation byte */
+    0, /* 10111, invalid continuation byte */
+    2, /* 11000, 2-byte code */
+    2, /* 11001, 2-byte code */
+    2, /* 11010, 2-byte code */
+    2, /* 11011, 2-byte code */
+    3, /* 11100, 3-byte code */
+    3, /* 11101, 3-byte code */
+    4, /* 11110, 4-byte code */
+    0, /* 11111, invalid byte (should never be seen) */
+};
+
+uint32_t utf8next(const char *utf8, const char **next) {
     const uint32_t error = 0x8000fffdul;
-    int bytesInCode = high5BitsToByteCount[(unsigned char) *utf8 >> 3];
+    int bytesInCode = utf8High5BitsToByteCount[(unsigned char) *utf8 >> 3];
     uint32_t codepoint = 0;
 
     if (next)
@@ -791,6 +829,47 @@ uint32_t utf8next(const char *utf8, const char **next) {
     /* Finished without error */
     if (next)
         *next = utf8 + bytesInCode;
+    return codepoint;
+}
+
+uint32_t utf8next_n(const char *utf8, size_t *remainingBytes, const char **next) {
+    const size_t remaining = *remainingBytes;
+    const uint32_t error = 0x8000fffdul;
+    int bytesInCode = utf8High5BitsToByteCount[(unsigned char) *utf8 >> 3];
+    uint32_t codepoint = 0;
+
+    if (next) {
+        *next = utf8 + 1;
+        *remainingBytes -= 1;
+    }
+
+    if (bytesInCode == 0 || bytesInCode > remaining) /* Some sort of error or not enough characters left in string */
+        return error;
+    else if (bytesInCode == 1) /* Shortcut for single byte, since there's no way to fail */
+        return *utf8;
+
+    /* Shift out high byte-length bits and begin result */
+    codepoint = (unsigned char) *utf8 & (0xff >> bytesInCode);
+
+    /* Obtain continuation bytes */
+    for (int i = 1; i < bytesInCode; ++i) {
+        if ((utf8[i] & 0xC0) != 0x80) /* Invalid continuation byte (note this handles a terminating NUL just fine) */
+            return error;
+
+        codepoint = (codepoint << 6) | (utf8[i] & 0x3f);
+    }
+
+    /* Syntax is good, now check for overlong encoding and invalid values */
+    if (utf8size(codepoint) != bytesInCode || /* Overlong encoding */
+            (codepoint >= 0xd800 && codepoint <= 0xdfff) || /* Not supposed to allow UTF-16 surrogates */
+            codepoint > UTF8_MAX) /* Too large of a codepoint */
+        return error;
+
+    /* Finished without error */
+    if (next) {
+        *next = utf8 + bytesInCode;
+        *remainingBytes = remaining - bytesInCode;
+    }
     return codepoint;
 }
 
