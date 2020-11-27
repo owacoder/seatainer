@@ -15,7 +15,7 @@ StringMap variant_get_stringmap(Variant var);
 int variant_set_stringmap(Variant var, const StringMap map);
 int variant_set_stringmap_move(Variant var, StringMap map);
 StringMap stringmap_create();
-StringMap stringmap_create_custom(BinaryCompare compare, StringCompare value_compare);
+StringMap stringmap_create_custom(const CommonContainerBase *key_base, const CommonContainerBase *value_base);
 StringMap stringmap_copy(StringMap other);
 int stringmap_insert_move(StringMap map, const char *key, char *item);
 int stringmap_insert(StringMap map, const char *key, const char *item);
@@ -34,12 +34,14 @@ char *stringmap_value_of(StringMap map, Iterator it);
 char *stringmap_value_of_key(StringMap map, const char *key);
 size_t stringmap_size(StringMap map);
 int stringmap_compare(StringMap lhs, StringMap rhs);
-BinaryCompare stringmap_get_key_compare_fn(StringMap map);
-void stringmap_set_key_compare_fn(StringMap map, BinaryCompare compare);
-StringCompare stringmap_get_value_compare_fn(StringMap map);
-void stringmap_set_value_compare_fn(StringMap map, StringCompare compare);
+Compare stringmap_get_key_compare_fn(StringMap map);
+void stringmap_set_key_compare_fn(StringMap map, Compare compare);
+Compare stringmap_get_value_compare_fn(StringMap map);
+void stringmap_set_value_compare_fn(StringMap map, Compare compare);
 void stringmap_clear(StringMap map);
 void stringmap_destroy(StringMap map);
-CommonContainerBase *stringmap_get_container_base(StringMap map);
+const CommonContainerBase *stringmap_get_key_container_base(StringMap map);
+const CommonContainerBase *stringmap_get_value_container_base(StringMap map);
+CommonContainerBase *stringmap_build_recipe(StringMap map);
 
 #endif // STRINGMAP_H

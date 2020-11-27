@@ -8,54 +8,33 @@
 
 typedef struct AVLNode {
     struct AVLNode *left, *right, *parent;
-    Binary key;
+    void *key;
     void *value;
     int balance;
 } AVLNode;
 
 typedef struct AVLTree {
-    CommonContainerBase base;
+    CommonContainerBase *key_base, *value_base;
     struct AVLNode *root;
-    BinaryCompare key_compare;
-    Compare value_compare;
-    Copier copy;
-    Deleter deleter;
     size_t size;
 } AVLTree;
 
-void *avltree_copier(const void *p) {
-    return (void *) p;
+void *avltree_non_copier(const void *p) {
+    UNUSED(p);
+    return NULL;
 }
 
-void avltree_deleter(void *p) {
+void avltree_non_deleter(void *p) {
     UNUSED(p)
 }
 
-static AVLNode *avltree_nodealloc(const char *key, size_t key_len) {
-    AVLNode *node = CALLOC(1, sizeof(*node));
-    if (node == NULL)
-        return NULL;
-
-    node->key.data = MALLOC(key_len + 1);
-    if (node->key.data == NULL) {
-        FREE(node);
-        return NULL;
-    }
-
-    memcpy(node->key.data, key, key_len);
-    node->key.data[key_len] = 0;
-    node->key.length = key_len;
-
-    return node;
-}
-
-static void avltree_nodedestroy(AVLNode *node, Deleter deleter) {
-    deleter(node->value);
-    FREE(node->key.data);
+static void avltree_nodedestroy(const AVLTree *tree, AVLNode *node) {
+    if (tree->key_base->deleter) tree->key_base->deleter(node->key);
+    if (tree->value_base->deleter) tree->value_base->deleter(node->value);
     FREE(node);
 }
 
-Binary avlnode_key(AVLNode *node) {
+const void *avlnode_key(AVLNode *node) {
     return node->key;
 }
 
@@ -63,84 +42,226 @@ void **avlnode_value(AVLNode *node) {
     return &node->value;
 }
 
-BinaryCompare avltree_get_key_compare_fn(AVLTree *tree) {
-    return tree->key_compare;
+Compare avltree_get_key_compare_fn(AVLTree *tree) {
+    return tree->key_base->compare;
 }
 
-void avltree_set_key_compare_fn(AVLTree *tree, BinaryCompare compare) {
-    tree->key_compare = compare? compare: binary_compare;
+int avltree_set_key_compare_fn(AVLTree *tree, Compare compare) {
+    if (compare == NULL || tree->size)
+        return CC_EINVAL;
+
+    CommonContainerBase *base = container_base_copy_if_static(tree->key_base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->compare = compare;
+    tree->key_base = base;
+
+    return 0;
 }
 
 Compare avltree_get_value_compare_fn(AVLTree *tree) {
-    return tree->value_compare;
+    return tree->value_base->compare;
 }
 
-void avltree_set_value_compare_fn(AVLTree *tree, Compare compare) {
-    tree->value_compare = compare;
+int avltree_set_value_compare_fn(AVLTree *tree, Compare compare) {
+    CommonContainerBase *base = container_base_copy_if_static(tree->value_base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->compare = compare;
+    tree->value_base = base;
+
+    return 0;
 }
 
-Copier avltree_get_copier_fn(AVLTree *tree) {
-    return tree->copy;
+Copier avltree_get_key_copier_fn(AVLTree *tree) {
+    return tree->key_base->copier;
 }
 
-void avltree_set_copier_fn(AVLTree *tree, Copier copier) {
-    tree->copy = copier;
+int avltree_set_key_copier_fn(AVLTree *tree, Copier copier) {
+    CommonContainerBase *base = container_base_copy_if_static(tree->key_base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->copier = copier;
+    tree->key_base = base;
+
+    return 0;
 }
 
-Deleter avltree_get_deleter_fn(AVLTree *tree) {
-    return tree->deleter;
+Copier avltree_get_value_copier_fn(AVLTree *tree) {
+    return tree->value_base->copier;
 }
 
-void avltree_set_deleter_fn(AVLTree *tree, Deleter deleter) {
-    tree->deleter = deleter? deleter: avltree_deleter;
+int avltree_set_value_copier_fn(AVLTree *tree, Copier copier) {
+    CommonContainerBase *base = container_base_copy_if_static(tree->value_base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->copier = copier? copier: avltree_non_copier;
+    tree->value_base = base;
+
+    return 0;
 }
 
-AVLTree *avltree_create() {
-    AVLTree *tree = CALLOC(1, sizeof(*tree));
-    if (tree == NULL)
+Deleter avltree_get_key_deleter_fn(AVLTree *tree) {
+    return tree->key_base->deleter;
+}
+
+int avltree_set_key_deleter_fn(AVLTree *tree, Deleter deleter) {
+    CommonContainerBase *base = container_base_copy_if_static(tree->key_base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->deleter = deleter;
+    tree->key_base = base;
+
+    return 0;
+}
+
+Deleter avltree_get_value_deleter_fn(AVLTree *tree) {
+    return tree->value_base->deleter;
+}
+
+int avltree_set_value_deleter_fn(AVLTree *tree, Deleter deleter) {
+    CommonContainerBase *base = container_base_copy_if_static(tree->value_base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->deleter = deleter? deleter: avltree_non_deleter;
+    tree->value_base = base;
+
+    return 0;
+}
+
+Parser avltree_get_key_parser_fn(AVLTree *tree) {
+    return tree->key_base->parse;
+}
+
+int avltree_set_key_parser_fn(AVLTree *tree, Parser parser) {
+    CommonContainerBase *base = container_base_copy_if_static(tree->key_base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->parse = parser;
+    tree->key_base = base;
+
+    return 0;
+}
+
+Parser avltree_get_value_parser_fn(AVLTree *tree) {
+    return tree->value_base->parse;
+}
+
+int avltree_set_value_parser_fn(AVLTree *tree, Parser parser) {
+    CommonContainerBase *base = container_base_copy_if_static(tree->value_base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->parse = parser;
+    tree->value_base = base;
+
+    return 0;
+}
+
+Serializer avltree_get_key_serializer_fn(AVLTree *tree) {
+    return tree->key_base->serialize;
+}
+
+int avltree_set_key_serializer_fn(AVLTree *tree, Serializer serializer) {
+    CommonContainerBase *base = container_base_copy_if_static(tree->key_base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->serialize = serializer;
+    tree->key_base = base;
+
+    return 0;
+}
+
+Serializer avltree_get_value_serializer_fn(AVLTree *tree) {
+    return tree->value_base->serialize;
+}
+
+int avltree_set_value_serializer_fn(AVLTree *tree, Serializer serializer) {
+    CommonContainerBase *base = container_base_copy_if_static(tree->value_base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->serialize = serializer;
+    tree->value_base = base;
+
+    return 0;
+}
+
+AVLTree *avltree_create(const CommonContainerBase *key_base, const CommonContainerBase *value_base) {
+    if (key_base == NULL || value_base == NULL)
         return NULL;
 
-    tree->key_compare = binary_compare;
-    tree->value_compare = NULL;
-    tree->copy = avltree_copier;
-    tree->deleter = avltree_deleter;
+    AVLTree *tree = CALLOC(1, sizeof(*tree));
+    if (tree == NULL)
+        goto cleanup;
+
+    tree->key_base = container_base_copy_if_dynamic((CommonContainerBase *) key_base);
+    if (tree->key_base == NULL)
+        goto cleanup;
+
+    tree->value_base = container_base_copy_if_dynamic((CommonContainerBase *) value_base);
+    if (tree->value_base == NULL)
+        goto cleanup;
 
     return tree;
+
+cleanup:
+    if (tree) {
+        container_base_destroy_if_dynamic(tree->key_base);
+        container_base_destroy_if_dynamic(tree->value_base);
+    }
+    FREE(tree);
+
+    return NULL;
 }
 
-void avltree_destroy_helper(AVLNode *node, Deleter deleter) {
+void avltree_destroy_helper(const AVLTree *tree, AVLNode *node) {
     if (node == NULL)
         return;
 
-    avltree_destroy_helper(node->left, deleter);
-    avltree_destroy_helper(node->right, deleter);
-    avltree_nodedestroy(node, deleter);
+    avltree_destroy_helper(tree, node->left);
+    avltree_destroy_helper(tree, node->right);
+    avltree_nodedestroy(tree, node);
 }
 
 void avltree_destroy(AVLTree *tree) {
-    if (tree != NULL)
-        avltree_destroy_helper(tree->root, tree->deleter);
+    if (tree != NULL) {
+        avltree_destroy_helper(tree, tree->root);
+
+        container_base_destroy_if_dynamic(tree->key_base);
+        container_base_destroy_if_dynamic(tree->value_base);
+    }
 
     FREE(tree);
 }
 
-static AVLNode *avltree_copy_helper(AVLNode *node, AVLNode *parent, Copier copier, Deleter deleter) {
+static AVLNode *avltree_copy_helper(const AVLTree *tree, AVLNode *node, AVLNode *parent) {
     if (node == NULL)
         return NULL;
 
-    AVLNode *new_node = avltree_nodealloc(node->key.data, node->key.length);
+    AVLNode *new_node = CALLOC(1, sizeof(*new_node));
     if (new_node == NULL)
         return NULL;
 
     new_node->parent = parent;
-    new_node->value = copier(node->value);
-    new_node->left = avltree_copy_helper(node->left, new_node, copier, deleter);
-    new_node->right = avltree_copy_helper(node->right, new_node, copier, deleter);
+    new_node->key = tree->key_base->copier(node->key);
+    new_node->value = tree->value_base->copier(node->value);
+    new_node->left = avltree_copy_helper(tree, node->left, new_node);
+    new_node->right = avltree_copy_helper(tree, node->right, new_node);
 
-    if ((new_node->value == NULL && node->value != NULL) ||
+    if ((new_node->key == NULL && node->key != NULL) ||
+        (new_node->value == NULL && node->value != NULL) ||
         (new_node->left == NULL && node->left != NULL) ||
         (new_node->right == NULL && node->right != NULL)) {
-        avltree_destroy_helper(new_node, deleter);
+        avltree_destroy_helper(tree, new_node);
         return NULL;
     }
 
@@ -148,19 +269,15 @@ static AVLNode *avltree_copy_helper(AVLNode *node, AVLNode *parent, Copier copie
 }
 
 AVLTree *avltree_copy(AVLTree *other) {
-    if (other->copy == NULL)
+    if (other == NULL || other->key_base->copier == NULL || other->value_base->copier == NULL)
         return NULL;
 
-    AVLTree *tree = avltree_create();
+    AVLTree *tree = avltree_create(other->key_base, other->value_base);
     if (tree == NULL)
         return NULL;
 
-    tree->key_compare = other->key_compare;
-    tree->value_compare = other->value_compare;
-    tree->copy = other->copy;
-    tree->deleter = other->deleter;
     tree->size = other->size;
-    tree->root = avltree_copy_helper(other->root, NULL, other->copy, other->deleter);
+    tree->root = avltree_copy_helper(other, other->root, NULL);
 
     if (tree->root == NULL && other->root != NULL) {
         avltree_destroy(tree);
@@ -170,14 +287,14 @@ AVLTree *avltree_copy(AVLTree *other) {
     return tree;
 }
 
-static AVLNode **avltree_find_helper(AVLNode **node, AVLNode **parent, BinaryCompare compare, Binary item) {
+static AVLNode **avltree_find_helper(const AVLTree *tree, AVLNode **node, AVLNode **parent, const void *item_key) {
     *parent = NULL;
 
     while (1) {
         if (*node == NULL)
             return node;
 
-        int cmp = compare(&item, &((*node)->key));
+        int cmp = tree->key_base->compare(item_key, (*node)->key);
 
         if (cmp == 0)
             return node;
@@ -264,11 +381,10 @@ AVLNode *avltree_inorder_next(AVLNode *node) {
     return node;
 }
 
-AVLNode *avltree_find(AVLTree *tree, const char *key, size_t key_len) {
-    Binary b = {.data = (char *) key, .length = key_len};
+AVLNode *avltree_find(AVLTree *tree, const void *key) {
     AVLNode *parent;
 
-    return *avltree_find_helper(&tree->root, &parent, tree->key_compare, b);
+    return *avltree_find_helper(tree, &tree->root, &parent, key);
 }
 
 static AVLNode *avltree_rotate_left(AVLNode *parent, AVLNode *child) {
@@ -367,22 +483,26 @@ static AVLNode *avltree_rotate_leftright(AVLNode *parent, AVLNode *child) {
     return grandchild;
 }
 
-AVLNode *avltree_insert(AVLTree *tree, const char *key, size_t key_len, void *value) {
-    Binary b = {.data = (char *) key, .length = key_len};
+AVLNode *avltree_insert_move_key(AVLTree *tree, void *key, void *value) {
     AVLNode *parent, *node, *inserted;
-    AVLNode **nodeptr = avltree_find_helper(&tree->root, &parent, tree->key_compare, b);
+    AVLNode **nodeptr = avltree_find_helper(tree, &tree->root, &parent, key);
 
-    if (*nodeptr != NULL) {
-        tree->deleter((*nodeptr)->value);
+    if (*nodeptr != NULL) { /* Key already exists in tree */
+        if (tree->value_base->deleter)
+            tree->value_base->deleter((*nodeptr)->value);
+
         (*nodeptr)->value = value;
         return *nodeptr;
     }
 
-    inserted = node = *nodeptr = avltree_nodealloc(key, key_len);
+    /* Key does not exist in tree yet */
+
+    inserted = node = *nodeptr = CALLOC(1, sizeof(*node));
     if (node == NULL)
         return NULL;
 
     tree->size += 1;
+    node->key = key;
     node->value = value;
     node->parent = parent;
 
@@ -442,27 +562,38 @@ AVLNode *avltree_insert(AVLTree *tree, const char *key, size_t key_len, void *va
     return inserted;
 }
 
+AVLNode *avltree_insert_copy_key(AVLTree *tree, const void *key, void *value) {
+    if (tree->key_base->copier == NULL)
+        return NULL;
+
+    void *new_key = tree->key_base->copier(key);
+    if (new_key == NULL)
+        return NULL;
+
+    return avltree_insert_move_key(tree, new_key, value);
+}
+
 /* Returns node after deleted node, or NULL if the node to be deleted has no successor */
 static AVLNode *avltree_delete_node_helper(AVLTree *tree, AVLNode **node) {
     AVLNode *successor = avltree_inorder_next(*node);
     AVLNode save = **node, *node_replacement = NULL;
 
     if ((*node)->left == NULL && (*node)->right == NULL) {
-        avltree_nodedestroy(*node, tree->deleter);
+        avltree_nodedestroy(tree, *node);
 
         node_replacement = NULL;
     } else if ((*node)->left == NULL) { /* Right child present */
         AVLNode *right = (*node)->right;
         right->parent = (*node)->parent;
 
-        avltree_nodedestroy(*node, tree->deleter);
+        avltree_nodedestroy(tree, *node);
 
         node_replacement = right;
     } else if ((*node)->right == NULL) { /* Left child present */
         AVLNode *left = (*node)->left;
         left->parent = (*node)->parent;
 
-        avltree_nodedestroy(*node, tree->deleter);
+        avltree_nodedestroy(tree, *node);
 
         node_replacement = left;
     } else { /* Both children present, successor will never be parent of node */
@@ -563,8 +694,8 @@ AVLNode *avltree_delete_node(AVLTree *tree, AVLNode *node) {
     return avltree_delete_node_helper(tree, p);
 }
 
-AVLNode *avltree_delete(AVLTree *tree, const char *key, size_t key_len) {
-    return avltree_delete_node(tree, avltree_find(tree, key, key_len));
+AVLNode *avltree_delete(AVLTree *tree, const void *key) {
+    return avltree_delete_node(tree, avltree_find(tree, key));
 }
 
 #if 0
@@ -613,16 +744,24 @@ int avltree_is_avl(AVLTree *tree) {
 #endif
 
 int avltree_compare(AVLTree *left, AVLTree *right) {
+    int cmp = generic_types_compatible_compare(left->key_base, right->key_base);
+    if (cmp)
+        return cmp;
+
+    cmp = generic_types_compatible_compare(left->value_base, right->value_base);
+    if (cmp)
+        return cmp;
+
     AVLNode *lhs = avltree_min_node(left);
     AVLNode *rhs = avltree_min_node(right);
 
     while (lhs && rhs) {
-        int cmp = left->key_compare(&lhs->key, &rhs->key);
+        cmp = left->key_base->compare(&lhs->key, &rhs->key);
         if (cmp)
             return cmp;
 
-        if (left->value_compare) {
-            cmp = left->value_compare(lhs->value, rhs->value);
+        if (left->value_base->compare) {
+            cmp = left->value_base->compare(lhs->value, rhs->value);
             if (cmp)
                 return cmp;
         }
@@ -640,7 +779,7 @@ int avltree_compare(AVLTree *left, AVLTree *right) {
 }
 
 void avltree_clear(AVLTree *tree) {
-    avltree_destroy_helper(tree->root, tree->deleter);
+    avltree_destroy_helper(tree, tree->root);
     tree->root = NULL;
     tree->size = 0;
 }
@@ -649,6 +788,10 @@ size_t avltree_size(AVLTree *tree) {
     return tree->size;
 }
 
-CommonContainerBase *avltree_get_container_base(AVLTree *tree) {
-    return &tree->base;
+const CommonContainerBase *avltree_get_key_container_base(const AVLTree *tree) {
+    return tree->key_base;
+}
+
+const CommonContainerBase *avltree_get_value_container_base(const AVLTree *tree) {
+    return tree->value_base;
 }

@@ -302,6 +302,36 @@ struct InputOutputDeviceCallbacks {
 # define IO_DEFAULT_TEXT_MODE
 #endif
 
+/** @brief Returns an IO device that reads from stdin
+ *
+ * This IO device is a simple translation layer over the FILE *stdin
+ * This IO device must not be closed by the user.
+ *
+ * @return An IO device that reads from stdin, or NULL if an error occurred.
+ */
+IO io_get_stdin(void);
+#define io_stdin io_get_stdin()
+
+/** @brief Returns an IO device that writes to stdout
+ *
+ * This IO device is a simple translation layer over the FILE *stdout
+ * This IO device must not be closed by the user.
+ *
+ * @return An IO device that writes to stdout, or NULL if an error occurred.
+ */
+IO io_get_stdout(void);
+#define io_stdout io_get_stdout()
+
+/** @brief Returns an IO device that writes to stderr
+ *
+ * This IO device is a simple translation layer over the FILE *stderr
+ * This IO device must not be closed by the user.
+ *
+ * @return An IO device that writes to stderr, or NULL if an error occurred.
+ */
+IO io_get_stderr(void);
+#define io_stderr io_get_stderr()
+
 /** @brief Clears any error or EOF flag present in an IO device.
  *
  * @param io The device to clear error flags on.
@@ -608,6 +638,13 @@ int io_copy_and_close(IO in, IO out);
  * With the exception of wide strings, and hexadecimal floating-point output, this function should perform identically to the standard
  * library functions in the `printf()` family. Wide strings and hexadecimal floating-point output are not supported.
  *
+ * An extension of '%?' (along with the normal format specifiers) is supported for container serializers. This format takes two arguments, the first being the data itself,
+ * and the second being a `const CommonContainerBase *` containing the data's recipe. For example, printing a Binary item would require a call like the following:
+ *
+ *      io_printf(io, "Binary data: %?", (Binary *) (data), container_base_binary_recipe());
+ *
+ * However, this extension also requires that a serializer be present in the recipe. If no serializer is present, an error is returned.
+ *
  * @param io The IO device to write to.
  * @param fmt The format string specifying what arguments to print.
  * @param args The va_list containing the arguments to print.
@@ -639,6 +676,18 @@ int io_printf(IO io, const char *fmt, ...);
  * @return The character written, or EOF if an error occurred.
  */
 int io_putc(int ch, IO io);
+
+/** @brief Efficiently duplicates a character to an IO device.
+ *
+ * If the stream is opened as a text stream, any newline (10) characters written to the stream will be converted to the native
+ * newline as needed.
+ *
+ * @param ch The character to write, which will be casted to `unsigned char` internally.
+ * @param count The number of characters to write. The number of bytes written may be greater than count if there are newlines that are converted.
+ * @param io The IO device to write to.
+ * @return Zero on success, or EOF if an error occurred.
+ */
+int io_putc_n(int ch, size_t count, IO io);
 
 /** @brief Writes a value in binary format to an IO device.
  *
@@ -698,11 +747,30 @@ int io_set_read_timeout(IO io, long long usecs);
  * @return 0 on success, an error code if something went wrong.
  */
 int io_set_write_timeout(IO io, long long usecs);
+
+/** @brief Returns the read timeout for the IO device
+ *
+ * This function only applies to platform-defined networking sockets.
+ *
+ * @param io The IO device that is being operated on.
+ * @return The number of microseconds to timeout after attempting a read.
+ */
 long long io_read_timeout(IO io);
+
+/** @brief Returns the read timeout for the IO device
+ *
+ * This function only applies to platform-defined networking sockets.
+ *
+ * @param io The IO device that is being operated on.
+ * @return The number of microseconds to timeout after attempting a read.
+ */
 long long io_write_timeout(IO io);
+
 IO io_reopen(const char *filename, const char *mode, IO io);
+
 int io_vscanf(IO io, const char *fmt, va_list args);
 int io_scanf(IO io, const char *fmt, ...);
+
 int io_seek(IO io, long int offset, int origin);
 int io_seek64(IO io, long long int offset, int origin);
 int io_setpos(IO io, const IO_Pos *pos);

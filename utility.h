@@ -215,6 +215,18 @@ int memswap(void *p, void *q, size_t size);
  */
 int memxor(void *dst, void *src, size_t size);
 
+/** @brief Searches for a binary token inside a binary string
+ *
+ *  Operates the same as strstr, but for binary strings.
+ *
+ * @param string The binary data to search in (the haystack)
+ * @param string_len A pointer to the length of data to search in (the size of the haystack). This field is updated to a new smaller size, unless NULL is returned.
+ * @param token The binary token to search for (the needle)
+ * @param token_len The length of data to search for (the size of the needle)
+ * @return Returns the location where token was found, or NULL if @p token was not found. If a non-NULL value is returned, the value pointed to by @p string_len is updated with the length to the end of the string from the return value.
+ */
+const char *binstr_search(const char *string, size_t *string_len, const char *token, size_t token_len);
+
 #define UTF8_MAX (0x10ffff)
 #define UTF8_MASK (0x1fffff)
 
@@ -223,7 +235,7 @@ int memxor(void *dst, void *src, size_t size);
  * @param codepoint The codepoint to get the encoding size of.
  * @return The number of bytes it would take to encode @p codepoint as UTF-8.
  */
-int utf8size(uint32_t codepoint);
+unsigned utf8size(uint32_t codepoint);
 
 /** @brief Gets the length of the NUL-terminated UTF-8 string in characters
  *

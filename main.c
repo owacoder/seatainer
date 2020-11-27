@@ -237,7 +237,7 @@ int printer(void *arg) {
 
 #include <math.h>
 
-void json() {
+/*void json() {
     GenericMap map = genericmap_create(binary_compare, (Compare) variant_compare, (Copier) variant_copy, (Deleter) variant_destroy);
     Variant v = variant_create_custom_move(map, (Compare) genericmap_compare, (Copier) genericmap_copy, (Deleter) genericmap_destroy);
 
@@ -245,14 +245,39 @@ void json() {
     genericmap_insert_move(map, "test2", 5, variant_create_string("This is a value\"\b"));
     genericmap_insert_move(map, "test3", 5, variant_create_string("Hi to you too!"));
 
-    *variant_get_container_base(v) = build_container_base(NULL, (Serializer) json_serialize_variant, 1);
+    *variant_get_container_base(v) = container_base_build(NULL, (Serializer) json_serialize_variant, 1);
 
     IO out = io_open_file(stdout);
     printf("\nJSON error: %s\n", error_description(variant_serialize(out, v, NULL)));
+}*/
+void json() {}
+
+void test_new_io() {
+    for (size_t i = 0; i < 100000; ++i) {
+        int new_io = io_printf(io_stdout, "string %d %.*g string string %-20s|\ntest", -250007, 6, 1.2003, "string");
+        int old_io = fprintf(stdout, "string %d %.*g string string %-20s|\ntest", -250007, 6, 1.2003, "string");
+
+        if (new_io != old_io) {
+            printf("An error occurred of some sort: %d, %d\n", new_io, old_io);
+            abort();
+        }
+    }
+}
+
+void test_c_io() {
+    for (size_t i = 0; i < 100000; ++i)
+        if (fprintf(stdout, "string %d %.*g string string %-20s|\n", -250007, 6, 1.2003, "string") < 0)
+            printf("An error occurred of some sort\n");
 }
 
 int main(int argc, char **argv, const char **envp)
 {
+    test_new_io();
+    //test_c_io();
+
+    return 0;
+
+    if (0)
     {
         Process p = process_start("Y:/Test_Data/CmdTest.exe", NULL);
 
@@ -287,12 +312,12 @@ int main(int argc, char **argv, const char **envp)
         return 0;
     }
 
-    if (1) {
+    if (0) {
         json();
         return 0;
     }
 
-    if (1)
+    if (0)
     {
         DirectoryEntry entry = dirent_open("\\\\OLIVER-CODE\\Fast/Test_Data/Test - Copy");
         //DirectoryEntry entry = dirent_open("Y:/Test_Data/Test - Copy");
@@ -309,6 +334,7 @@ int main(int argc, char **argv, const char **envp)
         return 0;
     }
 
+    if (0)
     {
         const char *test = "-inf";
         IO io = io_open_cstring(test, "rb");
@@ -316,6 +342,69 @@ int main(int argc, char **argv, const char **envp)
         char c1 = 0, c2 = 0;
         printf("String: %s\nResult sscanf(): %d\nResult io_scanf(): %d\n", test, sscanf(test, "%g%1c", &result1, &c1), io_scanf(io, "%g%1c", &result2, &c2));
         printf("Value sscanf(): %g, %c\nValue io_scanf(): %g, %c\n", result1, c1, result2, c2);
+        return 0;
+    }
+
+    {
+        CommonContainerBase *base = container_base_build_key_value_container(container_base_cstring_recipe(),
+                                                                             container_base_double_recipe(),
+                                                                             container_base_genericmap_recipe());
+        base->serialize = (Serializer) json_serialize;
+        io_register_type("mymap", base);
+        io_register_format("JSON", NULL, (Serializer) json_serialize);
+
+        GenericMap fmap = genericmap_create(container_base_cstring_recipe(),
+                                            container_base_double_recipe());
+
+        double f = 804.22;
+        genericmap_insert(fmap, "Key 1", &f);
+        f = 1.0000000000001e-33;
+        genericmap_insert(fmap, "Key 2", &f);
+
+        for (size_t i = 0; i < 100000; ++i)
+            if (io_printf(io_stdout, "%-20s|\n", "string", fmap) < 0)
+                printf("An error occurred of some sort\n");
+
+        for (size_t i = 0; i < 100000; ++i)
+            if (fprintf(stdout, "%-20s|\n", "string") < 0)
+                printf("An error occurred of some sort\n");
+
+        genericmap_destroy(fmap);
+
+        return 0;
+
+        GenericMap imap = genericmap_create(container_base_cstring_recipe(),
+                                            container_base_int_recipe());
+
+        int v = 804;
+        genericmap_insert(imap, "Key 1", &v);
+        v = -776;
+        genericmap_insert(imap, "Key 2", &v);
+
+        printf("\nSerialize error: %s\n", error_description(json_serialize(io_open_file(stdout), imap, genericmap_build_recipe(imap), NULL)));
+
+        StringMap map = stringmap_create();
+
+        stringmap_insert(map, "Key 1", "\nValue 1 - A test");
+        stringmap_insert(map, "Key 2", "Value 2 - Another test");
+
+        printf("\nSerialize error: %s\n", error_description(json_serialize(io_open_file(stdout), map, stringmap_build_recipe(map), NULL)));
+
+        GenericList list = genericlist_create(container_base_cstring_recipe());
+
+        printf("error: %s\n", error_description(genericlist_insert(list, "test 1", 0)));
+        printf("error: %s\n", error_description(genericlist_insert(list, "test 2", 1)));
+
+        printf("list size: %d\n", genericlist_size(list));
+
+        for (Iterator it = genericlist_begin(list); it; it = genericlist_next(list, it)) {
+            printf("item: %s\n", ((const char *) genericlist_value_of(list, it)));
+        }
+
+        printf("\nSerialize error: %s\n", error_description(json_serialize(io_open_file(stdout), list, genericlist_build_recipe(list), NULL)));
+
+        genericlist_destroy(list);
+
         return 0;
     }
 
@@ -335,8 +424,6 @@ int main(int argc, char **argv, const char **envp)
 
     {
         StringList list = stringlist_split("How are you doing  all today", " ", 1);
-
-        stringlist_set_compare_fn(list, strcmp_no_case);
 
         StringList sorted = stringlist_stable_sorted(list, 0);
 
@@ -445,35 +532,6 @@ int main(int argc, char **argv, const char **envp)
         }
 
         stringset_destroy(set);
-    }
-
-    {
-        StringList list = stringlist_split("How are you doing  all today", " ", 1);
-
-        stringlist_set_compare_fn(list, strcmp_no_case);
-
-        StringList sorted = stringlist_stable_sorted(list, 1);
-
-        printf("Index of you: %d\n", (unsigned) stringlist_rfind(list, "YOU", SIZE_MAX));
-
-        for (size_t i = 0; i < stringlist_size(list); ++i) {
-            printf("Item %u: '%s'\n", (unsigned) i, stringlist_array(list)[i]);
-        }
-
-        printf("Sorted index of you: %d\n", (unsigned) stringlist_rfind(sorted, "YOU", SIZE_MAX));
-
-        for (size_t i = 0; i < stringlist_size(list); ++i) {
-            printf("Sorted Item %u: '%s'\n", (unsigned) i, stringlist_array(sorted)[i]);
-        }
-
-        printf("Equal: %d\n", stringlist_compare(list, list));
-
-        char *joined = stringlist_join(list, "");
-        printf("Joined: %s\n", joined);
-        //FREE(joined);
-
-        stringlist_destroy(list);
-        stringlist_destroy(sorted);
     }
 
     {

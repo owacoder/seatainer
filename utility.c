@@ -13,6 +13,7 @@
 #include <stdlib.h>
 
 #if LINUX_OS
+#include <sched.h>
 #include <pthread.h>
 #include <errno.h>
 #endif
@@ -541,7 +542,7 @@ int thread_is_current(Thread t) {
 
 void thread_yield() {
 #if LINUX_OS
-    pthread_yield();
+    sched_yield();
 #elif WINDOWS_OS
     YieldProcessor();
 #endif
@@ -603,7 +604,7 @@ int thread_detach(Thread t) {
 
 void thread_exit(int result) {
 #if LINUX_OS
-    pthread_exit((void *) result);
+    pthread_exit((void *) (intmax_t) result);
 #elif WINDOWS_OS
     ExitThread(result);
 #else
@@ -685,7 +686,22 @@ int memxor(void *dst, void *src, size_t size) {
     return 0;
 }
 
-int utf8size(uint32_t codepoint) {
+const char *binstr_search(const char *string, size_t *string_len, const char *token, size_t token_len) {
+    if (*string_len < token_len)
+        return NULL;
+    else {
+        for (size_t len = *string_len; len >= token_len; ++string, --len) {
+            if (memcmp(string, token, token_len) == 0) {
+                *string_len = len;
+                return string;
+            }
+        }
+    }
+
+    return NULL;
+}
+
+unsigned utf8size(uint32_t codepoint) {
     if (codepoint < 0x80) return 1;
     else if (codepoint < 0x800) return 2;
     else if (codepoint < 0x10000) return 3;
@@ -798,7 +814,7 @@ static const unsigned char utf8High5BitsToByteCount[32] = {
 
 uint32_t utf8next(const char *utf8, const char **next) {
     const uint32_t error = 0x8000fffdul;
-    int bytesInCode = utf8High5BitsToByteCount[(unsigned char) *utf8 >> 3];
+    const unsigned int bytesInCode = utf8High5BitsToByteCount[(unsigned char) *utf8 >> 3];
     uint32_t codepoint = 0;
 
     if (next)
@@ -813,7 +829,7 @@ uint32_t utf8next(const char *utf8, const char **next) {
     codepoint = (unsigned char) *utf8 & (0xff >> bytesInCode);
 
     /* Obtain continuation bytes */
-    for (int i = 1; i < bytesInCode; ++i) {
+    for (unsigned i = 1; i < bytesInCode; ++i) {
         if ((utf8[i] & 0xC0) != 0x80) /* Invalid continuation byte (note this handles a terminating NUL just fine) */
             return error;
 
@@ -835,7 +851,7 @@ uint32_t utf8next(const char *utf8, const char **next) {
 uint32_t utf8next_n(const char *utf8, size_t *remainingBytes, const char **next) {
     const size_t remaining = *remainingBytes;
     const uint32_t error = 0x8000fffdul;
-    int bytesInCode = utf8High5BitsToByteCount[(unsigned char) *utf8 >> 3];
+    const unsigned int bytesInCode = utf8High5BitsToByteCount[(unsigned char) *utf8 >> 3];
     uint32_t codepoint = 0;
 
     if (next) {
@@ -852,7 +868,7 @@ uint32_t utf8next_n(const char *utf8, size_t *remainingBytes, const char **next)
     codepoint = (unsigned char) *utf8 & (0xff >> bytesInCode);
 
     /* Obtain continuation bytes */
-    for (int i = 1; i < bytesInCode; ++i) {
+    for (unsigned i = 1; i < bytesInCode; ++i) {
         if ((utf8[i] & 0xC0) != 0x80) /* Invalid continuation byte (note this handles a terminating NUL just fine) */
             return error;
 

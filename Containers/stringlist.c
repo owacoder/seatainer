@@ -7,20 +7,20 @@
 #include "stringlist.h"
 #include "genericlist.h"
 #include "../utility.h"
+#include "recipes.h"
 
 /* For conversions */
 #include "variant.h"
 #include "stringset.h"
-#include "binarylist.h"
 #include "genericmap.h"
 #include "stringmap.h"
 
 Variant variant_from_stringlist(StringList list) {
-    return variant_create_custom_base(list, (Compare) stringlist_compare, (Copier) stringlist_copy, (Deleter) stringlist_destroy, *stringlist_get_container_base(list));
+    return variant_create_custom_adopt(list, stringlist_build_recipe(list));
 }
 
 int variant_is_stringlist(Variant var) {
-    return variant_get_copier_fn(var) == (Copier) stringlist_copy;
+    return generic_types_compatible_compare(variant_get_custom_container_base(var), container_base_stringlist_recipe());
 }
 
 StringList variant_get_stringlist(Variant var) {
@@ -31,23 +31,23 @@ StringList variant_get_stringlist(Variant var) {
 }
 
 int variant_set_stringlist_move(Variant var, StringList list) {
-    return variant_set_custom_move_base(var, list, (Compare) stringlist_compare, (Copier) stringlist_copy, (Deleter) stringlist_destroy, *stringlist_get_container_base(list));
+    return variant_set_custom_move(var, list, stringlist_get_container_base(list));
 }
 
 int variant_set_stringlist(Variant var, const StringList list) {
-    return variant_set_custom_base(var, list, (Compare) stringlist_compare, (Copier) stringlist_copy, (Deleter) stringlist_destroy, *stringlist_get_container_base(list));
+    return variant_set_custom(var, list, stringlist_get_container_base(list));
 }
 
 StringList stringlist_create() {
-    return stringlist_create_custom((StringCompare) strcmp);
+    return stringlist_create_custom(NULL);
 }
 
-StringList stringlist_create_custom(StringCompare compare) {
-    return stringlist_create_reserve(0, compare);
+StringList stringlist_create_custom(const CommonContainerBase *base) {
+    return stringlist_create_reserve(0, base);
 }
 
-StringList stringlist_create_reserve(size_t reserve, StringCompare compare) {
-    return (StringList) genericlist_create_reserve(reserve, (Compare) (compare? compare: strcmp), (Copier) strdup, (Deleter) FREE);
+StringList stringlist_create_reserve(size_t reserve, const CommonContainerBase *base) {
+    return (StringList) genericlist_create_reserve(reserve, base? base: container_base_cstring_recipe());
 }
 
 StringList stringlist_concatenate(StringList left, StringList right) {
@@ -103,7 +103,7 @@ StringList stringlist_divide(const char *string, size_t record_size, int keep_pa
 
     size_t records = record_size? len / record_size: 0;
     size_t partial_size = len - records * record_size;
-    StringList list = stringlist_create_reserve(records + !!partial_size, strcmp);
+    StringList list = stringlist_create_reserve(records + !!partial_size, container_base_cstring_recipe());
     if (!list)
         return NULL;
 
@@ -138,11 +138,11 @@ StringList stringlist_copy(StringList other) {
 }
 
 StringList stringlist_from_array(const char **strings) {
-    return (StringList) genericlist_from_array((const void **) strings, (Compare) strcmp, (Copier) strdup, (Deleter) FREE);
+    return (StringList) genericlist_from_array((const void **) strings, container_base_cstring_recipe());
 }
 
 StringList stringlist_from_array_n(const char **strings, size_t count) {
-    return (StringList) genericlist_from_array_n((const void **) strings, count, (Compare) strcmp, (Copier) strdup, (Deleter) FREE);
+    return (StringList) genericlist_from_array_n((const void **) strings, count, container_base_cstring_recipe());
 }
 
 StringList stringlist_from_stringset(StringSet other) {
@@ -152,40 +152,6 @@ StringList stringlist_from_stringset(StringSet other) {
 
     for (Iterator it = stringset_begin(other); it; it = stringset_next(other, it)) {
         if (stringlist_append(list, stringset_value_of(other, it))) {
-            stringlist_destroy(list);
-            return NULL;
-        }
-    }
-
-    return list;
-}
-
-StringList stringlist_from_binarylist(BinaryList other) {
-    Binary *array = binarylist_array(other);
-    StringList list = stringlist_create_reserve(binarylist_size(other), NULL);
-    if (!list)
-        return NULL;
-
-    for (size_t i = 0; i < binarylist_size(other); ++i) {
-        if (memchr(array[i].data, 0, array[i].length) != NULL || stringlist_append(list, array[i].data))
-            goto cleanup;
-    }
-
-    return list;
-
-cleanup:
-    stringlist_destroy(list);
-    return NULL;
-}
-
-StringList stringlist_from_genericmap_keys(GenericMap other) {
-    StringList list = stringlist_create_reserve(genericmap_size(other), NULL);
-    if (!list)
-        return NULL;
-
-    for (Iterator it = genericmap_begin(other); it; it = genericmap_next(other, it)) {
-        Binary key = genericmap_key_of(other, it);
-        if (memchr(key.data, 0, key.length) != NULL || stringlist_append(list, key.data)) {
             stringlist_destroy(list);
             return NULL;
         }
@@ -225,7 +191,7 @@ StringList stringlist_from_stringmap_values(StringMap other) {
 }
 
 StringList stringlist_create_filled(const char *item, size_t size) {
-    return (StringList) genericlist_create_filled(item, size, (Compare) strcmp, (Copier) strdup, (Deleter) FREE);
+    return (StringList) genericlist_create_filled(item, size, container_base_cstring_recipe());
 }
 
 StringList stringlist_copy_slice(StringList other, size_t begin_index, size_t length) {
@@ -411,14 +377,6 @@ size_t stringlist_size(StringList list) {
     return genericlist_size((GenericList) list);
 }
 
-StringCompare stringlist_get_compare_fn(StringList list) {
-    return (StringCompare) genericlist_get_compare_fn((GenericList) list);
-}
-
-void stringlist_set_compare_fn(StringList list, StringCompare compare) {
-    genericlist_set_compare_fn((GenericList) list, (Compare) compare);
-}
-
 void stringlist_clear(StringList list) {
     genericlist_clear((GenericList) list);
 }
@@ -427,6 +385,11 @@ void stringlist_destroy(StringList list) {
     genericlist_destroy((GenericList) list);
 }
 
-CommonContainerBase *stringlist_get_container_base(StringList list) {
+const CommonContainerBase *stringlist_get_container_base(StringList list) {
     return genericlist_get_container_base((GenericList) list);
+}
+
+CommonContainerBase *stringlist_build_recipe(StringList list) {
+    return container_base_build_container(stringlist_get_container_base(list),
+                                          container_base_stringlist_recipe());
 }

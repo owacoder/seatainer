@@ -6,31 +6,29 @@
 
 #include "genericlist.h"
 #include "../utility.h"
+#include "recipes.h"
 
 /* For conversions */
 #include "variant.h"
 #include "genericmap.h"
 
 struct GenericListStruct {
-    CommonContainerBase base;
+    CommonContainerBase *base;
     void **array;
-    Compare compare;
-    Copier copy;
-    Deleter deleter;
     size_t array_size;
     size_t array_capacity;
 };
 
 Variant variant_from_genericlist(GenericList list) {
-    return variant_create_custom_base(list, (Compare) genericlist_compare, (Copier) genericlist_copy, (Deleter) genericlist_destroy, *genericlist_get_container_base(list));
+    return variant_create_custom_adopt(list, genericlist_build_recipe(list));
 }
 
 int variant_is_genericlist(Variant var) {
-    return variant_get_copier_fn(var) == (Copier) genericlist_copy;
+    return generic_types_compatible_compare(variant_get_custom_container_base(var), container_base_genericlist_recipe()) == 0;
 }
 
 int variant_is_variantlist(Variant var) {
-    return variant_is_genericlist(var) && genericlist_get_copier_fn((GenericList) variant_get_custom(var)) == (Copier) variant_copy;
+    return generic_types_compatible_compare(variant_get_custom_container_base(var), container_base_variantlist_recipe()) == 0;
 }
 
 GenericList variant_get_genericlist(Variant var) {
@@ -41,22 +39,26 @@ GenericList variant_get_genericlist(Variant var) {
 }
 
 int variant_set_genericlist_move(Variant var, GenericList list) {
-    return variant_set_custom_move_base(var, list, (Compare) genericlist_compare, (Copier) genericlist_copy, (Deleter) genericlist_destroy, *genericlist_get_container_base(list));
+    return variant_set_custom_move(var, list, genericlist_get_container_base(list));
 }
 
 int variant_set_genericlist(Variant var, const GenericList list) {
-    return variant_set_custom_base(var, list, (Compare) genericlist_compare, (Copier) genericlist_copy, (Deleter) genericlist_destroy, *genericlist_get_container_base(list));
+    return variant_set_custom(var, list, genericlist_get_container_base(list));
 }
 
-GenericList genericlist_create(Compare compare, Copier copy, Deleter deleter) {
-    return genericlist_create_reserve(0, compare, copy, deleter);
+GenericList genericlist_create(const CommonContainerBase *base) {
+    return genericlist_create_reserve(0, base);
 }
 
-GenericList genericlist_create_reserve(size_t reserve, Compare compare, Copier copy, Deleter deleter) {
+GenericList genericlist_create_reserve(size_t reserve, const CommonContainerBase *base) {
+    if (base == NULL)
+        return NULL;
+
     const size_t minimum_size = 8;
     GenericList list = CALLOC(1, sizeof(*list));
-    if (!list)
-        return NULL;
+    CommonContainerBase *new_base = container_base_copy_if_dynamic(base);
+    if (!list || !new_base)
+        goto cleanup;
 
     list->array_capacity = MAX(minimum_size, reserve);
     while (1) {
@@ -67,21 +69,24 @@ GenericList genericlist_create_reserve(size_t reserve, Compare compare, Copier c
                 continue;
             }
 
-            FREE(list);
-            return NULL;
+            goto cleanup;
         }
+
         list->array[0] = NULL;
-        list->compare = compare;
-        list->copy = copy;
-        list->deleter = deleter? deleter: (Deleter) FREE;
+        list->base = new_base;
 
         return list;
     }
+
+cleanup:
+    FREE(list);
+    container_base_destroy_if_dynamic(new_base);
+    return NULL;
 }
 
 GenericList genericlist_copy(GenericList other) {
     void **array = genericlist_array(other);
-    GenericList list = genericlist_create_reserve(other->array_size, other->compare, other->copy, other->deleter);
+    GenericList list = genericlist_create_reserve(other->array_size, other->base);
     if (!list)
         return NULL;
 
@@ -95,10 +100,10 @@ GenericList genericlist_copy(GenericList other) {
 }
 
 GenericList genericlist_concatenate(GenericList left, GenericList right) {
-    GenericList result = genericlist_create_reserve(genericlist_size(left) + genericlist_size(right),
-                                                    genericlist_get_compare_fn(left),
-                                                    genericlist_get_copier_fn(left),
-                                                    genericlist_get_deleter_fn(left));
+    if (generic_types_compatible_compare(genericlist_get_container_base(left), genericlist_get_container_base(right)) != 0)
+        return NULL;
+
+    GenericList result = genericlist_create_reserve(genericlist_size(left) + genericlist_size(right), genericlist_get_container_base(left));
 
     if (result == NULL)
         return NULL;
@@ -120,11 +125,8 @@ GenericList genericlist_concatenate(GenericList left, GenericList right) {
     return result;
 }
 
-GenericList genericlist_from_genericmap_values(GenericMap other, Compare compare) {
-    GenericList list = genericlist_create_reserve(genericmap_size(other),
-                                                  compare,
-                                                  genericmap_get_copier_fn(other),
-                                                  genericmap_get_deleter_fn(other));
+GenericList genericlist_from_genericmap_values(GenericMap other) {
+    GenericList list = genericlist_create_reserve(genericmap_size(other), genericmap_get_value_container_base(other));
     if (!list)
         return NULL;
 
@@ -138,17 +140,17 @@ GenericList genericlist_from_genericmap_values(GenericMap other, Compare compare
     return list;
 }
 
-GenericList genericlist_from_array(const void **items, Compare compare, Copier copy, Deleter deleter) {
+GenericList genericlist_from_array(const void **items, const CommonContainerBase *base) {
     const void **ptr = items;
     size_t count = 0;
 
     for (; *ptr; ++ptr, ++count);
 
-    return genericlist_from_array_n(items, count, compare, copy, deleter);
+    return genericlist_from_array_n(items, count, base);
 }
 
-GenericList genericlist_from_array_n(const void **items, size_t count, Compare compare, Copier copy, Deleter deleter) {
-    GenericList list = genericlist_create_reserve(count, compare, copy, deleter);
+GenericList genericlist_from_array_n(const void **items, size_t count, const CommonContainerBase *base) {
+    GenericList list = genericlist_create_reserve(count, base);
     if (!list)
         return NULL;
 
@@ -162,8 +164,8 @@ GenericList genericlist_from_array_n(const void **items, size_t count, Compare c
     return list;
 }
 
-GenericList genericlist_create_filled(const void *item, size_t size, Compare compare, Copier copy, Deleter deleter) {
-    GenericList list = genericlist_create_reserve(size, compare, copy, deleter);
+GenericList genericlist_create_filled(const void *item, size_t size, const CommonContainerBase *base) {
+    GenericList list = genericlist_create_reserve(size, base);
     if (!list || genericlist_fill(list, item, size)) {
         genericlist_destroy(list);
         return NULL;
@@ -179,7 +181,7 @@ GenericList genericlist_copy_slice(GenericList other, size_t begin_index, size_t
     if (genericlist_size(other) - begin_index < length)
         length = genericlist_size(other) - begin_index;
 
-    GenericList list = genericlist_create_reserve(length, genericlist_get_compare_fn(other), genericlist_get_copier_fn(other), genericlist_get_deleter_fn(other));
+    GenericList list = genericlist_create_reserve(length, genericlist_get_container_base(other));
     if (list == NULL)
         return NULL;
 
@@ -213,7 +215,7 @@ static int genericlist_grow(GenericList list, size_t added) {
 }
 
 int genericlist_fill(GenericList list, const void *item, size_t size) {
-    if (list->copy == NULL)
+    if (list->base->copier == NULL)
         return CC_ENOTSUP;
 
     size_t fill_size = MIN(genericlist_size(list), size);
@@ -223,11 +225,12 @@ int genericlist_fill(GenericList list, const void *item, size_t size) {
         return error;
 
     for (size_t i = 0; i < fill_size; ++i) {
-        void *duplicate = list->copy(item);
+        void *duplicate = list->base->copier(item);
         if (duplicate == NULL && item != NULL)
             return CC_ENOMEM;
 
-        list->deleter(list->array[i]);
+        if (list->base->deleter)
+            list->base->deleter(list->array[i]);
         list->array[i] = duplicate;
     }
 
@@ -238,7 +241,7 @@ int genericlist_resize(GenericList list, size_t size, const void *empty_item) {
     size_t original_size = genericlist_size(list);
 
     if (size > original_size) {
-        if (list->copy == NULL)
+        if (list->base->copier == NULL)
             return CC_ENOTSUP;
 
         int error = genericlist_grow(list, size - original_size);
@@ -246,7 +249,7 @@ int genericlist_resize(GenericList list, size_t size, const void *empty_item) {
             return error;
 
         for (size_t i = original_size; i < size; ++i) {
-            void *duplicate = list->copy(empty_item);
+            void *duplicate = list->base->copier(empty_item);
             if (duplicate == NULL && empty_item != NULL) {
                 list->array_size = i;
                 goto cleanup;
@@ -254,9 +257,9 @@ int genericlist_resize(GenericList list, size_t size, const void *empty_item) {
 
             list->array[i] = duplicate;
         }
-    } else if (size < original_size) {
+    } else if (size < original_size && list->base->deleter) {
         for (size_t i = size; i < original_size; ++i) {
-            list->deleter(list->array[i]);
+            list->base->deleter(list->array[i]);
         }
     }
 
@@ -266,8 +269,10 @@ int genericlist_resize(GenericList list, size_t size, const void *empty_item) {
     return 0;
 
 cleanup:
-    for (size_t i = original_size; i < list->array_size; ++i) {
-        list->deleter(list->array[i]);
+    if (list->base->deleter) {
+        for (size_t i = original_size; i < list->array_size; ++i) {
+            list->base->deleter(list->array[i]);
+        }
     }
 
     list->array_size = original_size;
@@ -289,9 +294,12 @@ int genericlist_append_list(GenericList list, GenericList other) {
     return 0;
 
 cleanup:
-    for (size_t i = original_size; i < genericlist_size(list); ++i) {
-        list->deleter(list->array[i]);
+    if (list->base->deleter) {
+        for (size_t i = original_size; i < genericlist_size(list); ++i) {
+            list->base->deleter(list->array[i]);
+        }
     }
+
     list->array_size = original_size;
     list->array[list->array_size] = NULL;
     return err;
@@ -308,22 +316,22 @@ int genericlist_append_move(GenericList list, void *item) {
 }
 
 int genericlist_append(GenericList list, const void *item) {
-    if (list->copy == NULL)
+    if (list->base->copier == NULL)
         return CC_ENOTSUP;
 
-    void *duplicate = list->copy(item);
+    void *duplicate = list->base->copier(item);
     if (duplicate == NULL && item != NULL)
         return CC_ENOMEM;
 
     int err = genericlist_append_move(list, duplicate);
-    if (err)
-        list->deleter(duplicate);
+    if (err && list->base->deleter)
+        list->base->deleter(duplicate);
 
     return err;
 }
 
 int genericlist_insert_list(GenericList list, GenericList other, size_t before_index) {
-    if (list->copy == NULL)
+    if (list->base->copier == NULL)
         return CC_ENOTSUP;
 
     if (before_index >= genericlist_size(list))
@@ -348,7 +356,7 @@ int genericlist_insert_list(GenericList list, GenericList other, size_t before_i
                 source_index += original_size;
 
             const void *other_item = list->array[source_index];
-            void *duplicate = list->copy(other_item);
+            void *duplicate = list->base->copier(other_item);
             if (duplicate == NULL && other_item != NULL) {
                 rollback_location = destination_index;
                 goto cleanup;
@@ -359,7 +367,7 @@ int genericlist_insert_list(GenericList list, GenericList other, size_t before_i
     } else {
         for (size_t i = before_index; i < before_index + other_size; ++i) {
             const void *other_item = other->array[i-before_index];
-            void *duplicate = list->copy(other_item);
+            void *duplicate = list->base->copier(other_item);
             if (duplicate == NULL && other_item != NULL) {
                 rollback_location = i;
                 goto cleanup;
@@ -375,8 +383,10 @@ int genericlist_insert_list(GenericList list, GenericList other, size_t before_i
     return 0;
 
 cleanup:
-    for (size_t i = before_index; i < rollback_location; ++i) {
-        list->deleter(list->array[i]);
+    if (list->base->deleter) {
+        for (size_t i = before_index; i < rollback_location; ++i) {
+            list->base->deleter(list->array[i]);
+        }
     }
 
     /* One is added at the end of the move so the trailing NULL will be moved back as well */
@@ -398,21 +408,22 @@ int genericlist_insert_move(GenericList list, void *item, size_t before_index) {
 
     /* Insert into list */
     list->array[before_index] = item;
-    list->array[list->array_size] = NULL;
+    list->array[++list->array_size] = NULL;
+
     return 0;
 }
 
 int genericlist_insert(GenericList list, const void *item, size_t before_index) {
-    if (list->copy == NULL)
+    if (list->base->copier == NULL)
         return CC_ENOTSUP;
 
-    void *duplicate = list->copy(item);
+    void *duplicate = list->base->copier(item);
     if (duplicate == NULL && item != NULL)
         return CC_ENOMEM;
 
     int err = genericlist_insert_move(list, duplicate, before_index);
-    if (err)
-        list->deleter(duplicate);
+    if (err && list->base->deleter)
+        list->base->deleter(duplicate);
 
     return err;
 }
@@ -421,22 +432,24 @@ int genericlist_replace_move_at(GenericList list, size_t index, void *item) {
     if (index >= list->array_size)
         return CC_EINVAL;
 
-    list->deleter(list->array[index]);
+    if (list->base->deleter)
+        list->base->deleter(list->array[index]);
+
     list->array[index] = item;
     return 0;
 }
 
 int genericlist_replace_at(GenericList list, size_t index, const void *item) {
-    if (list->copy == NULL)
+    if (list->base->copier == NULL)
         return CC_ENOTSUP;
 
-    void *duplicate = list->copy(item);
+    void *duplicate = list->base->copier(item);
     if (duplicate == NULL && item != NULL)
         return CC_ENOMEM;
 
     int err = genericlist_replace_move_at(list, index, duplicate);
-    if (err)
-        list->deleter(duplicate);
+    if (err && list->base->deleter)
+        list->base->deleter(duplicate);
 
     return err;
 }
@@ -474,8 +487,10 @@ size_t genericlist_erase(GenericList list, size_t begin_index, size_t end_index)
         end_index = genericlist_size(list);
 
     size_t length = end_index - begin_index;
-    for (size_t i = begin_index; i < end_index; ++i) {
-        list->deleter(list->array[i]);
+    if (list->base->deleter) {
+        for (size_t i = begin_index; i < end_index; ++i) {
+            list->base->deleter(list->array[i]);
+        }
     }
 
     memmove(list->array + begin_index, list->array + end_index, (genericlist_size(list) - end_index) * sizeof(*list->array));
@@ -494,11 +509,11 @@ int genericlist_contains(GenericList list, const void *item) {
 }
 
 size_t genericlist_find(GenericList list, const void *item, size_t begin_index) {
-    if (list->compare == NULL)
+    if (list->base->compare == NULL)
         return SIZE_MAX;
 
     for (size_t i = begin_index; i < genericlist_size(list); ++i) {
-        if (list->compare(genericlist_array(list)[i], item) == 0)
+        if (list->base->compare(item, genericlist_array(list)[i]) == 0)
             return i;
     }
 
@@ -506,14 +521,14 @@ size_t genericlist_find(GenericList list, const void *item, size_t begin_index) 
 }
 
 size_t genericlist_rfind(GenericList list, const void *item, size_t begin_index) {
-    if (list->compare == NULL)
+    if (list->base->compare == NULL)
         return SIZE_MAX;
 
     if (begin_index >= genericlist_size(list))
         begin_index = genericlist_size(list)-1;
 
     for (size_t i = begin_index; i != SIZE_MAX; --i) {
-        if (list->compare(genericlist_array(list)[i], item) == 0)
+        if (list->base->compare(item, genericlist_array(list)[i]) == 0)
             return i;
     }
 
@@ -521,17 +536,15 @@ size_t genericlist_rfind(GenericList list, const void *item, size_t begin_index)
 }
 
 int genericlist_compare(GenericList list, GenericList other) {
-    int cmp = generictypes_compatible_compare(list->compare, other->compare,
-                                              list->copy, other->copy,
-                                              list->deleter, other->deleter);
+    int cmp = generic_types_compatible_compare(genericlist_get_container_base(list), genericlist_get_container_base(other));
     if (cmp)
         return cmp;
 
     size_t max = MIN(genericlist_size(list), genericlist_size(other));
 
-    if (list->compare != NULL) {
+    if (list->base->compare != NULL) {
         for (size_t i = 0; i < max; ++i) {
-            int cmp = list->compare(genericlist_array(list)[i], genericlist_array(other)[i]);
+            int cmp = list->base->compare(genericlist_array(list)[i], genericlist_array(other)[i]);
 
             if (cmp)
                 return cmp;
@@ -682,15 +695,15 @@ GenericList genericlist_stable_sorted(GenericList list, int descending) {
 }
 
 int genericlist_sort(GenericList list, int descending) {
-    if (list->compare == NULL)
+    if (list->base->compare == NULL)
         return CC_ENOTSUP;
 
-    genericlist_heap_sort_helper(list->array, genericlist_size(list), descending? -1: 1, list->compare);
+    genericlist_heap_sort_helper(list->array, genericlist_size(list), descending? -1: 1, list->base->compare);
     return 0;
 }
 
 int genericlist_stable_sort(GenericList list, int descending) {
-    if (list->compare == NULL)
+    if (list->base->compare == NULL)
         return CC_ENOTSUP;
 
     void **temp = MALLOC(genericlist_size(list) * sizeof(*temp));
@@ -698,7 +711,7 @@ int genericlist_stable_sort(GenericList list, int descending) {
         return CC_ENOMEM;
 
     memcpy(temp, list->array, genericlist_size(list) * sizeof(*temp));
-    genericlist_merge_sort_helper(temp, list->array, 0, genericlist_size(list), descending? -1: 1, list->compare);
+    genericlist_merge_sort_helper(temp, list->array, 0, genericlist_size(list), descending? -1: 1, list->base->compare);
 
     FREE(temp);
 
@@ -734,33 +747,85 @@ size_t genericlist_size(GenericList list) {
 }
 
 Compare genericlist_get_compare_fn(GenericList list) {
-    return list->compare;
-}
-
-void genericlist_set_compare_fn(GenericList list, Compare compare) {
-    list->compare = compare;
+    return list->base->compare;
 }
 
 Copier genericlist_get_copier_fn(GenericList list) {
-    return list->copy;
-}
-
-void genericlist_set_copier_fn(GenericList list, Copier copier) {
-    list->copy = copier;
+    return list->base->copier;
 }
 
 Deleter genericlist_get_deleter_fn(GenericList list) {
-    return list->deleter;
+    return list->base->deleter;
 }
 
-void genericlist_set_deleter_fn(GenericList list, Deleter deleter) {
-    if (deleter != NULL)
-        list->deleter = deleter;
+Parser genericlist_get_parser_fn(GenericList list) {
+    return list->base->parse;
+}
+
+Serializer genericlist_get_serializer_fn(GenericList list) {
+    return list->base->serialize;
+}
+
+int genericlist_set_compare_fn(GenericList list, Compare compare) {
+    CommonContainerBase *base = container_base_copy_if_static(list->base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->compare = compare;
+    list->base = base;
+
+    return 0;
+}
+
+int genericlist_set_copier_fn(GenericList list, Copier copier) {
+    CommonContainerBase *base = container_base_copy_if_static(list->base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->copier = copier;
+    list->base = base;
+
+    return 0;
+}
+
+int genericlist_set_deleter_fn(GenericList list, Deleter deleter) {
+    CommonContainerBase *base = container_base_copy_if_static(list->base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->deleter = deleter;
+    list->base = base;
+
+    return 0;
+}
+
+int genericlist_set_parser_fn(GenericList list, Parser parser) {
+    CommonContainerBase *base = container_base_copy_if_static(list->base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->parse = parser;
+    list->base = base;
+
+    return 0;
+}
+
+int genericlist_set_serializer_fn(GenericList list, Serializer serializer) {
+    CommonContainerBase *base = container_base_copy_if_static(list->base, 1);
+    if (base == NULL)
+        return CC_ENOMEM;
+
+    base->serialize = serializer;
+    list->base = base;
+
+    return 0;
 }
 
 void genericlist_clear(GenericList list) {
-    for (size_t i = 0; i < genericlist_size(list); ++i)
-        list->deleter(list->array[i]);
+    if (list->base->deleter) {
+        for (size_t i = 0; i < genericlist_size(list); ++i)
+            list->base->deleter(list->array[i]);
+    }
 
     list->array_size = 0;
     list->array[0] = NULL;
@@ -768,14 +833,22 @@ void genericlist_clear(GenericList list) {
 
 void genericlist_destroy(GenericList list) {
     if (list) {
-        for (size_t i = 0; i < genericlist_size(list); ++i)
-            list->deleter(list->array[i]);
+        if (list->base->deleter) {
+            for (size_t i = 0; i < genericlist_size(list); ++i)
+                list->base->deleter(list->array[i]);
+        }
 
+        container_base_destroy_if_dynamic(list->base);
         FREE(list->array);
         FREE(list);
     }
 }
 
-CommonContainerBase *genericlist_get_container_base(GenericList list) {
-    return &list->base;
+const CommonContainerBase *genericlist_get_container_base(GenericList list) {
+    return list->base;
+}
+
+CommonContainerBase *genericlist_build_recipe(GenericList list) {
+    return container_base_build_container(genericlist_get_container_base(list),
+                                          container_base_genericlist_recipe());
 }

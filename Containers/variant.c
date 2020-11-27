@@ -6,6 +6,7 @@
 
 #include "variant.h"
 #include "../utility.h"
+#include "recipes.h"
 
 #include <float.h>
 #include <math.h>
@@ -13,9 +14,7 @@
 #include <stdio.h>
 
 struct VariantStructCustomHelper {
-    Compare compare;
-    Copier copy;
-    Deleter deleter;
+    CommonContainerBase *base;
     void *data;
 };
 
@@ -35,135 +34,106 @@ struct VariantStruct {
         struct VariantStructAtomHelper atom;
     } d;
     enum VariantType type;
-    CommonContainerBase base;
 };
 
 static void variant_clear_to(Variant var, enum VariantType type) {
-    if (variant_get_type(var) == VariantCustom)
-        var->d.custom.deleter(var->d.custom.data);
-    else
+    if (variant_get_type(var) == VariantCustom) {
+        var->d.custom.base->deleter(var->d.custom.data);
+        container_base_destroy_if_dynamic(var->d.custom.base);
+    } else
         FREE(var->d.atom.string.data);
-
-    if (!var->base.cvt_expects_variant && type != var->type)
-        var->base = empty_container_base();
 
     var->d.atom.string.data = NULL;
     var->d.atom.string.length = 0;
     var->type = type;
 }
 
-Variant variant_create_null() {return variant_create_null_base(empty_container_base());}
-
-Variant variant_create_null_base(CommonContainerBase base) {
+Variant variant_create_null() {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
 
     var->type = VariantNull;
-    var->base = base;
 
     return var;
 }
 
-Variant variant_create_boolean(int b) {return variant_create_boolean_base(b, empty_container_base());}
-
-Variant variant_create_boolean_base(int b, CommonContainerBase base) {
+Variant variant_create_boolean(int b) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
 
     var->type = VariantBoolean;
     var->d.atom.d.boolean = !!b;
-    var->base = base;
 
     return var;
 }
 
-Variant variant_create_int(int value) {return variant_create_int_base(value, empty_container_base());}
-
-Variant variant_create_int_base(int value, CommonContainerBase base) {
-    return variant_create_int64_base(value, base);
+Variant variant_create_int(int value) {
+    return variant_create_int64(value);
 }
 
-Variant variant_create_uint(unsigned int value) {return variant_create_uint_base(value, empty_container_base());}
-
-Variant variant_create_uint_base(unsigned int value, CommonContainerBase base) {
-    return variant_create_uint64_base(value, base);
+Variant variant_create_uint(unsigned int value) {
+    return variant_create_uint64(value);
 }
 
-Variant variant_create_int64(long long value) {return variant_create_int64_base(value, empty_container_base());}
-
-Variant variant_create_int64_base(long long value, CommonContainerBase base) {
+Variant variant_create_int64(long long value) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
 
     var->type = VariantInteger;
     var->d.atom.d.integer = value;
-    var->base = base;
 
     return var;
 }
 
-Variant variant_create_uint64(unsigned long long value) {return variant_create_uint64_base(value, empty_container_base());}
-
-Variant variant_create_uint64_base(unsigned long long value, CommonContainerBase base) {
+Variant variant_create_uint64(unsigned long long value) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
 
     var->type = VariantUnsignedInteger;
     var->d.atom.d.unsigned_integer = value;
-    var->base = base;
 
     return var;
 }
 
-Variant variant_create_float(double value) {return variant_create_float_base(value, empty_container_base());}
-
-Variant variant_create_float_base(double value, CommonContainerBase base) {
+Variant variant_create_float(double value) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
 
     var->type = VariantFloat;
     var->d.atom.d.floating = value;
-    var->base = base;
 
     return var;
 }
 
-Variant variant_create_string_move(char *value) {return variant_create_string_move_base(value, empty_container_base());}
-
-Variant variant_create_string_move_base(char *value, CommonContainerBase base) {
+Variant variant_create_string_move(char *value) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
 
     var->type = VariantString;
     var->d.atom.string.data = value;
-    var->base = base;
 
     return var;
 }
 
-Variant variant_create_string(const char *value) {return variant_create_string_base(value, empty_container_base());}
-
-Variant variant_create_string_base(const char *value, CommonContainerBase base) {
+Variant variant_create_string(const char *value) {
     char *duplicate = strdup(value);
     if (duplicate == NULL)
         return NULL;
 
-    Variant var = variant_create_string_move_base(duplicate, base);
+    Variant var = variant_create_string_move(duplicate);
     if (var == NULL)
         FREE(duplicate);
 
     return var;
 }
 
-Variant variant_create_binary_string_move(char *value, size_t value_len) {return variant_create_binary_string_move_base(value, value_len, empty_container_base());}
-
-Variant variant_create_binary_string_move_base(char *value, size_t value_len, CommonContainerBase base) {
+Variant variant_create_binary_string_move(char *value, size_t value_len) {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
         return NULL;
@@ -171,19 +141,16 @@ Variant variant_create_binary_string_move_base(char *value, size_t value_len, Co
     var->type = VariantBinary;
     var->d.atom.string.data = value;
     var->d.atom.string.length = value_len;
-    var->base = base;
 
     return var;
 }
 
-Variant variant_create_binary_string(const char *value, size_t value_len) {return variant_create_binary_string_base(value, value_len, empty_container_base());}
-
-Variant variant_create_binary_string_base(const char *value, size_t value_len, CommonContainerBase base) {
+Variant variant_create_binary_string(const char *value, size_t value_len) {
     char *duplicate = MALLOC(value_len+1);
     if (duplicate == NULL)
         return NULL;
 
-    Variant var = variant_create_binary_string_move_base(duplicate, value_len, base);
+    Variant var = variant_create_binary_string_move(duplicate, value_len);
     if (var == NULL)
         FREE(duplicate);
     else {
@@ -198,70 +165,92 @@ Variant variant_create_binary_string_binary_move(Binary value) {
     return variant_create_binary_string_move(value.data, value.length);
 }
 
-Variant variant_create_binary_string_binary_move_base(Binary value, CommonContainerBase base) {
-    return variant_create_binary_string_move_base(value.data, value.length, base);
-}
-
 Variant variant_create_binary_string_binary(const Binary value) {
     return variant_create_binary_string(value.data, value.length);
 }
 
-Variant variant_create_binary_string_binary_base(const Binary value, CommonContainerBase base) {
-    return variant_create_binary_string_base(value.data, value.length, base);
-}
-
-Variant variant_create_custom_move(void *item, Compare compare, Copier copier, Deleter deleter) {return variant_create_custom_move_base(item, compare, copier, deleter, empty_container_base());}
-
-Variant variant_create_custom_move_base(void *item, Compare compare, Copier copier, Deleter deleter, CommonContainerBase base) {
+Variant variant_create_custom_move(void *item, const CommonContainerBase *base) {
     Variant var = CALLOC(sizeof(*var), 1);
-    if (var == NULL)
+    CommonContainerBase *new_base = container_base_copy_if_dynamic(base);
+    if (var == NULL || new_base == NULL) {
+        FREE(var);
+        FREE(new_base);
         return NULL;
+    }
 
     var->type = VariantCustom;
-    var->d.custom.compare = compare;
-    var->d.custom.copy = copier;
-    var->d.custom.deleter = deleter? deleter: (Deleter) FREE;
     var->d.custom.data = item;
-    var->base = base;
+    var->d.custom.base = new_base;
 
     return var;
 }
 
-Variant variant_create_custom(const void *item, Compare compare, Copier copier, Deleter deleter) {return variant_create_custom_base(item, compare, copier, deleter, empty_container_base());}
-
-Variant variant_create_custom_base(const void *item, Compare compare, Copier copier, Deleter deleter, CommonContainerBase base) {
-    if (copier == NULL)
+Variant variant_create_custom(const void *item, const CommonContainerBase *base) {
+    if (base->copier == NULL) /* Needed in order to copy item */
         return NULL;
 
-    if (deleter == NULL)
-        deleter = FREE;
-
-    void *duplicate = copier(item);
+    void *duplicate = base->copier(item);
     if (duplicate == NULL && item != NULL)
         return NULL;
 
-    Variant var = variant_create_custom_move_base(duplicate, compare, copier, deleter, base);
-    if (var == NULL)
-        deleter(duplicate);
+    Variant var = variant_create_custom_move(duplicate, base);
+    if (var == NULL && base->deleter)
+        base->deleter(duplicate);
 
     return var;
+}
+
+Variant variant_create_custom_move_adopt(void *item, CommonContainerBase *base) {
+    if (base == NULL)
+        return NULL;
+
+    Variant var = CALLOC(sizeof(*var), 1);
+    if (var == NULL) {
+        container_base_destroy_if_dynamic(base);
+        return NULL;
+    }
+
+    var->type = VariantCustom;
+    var->d.custom.data = item;
+    var->d.custom.base = base;
+
+    return var;
+}
+
+Variant variant_create_custom_adopt(const void *item, CommonContainerBase *base) {
+    if (base == NULL || base->copier == NULL) /* Needed to copy item */
+        goto cleanup;
+
+    void *duplicate = base->copier(item);
+    if (duplicate == NULL && item != NULL)
+        goto cleanup;
+
+    Variant var = variant_create_custom_move_adopt(duplicate, base);
+    if (var == NULL) {
+        if (base->deleter)
+            base->deleter(duplicate);
+
+        return NULL; /* The variant_create function already cleaned up the base */
+    }
+
+    return var;
+
+cleanup:
+    container_base_destroy_if_dynamic(base);
+    return NULL;
 }
 
 Variant variant_copy(Variant other) {
     switch (variant_get_type(other)) {
         default:
-        case VariantNull: return variant_create_null_base(*variant_get_container_base(other));
-        case VariantBoolean: return variant_create_boolean_base(variant_get_boolean(other), *variant_get_container_base(other));
-        case VariantInteger: return variant_create_int64_base(variant_get_int64(other), *variant_get_container_base(other));
-        case VariantUnsignedInteger: return variant_create_uint64_base(variant_get_uint64(other), *variant_get_container_base(other));
-        case VariantFloat: return variant_create_float_base(variant_get_float(other), *variant_get_container_base(other));
-        case VariantString: return variant_create_string_base(variant_get_string(other), *variant_get_container_base(other));
-        case VariantBinary: return variant_create_binary_string_binary_base(variant_get_binary(other), *variant_get_container_base(other));
-        case VariantCustom: return variant_create_custom_base(variant_get_custom(other),
-                                                              variant_get_compare_fn(other),
-                                                              variant_get_copier_fn(other),
-                                                              variant_get_deleter_fn(other),
-                                                              *variant_get_container_base(other));
+        case VariantNull: return variant_create_null();
+        case VariantBoolean: return variant_create_boolean(variant_get_boolean(other));
+        case VariantInteger: return variant_create_int64(variant_get_int64(other));
+        case VariantUnsignedInteger: return variant_create_uint64(variant_get_uint64(other));
+        case VariantFloat: return variant_create_float(variant_get_float(other));
+        case VariantString: return variant_create_string(variant_get_string(other));
+        case VariantBinary: return variant_create_binary_string_binary(variant_get_binary(other));
+        case VariantCustom: return variant_create_custom(variant_get_custom(other), variant_get_custom_container_base(other));
     }
 }
 
@@ -280,16 +269,14 @@ int variant_compare(Variant lhs, Variant rhs) {
         case VariantString: return strcmp(lhs->d.atom.string.data, rhs->d.atom.string.data);
         case VariantBinary: return binary_compare(&lhs->d.atom.string, &rhs->d.atom.string);
         case VariantCustom: {
-            int cmp = generictypes_compatible_compare(lhs->d.custom.compare, rhs->d.custom.compare,
-                                                      lhs->d.custom.copy, rhs->d.custom.copy,
-                                                      lhs->d.custom.deleter, rhs->d.custom.deleter);
+            int cmp = generic_types_compatible_compare(lhs->d.custom.base, rhs->d.custom.base);
             if (cmp)
                 return cmp;
 
-            if (lhs->d.custom.compare)
-                return lhs->d.custom.compare(lhs->d.custom.data, rhs->d.custom.data);
-            else if (rhs->d.custom.compare)
-                return rhs->d.custom.compare(lhs->d.custom.data, rhs->d.custom.data);
+            if (lhs->d.custom.base->compare)
+                return lhs->d.custom.base->compare(lhs->d.custom.data, rhs->d.custom.data);
+            else if (rhs->d.custom.base->compare)
+                return rhs->d.custom.base->compare(lhs->d.custom.data, rhs->d.custom.data);
 
             return 0; /* Assume equal if no comparison function */
         }
@@ -302,48 +289,9 @@ enum VariantType variant_get_type(Variant var) {
 
 int variants_are_equal_types(Variant a, Variant b) {
     if (variant_is_custom(a) && variant_is_custom(b))
-        return !generictypes_compatible_compare(a->d.custom.compare, b->d.custom.compare,
-                                                a->d.custom.copy, b->d.custom.copy,
-                                                a->d.custom.deleter, b->d.custom.deleter);
+        return !generic_types_compatible_compare(a->d.custom.base, b->d.custom.base);
 
     return a->type == b->type;
-}
-
-Compare variant_get_compare_fn(Variant var) {
-    if (!variant_is_custom(var))
-        return NULL;
-
-    return var->d.custom.compare;
-}
-
-Copier variant_get_copier_fn(Variant var) {
-    if (!variant_is_custom(var))
-        return NULL;
-
-    return var->d.custom.copy;
-}
-
-Deleter variant_get_deleter_fn(Variant var) {
-    if (!variant_is_custom(var))
-        return NULL;
-
-    return var->d.custom.deleter;
-}
-
-VariantParser variant_get_parser_fn(Variant var) {
-    return (VariantParser) var->base.parse;
-}
-
-VariantSerializer variant_get_serializer_fn(Variant var) {
-    return (VariantSerializer) var->base.serialize;
-}
-
-void variant_set_parser_fn(Variant var, VariantParser parse) {
-    var->base.parse = (Parser) parse;
-}
-
-void variant_set_serializer_fn(Variant var, VariantSerializer serialize) {
-    var->base.serialize = (Serializer) serialize;
 }
 
 int variant_is_null(Variant var) {
@@ -507,46 +455,69 @@ int variant_set_binary_string_binary(Variant var, const Binary value) {
     return variant_set_binary_string(var, value.data, value.length);
 }
 
-int variant_set_custom_move(Variant var, void *item, Compare compare, Copier copier, Deleter deleter) {
-    return variant_set_custom_move_base(var, item, compare, copier, deleter, empty_container_base());
-}
-
-int variant_set_custom_move_base(Variant var, void *item, Compare compare, Copier copier, Deleter deleter, CommonContainerBase base) {
-    if (compare == NULL || copier == NULL)
-        return CC_EINVAL;
-
-    variant_clear_to(var, VariantCustom);
-
-    var->d.custom.compare = compare;
-    var->d.custom.copy = copier;
-    var->d.custom.deleter = deleter? deleter: (Deleter) FREE;
-    var->d.custom.data = item;
-    var->base = base;
-
-    return 0;
-}
-
-int variant_set_custom(Variant var, const void *item, Compare compare, Copier copier, Deleter deleter) {
-    return variant_set_custom_base(var, item, compare, copier, deleter, empty_container_base());
-}
-
-int variant_set_custom_base(Variant var, const void *item, Compare compare, Copier copier, Deleter deleter, CommonContainerBase base) {
-    if (compare == NULL || copier == NULL)
-        return CC_EINVAL;
-
-    void *duplicate = copier(item);
-    if (duplicate == NULL && item != NULL)
+int variant_set_custom_move(Variant var, void *item, const CommonContainerBase *base) {
+    CommonContainerBase *new_base = container_base_copy_if_dynamic(base);
+    if (new_base == NULL)
         return CC_ENOMEM;
 
     variant_clear_to(var, VariantCustom);
 
-    var->d.custom.compare = compare;
-    var->d.custom.copy = copier;
-    var->d.custom.deleter = deleter? deleter: (Deleter) FREE;
-    var->d.custom.data = duplicate;
-    var->base = base;
+    var->d.custom.data = item;
+    var->d.custom.base = new_base;
 
     return 0;
+}
+
+int variant_set_custom(Variant var, const void *item, const CommonContainerBase *base) {
+    if (base == NULL || base->copier == NULL)
+        return CC_EINVAL;
+
+    void *duplicate = base->copier(item);
+    if (duplicate == NULL && item != NULL)
+        return CC_ENOMEM;
+
+    int err = variant_set_custom_move(var, duplicate, base);
+    if (err && base->deleter)
+        base->deleter(duplicate);
+
+    return err;
+}
+
+int variant_set_custom_move_adopt(Variant var, void *item, CommonContainerBase *base) {
+    if (base == NULL)
+        return CC_EINVAL;
+
+    variant_clear_to(var, VariantCustom);
+
+    var->d.custom.data = item;
+    var->d.custom.base = base;
+
+    return 0;
+}
+
+int variant_set_custom_adopt(Variant var, const void *item, CommonContainerBase *base) {
+    int err = 0;
+
+    if (base == NULL || base->copier == NULL) {
+        err = CC_EINVAL;
+        goto cleanup;
+    }
+
+    void *duplicate = base->copier(item);
+    if (duplicate == NULL && item != NULL) {
+        err = CC_ENOMEM;
+        goto cleanup;
+    }
+
+    err = variant_set_custom_move_adopt(var, duplicate, base);
+    if (err && base->deleter)
+        base->deleter(duplicate);
+
+    return err;
+
+cleanup:
+    container_base_destroy_if_dynamic(base);
+    return err;
 }
 
 int variant_set_variant(Variant var, const Variant other) {
@@ -902,10 +873,10 @@ const char *variant_to_string(Variant var, int *error) {
             break;
         }
         case VariantFloat: {
-            size_t len = snprintf(NULL, 0, "%.*g", DECIMAL_DIG-1, var->d.atom.d.floating);
+            size_t len = snprintf(NULL, 0, "%.*g", DBL_DIG-1, var->d.atom.d.floating);
             string = MALLOC(len+1);
             if (string)
-                snprintf(string, len+1, "%.*g", DECIMAL_DIG-1, var->d.atom.d.floating);
+                snprintf(string, len+1, "%.*g", DBL_DIG-1, var->d.atom.d.floating);
             break;
         }
     }
@@ -946,7 +917,10 @@ void variant_clear(Variant var) {
 void variant_destroy(Variant var) {
     if (var) {
         if (variant_get_type(var) == VariantCustom) {
-            var->d.custom.deleter(var->d.custom.data);
+            if (var->d.custom.base->deleter)
+                var->d.custom.base->deleter(var->d.custom.data);
+
+            container_base_destroy_if_dynamic(var->d.custom.base);
         } else {
             FREE(var->d.atom.string.data);
         }
@@ -955,30 +929,16 @@ void variant_destroy(Variant var) {
     }
 }
 
-CommonContainerBase *variant_get_container_base(Variant var) {
-    return &var->base;
+const CommonContainerBase *variant_get_custom_container_base(Variant var) {
+    if (variant_is_custom(var))
+        return var->d.custom.base;
+
+    return NULL;
 }
 
-int variant_serialize(void *output, Variant var, struct SerializerIdentity *type) {
-    if (var == NULL)
-        return CC_EINVAL;
+CommonContainerBase *variant_build_recipe(Variant variant) {
+    if (variant_is_custom(variant))
+        return container_base_build_container(variant_get_custom_container_base(variant), container_base_variant_recipe());
 
-    const CommonContainerBase *base = variant_get_container_base(var);
-    Serializer serialize = base->serialize;
-    if (serialize == NULL)
-        return CC_EINVAL;
-
-    if (base->cvt_expects_variant)
-        return serialize(output, var, type);
-
-    switch (var->type) {
-        case VariantNull: return serialize(output, NULL, type);
-        case VariantBoolean: return serialize(output, &var->d.atom.d.boolean, type);
-        case VariantInteger: return serialize(output, &var->d.atom.d.integer, type);
-        case VariantUnsignedInteger: return serialize(output, &var->d.atom.d.unsigned_integer, type);
-        case VariantFloat: return serialize(output, &var->d.atom.d.floating, type);
-        case VariantString: return serialize(output, &var->d.atom.string.data, type);
-        case VariantBinary: return serialize(output, &var->d.atom.string, type);
-        default: return CC_ENOTSUP;
-    }
+    return (CommonContainerBase *) container_base_variant_recipe();
 }

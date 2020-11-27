@@ -6,6 +6,7 @@
 
 #include "stringmap.h"
 #include "genericmap.h"
+#include "recipes.h"
 
 /* For strdup */
 #include "../utility.h"
@@ -17,11 +18,11 @@
 struct StringMapStruct {char dummy;};
 
 Variant variant_from_stringmap(StringMap map) {
-    return variant_create_custom_base(map, (Compare) stringmap_compare, (Copier) stringmap_copy, (Deleter) stringmap_destroy, *stringmap_get_container_base(map));
+    return variant_create_custom_adopt(map, stringmap_build_recipe(map));
 }
 
 int variant_is_stringmap(Variant var) {
-    return variant_get_copier_fn(var) == (Copier) stringmap_copy;
+    return generic_types_compatible_compare(variant_get_custom_container_base(var), container_base_stringmap_recipe()) == 0;
 }
 
 StringMap variant_get_stringmap(Variant var) {
@@ -32,19 +33,19 @@ StringMap variant_get_stringmap(Variant var) {
 }
 
 int variant_set_stringmap_move(Variant var, StringMap map) {
-    return variant_set_custom_move_base(var, map, (Compare) stringmap_compare, (Copier) stringmap_copy, (Deleter) stringmap_destroy, *stringmap_get_container_base(map));
+    return variant_set_custom_move_adopt(var, map, stringmap_build_recipe(map));
 }
 
 int variant_set_stringmap(Variant var, const StringMap map) {
-    return variant_set_custom_base(var, map, (Compare) stringmap_compare, (Copier) stringmap_copy, (Deleter) stringmap_destroy, *stringmap_get_container_base(map));
+    return variant_set_custom_adopt(var, map, stringmap_build_recipe(map));
 }
 
 StringMap stringmap_create() {
     return stringmap_create_custom(NULL, NULL);
 }
 
-StringMap stringmap_create_custom(BinaryCompare key_compare, StringCompare value_compare) {
-    return (StringMap) genericmap_create(key_compare, (Compare) (value_compare? value_compare: strcmp), (Copier) strdup, (Deleter) FREE);
+StringMap stringmap_create_custom(const CommonContainerBase *key_base, const CommonContainerBase *value_base) {
+    return (StringMap) genericmap_create(key_base? key_base: container_base_cstring_recipe(), value_base? value_base: container_base_cstring_recipe());
 }
 
 StringMap stringmap_copy(StringMap other) {
@@ -52,11 +53,11 @@ StringMap stringmap_copy(StringMap other) {
 }
 
 int stringmap_insert_move(StringMap map, const char *key, char *item) {
-    return genericmap_insert_move((GenericMap) map, key, strlen(key), item);
+    return genericmap_insert_move((GenericMap) map, key, item);
 }
 
 int stringmap_insert(StringMap map, const char *key, const char *item) {
-    return genericmap_insert((GenericMap) map, key, strlen(key), item);
+    return genericmap_insert((GenericMap) map, key, item);
 }
 
 int stringmap_insert_n(StringMap map, const char *key, const char *item, size_t item_len) {
@@ -110,15 +111,15 @@ int stringmap_replace_n(StringMap map, Iterator it, const char *item, size_t ite
 }
 
 int stringmap_contains(StringMap map, const char *key) {
-    return genericmap_contains((GenericMap) map, key, strlen(key));
+    return genericmap_contains((GenericMap) map, key);
 }
 
 void stringmap_remove(StringMap map, const char *key) {
-    genericmap_remove((GenericMap) map, key, strlen(key));
+    genericmap_remove((GenericMap) map, key);
 }
 
 Iterator stringmap_find(StringMap map, const char *key) {
-    return genericmap_find((GenericMap) map, key, strlen(key));
+    return genericmap_find((GenericMap) map, key);
 }
 
 Iterator stringmap_erase(StringMap map, Iterator it) {
@@ -134,7 +135,7 @@ Iterator stringmap_next(StringMap map, Iterator it) {
 }
 
 const char *stringmap_key_of(StringMap map, Iterator it) {
-    return genericmap_key_of((GenericMap) map, it).data;
+    return genericmap_key_of((GenericMap) map, it);
 }
 
 char *stringmap_value_of(StringMap map, Iterator it) {
@@ -142,7 +143,7 @@ char *stringmap_value_of(StringMap map, Iterator it) {
 }
 
 char *stringmap_value_of_key(StringMap map, const char *key) {
-    return genericmap_value_of_key((GenericMap) map, key, strlen(key));
+    return genericmap_value_of_key((GenericMap) map, key);
 }
 
 size_t stringmap_size(StringMap map) {
@@ -153,19 +154,19 @@ int stringmap_compare(StringMap lhs, StringMap rhs) {
     return genericmap_compare((GenericMap) lhs, (GenericMap) rhs);
 }
 
-BinaryCompare stringmap_get_key_compare_fn(StringMap map) {
+Compare stringmap_get_key_compare_fn(StringMap map) {
     return genericmap_get_key_compare_fn((GenericMap) map);
 }
 
-void stringmap_set_key_compare_fn(StringMap map, BinaryCompare compare) {
+void stringmap_set_key_compare_fn(StringMap map, Compare compare) {
     genericmap_set_key_compare_fn((GenericMap) map, compare);
 }
 
-StringCompare stringmap_get_value_compare_fn(StringMap map) {
-    return (StringCompare) genericmap_get_value_compare_fn((GenericMap) map);
+Compare stringmap_get_value_compare_fn(StringMap map) {
+    return genericmap_get_value_compare_fn((GenericMap) map);
 }
 
-void stringmap_set_value_compare_fn(StringMap map, StringCompare compare) {
+void stringmap_set_value_compare_fn(StringMap map, Compare compare) {
     genericmap_set_value_compare_fn((GenericMap) map, (Compare) compare);
 }
 
@@ -177,6 +178,16 @@ void stringmap_destroy(StringMap map) {
     genericmap_destroy((GenericMap) map);
 }
 
-CommonContainerBase *stringmap_get_container_base(StringMap map) {
-    return genericmap_get_container_base((GenericMap) map);
+const CommonContainerBase *stringmap_get_key_container_base(StringMap map) {
+    return genericmap_get_key_container_base((GenericMap) map);
+}
+
+const CommonContainerBase *stringmap_get_value_container_base(StringMap map) {
+    return genericmap_get_value_container_base((GenericMap) map);
+}
+
+CommonContainerBase *stringmap_build_recipe(StringMap map) {
+    return container_base_build_key_value_container(stringmap_get_key_container_base(map),
+                                                    stringmap_get_value_container_base(map),
+                                                    container_base_stringmap_recipe());
 }

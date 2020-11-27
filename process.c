@@ -38,14 +38,12 @@ static Atomic proclist_purge;
 static void proclist_remove(ProcessList lst, pid_t proc) {
     spinlock_lock(&proclist_lock);
 
-    printf("proclist remove %d\n", proc);
     for (size_t i = 0; i < lst->count; ++i) {
         if (lst->processes[i] == proc) {
             for (++i; i < lst->count; ++i)
                 lst->processes[i-1] = lst->processes[i];
 
             lst->count -= 1;
-            printf("proclist removed\n");
             break;
         }
     }
@@ -64,7 +62,6 @@ static int proclist_add(ProcessList lst, pid_t proc) {
             if (waitid(P_ALL, 0, &info, WNOHANG | WEXITED) == -1 || info.si_pid == 0)
                 break;
 
-            printf("Return code %d reaped\n", info.si_status);
             proclist_remove(&proclist, info.si_pid); /* TODO: not reentrant due to spinlock */
         }
     }
@@ -72,7 +69,6 @@ static int proclist_add(ProcessList lst, pid_t proc) {
     spinlock_lock(&proclist_lock);
 
     /* Add new process */
-    printf("proclist add %d\n", proc);
     if (lst->count == lst->capacity) {
         size_t amount = MAX(8, lst->count + (lst->count >> 1));
         pid_t *d = REALLOC(lst->processes, amount * sizeof(*d));
@@ -93,8 +89,6 @@ static int proclist_add(ProcessList lst, pid_t proc) {
 }
 
 static void proclist_at_exit(void) {
-    printf("Killing %d\n", (int) proclist.count);
-
     for (size_t i = 0; i < proclist.count; ++i) {
         kill(proclist.processes[i], SIGKILL);
         waitpid(proclist.processes[i], NULL, 0);
@@ -144,7 +138,6 @@ static Atomic proclist_lock;
 static int proclist_add(ProcessList lst, PROCESS_INFORMATION proc) {
     spinlock_lock(&proclist_lock);
 
-    printf("proclist add %d\n", proc.dwProcessId);
     if (lst->count == lst->capacity) {
         size_t amount = MAX(8, lst->count + (lst->count >> 1));
         PROCESS_INFORMATION *d = REALLOC(lst->processes, amount * sizeof(*d));
@@ -167,14 +160,13 @@ static int proclist_add(ProcessList lst, PROCESS_INFORMATION proc) {
 static void proclist_remove(ProcessList lst, PROCESS_INFORMATION proc) {
     spinlock_lock(&proclist_lock);
 
-    printf("proclist remove %d\n", proc.dwProcessId);
     for (size_t i = 0; i < lst->count; ++i) {
         if (lst->processes[i].hProcess == proc.hProcess) {
             for (++i; i < lst->count; ++i)
                 lst->processes[i-1] = lst->processes[i];
 
             lst->count -= 1;
-            printf("proclist removed\n");
+
             break;
         }
     }
@@ -183,8 +175,6 @@ static void proclist_remove(ProcessList lst, PROCESS_INFORMATION proc) {
 }
 
 static void proclist_at_exit(void) {
-    printf("Killing %d\n", proclist.count);
-
     for (size_t i = 0; i < proclist.count; ++i) {
         if (process_native_kill_normal(proclist.processes[i]))
             process_native_kill_immediate(proclist.processes[i]);
@@ -205,7 +195,6 @@ static void sigchld(void) { /* SIGCHLD handler only handles zombie processes */
         if (waitid(P_ALL, 0, &info, WNOHANG | WEXITED) == -1 || info.si_pid == 0)
             return;
 
-        printf("Return code %d reaped\n", info.si_status);
         proclist_remove(&proclist, info.si_pid);
     }
 }
@@ -327,7 +316,7 @@ static void register_proc_funcs() {
 }
 #endif
 
-static int process_stdin_io_write(void *data, size_t size, size_t count, void *userdata, IO io) {
+static size_t process_stdin_io_write(const void *data, size_t size, size_t count, void *userdata, IO io) {
     struct ProcessStruct *process = (struct ProcessStruct *) userdata;
     UNUSED(io);
 
@@ -381,6 +370,7 @@ static long long process_stdin_io_tell64(void *userdata, IO io) {
 
 static int process_stdin_io_seek64(void *userdata, long long offset, int origin, IO io) {
     struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io);
 
     return io_seek64(process->ioStdin, offset, origin);
 }
@@ -408,7 +398,7 @@ static const struct InputOutputDeviceCallbacks process_stdin_io_callbacks = {
     .what = process_stdin_io_what
 };
 
-static int process_stdout_io_read(void *data, size_t size, size_t count, void *userdata, IO io) {
+static size_t process_stdout_io_read(void *data, size_t size, size_t count, void *userdata, IO io) {
     struct ProcessStruct *process = (struct ProcessStruct *) userdata;
     UNUSED(io);
 
@@ -462,6 +452,7 @@ static long long process_stdout_io_tell64(void *userdata, IO io) {
 
 static int process_stdout_io_seek64(void *userdata, long long offset, int origin, IO io) {
     struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io)
 
     return io_seek64(process->ioStdout, offset, origin);
 }
@@ -489,7 +480,7 @@ static const struct InputOutputDeviceCallbacks process_stdout_io_callbacks = {
     .what = process_stdout_io_what
 };
 
-static int process_stderr_io_read(void *data, size_t size, size_t count, void *userdata, IO io) {
+static size_t process_stderr_io_read(void *data, size_t size, size_t count, void *userdata, IO io) {
     struct ProcessStruct *process = (struct ProcessStruct *) userdata;
     UNUSED(io);
 
@@ -536,13 +527,14 @@ static void process_stderr_io_clearerr(void *userdata, IO io) {
 
 static long long process_stderr_io_tell64(void *userdata, IO io) {
     struct ProcessStruct *process = (struct ProcessStruct *) userdata;
-    UNUSED(io);
+    UNUSED(io)
 
     return io_tell64(process->ioStderr);
 }
 
 static int process_stderr_io_seek64(void *userdata, long long offset, int origin, IO io) {
     struct ProcessStruct *process = (struct ProcessStruct *) userdata;
+    UNUSED(io)
 
     return io_seek64(process->ioStderr, offset, origin);
 }
@@ -1074,8 +1066,6 @@ int process_native_kill_normal(ProcessNativeHandle handle) {
     HWND process_window = process_top_level_window(handle);
 
     if (process_window != NULL) {
-        printf("Sending message to process window\n");
-
         if (SendMessage(process_window, WM_CLOSE, 0, 0) != 0)
             return CC_EBADMSG;
 
