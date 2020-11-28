@@ -40,6 +40,7 @@ size_t genericlist_remove_all(GenericList list, const void *item);
 size_t genericlist_erase(GenericList list, size_t begin_index, size_t end_index);
 void **genericlist_array(GenericList list);
 int genericlist_contains(GenericList list, const void *item);
+size_t genericlist_bsearch(GenericList list, const void *item);
 size_t genericlist_find(GenericList list, const void *item, size_t begin_index);
 size_t genericlist_rfind(GenericList list, const void *item, size_t begin_index);
 int genericlist_compare(GenericList list, GenericList other);

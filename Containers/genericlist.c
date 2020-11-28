@@ -508,6 +508,36 @@ int genericlist_contains(GenericList list, const void *item) {
     return genericlist_find(list, item, 0) != SIZE_MAX;
 }
 
+size_t genericlist_bsearch(GenericList list, const void *item) {
+    if (list->base->compare == NULL || genericlist_size(list) == 0)
+        return SIZE_MAX;
+
+    const size_t highest = genericlist_size(list) - 1;
+    size_t hi = highest;
+    size_t lo = 0;
+
+    while (lo <= hi) {
+        const size_t mid = lo + ((hi - lo) / 2);
+        int cmp = list->base->compare(item, list->array[mid]);
+        if (cmp == 0)
+            return mid;
+
+        if (cmp < 0) { /* Less than the compared element */
+            if (mid == 0)
+                break;
+
+            hi = mid-1;
+        } else { /* Greater than the compared element */
+            if (mid == highest)
+                break;
+
+            lo = mid+1;
+        }
+    }
+
+    return SIZE_MAX;
+}
+
 size_t genericlist_find(GenericList list, const void *item, size_t begin_index) {
     if (list->base->compare == NULL)
         return SIZE_MAX;
@@ -662,12 +692,12 @@ static void genericlist_merge_helper(void **result, void **base, size_t begin, s
 }
 
 static void genericlist_merge_sort_helper(void **result, void **base, size_t begin, size_t end, int descending, Compare compar) {
-    if (end - begin <= 4) {
+    if (end - begin <= 8) {
         genericlist_insertion_sort(base + begin, end - begin, descending, compar);
         return;
     }
 
-    size_t pivot = begin + (end - begin) / 2;
+    const size_t pivot = begin + (end - begin) / 2;
 
     genericlist_merge_sort_helper(base, result, begin, pivot, descending, compar);
     genericlist_merge_sort_helper(base, result, pivot, end, descending, compar);

@@ -1614,7 +1614,7 @@ typedef struct {
                 break;                                              \
             }                                                       \
                                                                     \
-            chr = (str - alpha);                                    \
+            chr = (int) (str - alpha);                              \
                                                                     \
             (value) = (value) * base + (neg? -chr: chr);            \
                                                                     \
@@ -1754,7 +1754,7 @@ typedef struct {
                 break;                                              \
             }                                                       \
                                                                     \
-            chr = strchr(alpha, chr) - alpha;                       \
+            chr = (int) (strchr(alpha, chr) - alpha);               \
                                                                     \
             (value) = (value) * 16 + (neg? -chr: chr);              \
                                                                     \
@@ -2800,14 +2800,14 @@ done_with_flags:
                 }
                 case 'n':
                     switch (fmt_len) {
-                        case PRINTF_LEN_NONE: *(va_arg(args_copy.args, int *)) = written; break;
+                        case PRINTF_LEN_NONE: *(va_arg(args_copy.args, int *)) = (int) written; break;
                         case PRINTF_LEN_HH: *(va_arg(args_copy.args, signed char *)) = (signed char) written; break;
                         case PRINTF_LEN_H: *(va_arg(args_copy.args, short *)) = (short) written; break;
-                        case PRINTF_LEN_L: *(va_arg(args_copy.args, long *)) = written; break;
-                        case PRINTF_LEN_LL: *(va_arg(args_copy.args, long long *)) = written; break;
-                        case PRINTF_LEN_J: *(va_arg(args_copy.args, intmax_t *)) = written; break;
+                        case PRINTF_LEN_L: *(va_arg(args_copy.args, long *)) = (long) written; break;
+                        case PRINTF_LEN_LL: *(va_arg(args_copy.args, long long *)) = (long long) written; break;
+                        case PRINTF_LEN_J: *(va_arg(args_copy.args, intmax_t *)) = (intmax_t) written; break;
                         case PRINTF_LEN_Z: *(va_arg(args_copy.args, size_t *)) = written; break;
-                        case PRINTF_LEN_T: *(va_arg(args_copy.args, ptrdiff_t *)) = written; break;
+                        case PRINTF_LEN_T: *(va_arg(args_copy.args, ptrdiff_t *)) = (ptrdiff_t) written; break;
                         default: CLEANUP(-2);
                     }
                     break;
@@ -3743,18 +3743,18 @@ int io_seek(IO io, long int offset, int origin) {
         {
             switch (origin) {
                 case SEEK_SET:
-                    if (offset < 0 || (io->sizes.pos < (unsigned long) offset && io->sizes.pos + strlen(io->ptr) < (unsigned long) offset))
+                    if (offset < 0 || (io->sizes.pos < (unsigned long) offset && io->sizes.pos + strlen((const char *) io->ptr + io->sizes.pos) < (unsigned long) offset))
                         return -1;
                     io->sizes.pos = offset;
                     break;
                 case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long) -offset > io->sizes.pos) || (offset > 0 && strlen(io->ptr) < (unsigned long) offset))
+                    if ((offset < 0 && (unsigned long) -offset > io->sizes.pos) || (offset > 0 && strlen((const char *) io->ptr + io->sizes.pos) < (unsigned long) offset))
                         return -1;
                     io->sizes.pos += offset;
                     break;
                 case SEEK_END:
                 {
-                    size_t len = io->sizes.pos + strlen(io->ptr);
+                    size_t len = io->sizes.pos + strlen((const char *) io->ptr + io->sizes.pos);
                     if (offset > 0 || (unsigned long) -offset > len)
                         return -1;
                     io->sizes.pos = len + offset;
@@ -3773,7 +3773,7 @@ int io_seek(IO io, long int offset, int origin) {
                     io->sizes.pos = offset;
                     break;
                 case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long) -offset > io->sizes.pos) || (offset > 0 && io->sizes.size < (unsigned long) offset))
+                    if ((offset < 0 && (unsigned long) -offset > io->sizes.pos) || (offset > 0 && io->sizes.size - io->sizes.pos < (unsigned long) offset))
                         return -1;
                     io->sizes.pos += offset;
                     break;
@@ -3840,18 +3840,18 @@ static int io_seek64_helper(IO io, long long int offset, int origin)
         {
             switch (origin) {
                 case SEEK_SET:
-                    if (offset < 0 || (io->sizes.pos < (unsigned long long) offset && io->sizes.pos + strlen(io->ptr) < (unsigned long long) offset))
+                    if (offset < 0 || (io->sizes.pos < (unsigned long long) offset && io->sizes.pos + strlen((const char *) io->ptr + io->sizes.pos) < (unsigned long long) offset))
                         return -1;
                     io->sizes.pos = offset;
                     break;
                 case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long long) -offset > io->sizes.pos) || (offset > 0 && strlen(io->ptr) < (unsigned long long) offset))
+                    if ((offset < 0 && (unsigned long long) -offset > io->sizes.pos) || (offset > 0 && strlen((const char *) io->ptr + io->sizes.pos) < (unsigned long long) offset))
                         return -1;
                     io->sizes.pos += offset;
                     break;
                 case SEEK_END:
                 {
-                    size_t len = io->sizes.pos + strlen(io->ptr);
+                    size_t len = io->sizes.pos + strlen((const char *) io->ptr + io->sizes.pos);
                     if (offset > 0 || (unsigned long long) -offset > len)
                         return -1;
                     io->sizes.pos = len + offset;
@@ -3870,7 +3870,7 @@ static int io_seek64_helper(IO io, long long int offset, int origin)
                     io->sizes.pos = offset;
                     break;
                 case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long long) -offset > io->sizes.pos) || (offset > 0 && io->sizes.size < (unsigned long long) offset))
+                    if ((offset < 0 && (unsigned long long) -offset > io->sizes.pos) || (offset > 0 && io->sizes.size - io->sizes.pos < (unsigned long long) offset))
                         return -1;
                     io->sizes.pos += offset;
                     break;

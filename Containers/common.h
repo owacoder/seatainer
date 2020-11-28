@@ -116,8 +116,6 @@ typedef int (*Serializer)(void *output, const void *data, const struct CommonCon
  * If performing a search for an item inside a collection, the item being searched for should be passed as the first parameter
  */
 typedef int (*Compare)(const void *a, const void *b);
-typedef int (*BinaryCompare)(const Binary *a, const Binary *b);
-typedef int (*StringCompare)(const char *a, const char *b);
 
 /** Returns the beginning of a collection
  *

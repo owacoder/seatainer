@@ -9,20 +9,6 @@
 
 #include "common.h"
 
-#if C11
-#define CC_POD_ALLOC(type, value) generic_pod_alloc(((type [1]) {(value)}), sizeof(type))
-#define CC_CREATE_STORABLE(type, value) (sizeof(type) <= sizeof(void*)? (void *) (type) (value): CC_POD_ALLOC(type, (value)))
-#define CC_READ_STORABLE(type, value) (sizeof(type) <= sizeof(void*)? (type) (value): *((type *) (value)))
-#define CC_DESTROY_STORABLE(type, storable) do {if (sizeof(type) > sizeof(void*)) FREE(storable);} while (0)
-
-#define CREATE_STORABLE(type, value) _Generic(value, \
-    float: CC_POD_ALLOC(float, (value)), \
-    double: CC_POD_ALLOC(double, (value)), \
-    long double: CC_POD_ALLOC(long double, (value)), \
-    default: CC_CREATE_STORABLE(type, (value)) \
-    )
-#endif
-
 const CommonContainerBase *container_base_empty_recipe(void);
 const CommonContainerBase *container_base_voidptr_recipe(void);
 const CommonContainerBase *container_base_boolean_recipe(void);

@@ -88,7 +88,7 @@ static size_t hex_decode_write(const void *ptr, size_t size, size_t count, void 
     unsigned char *nibble = io_tempdata(io);
 
     for (; max; --max, ++cptr) {
-        char *sptr = strchr(alpha, *cptr);
+        char *sptr = strchr(alpha, tolower(*cptr & 0xff));
         if (sptr == NULL)
             break;
 
@@ -136,12 +136,20 @@ static void hex_clearerr(void *userdata, IO io) {
 }
 
 static int hex_encode_seek64(void *userdata, long long int offset, int origin, IO io) {
+    if (io_readable(io) && io_writable(io))
+        return -1;
+
     /* Translate all origins to SEEK_SET for ease of computation */
     switch (origin) {
         case SEEK_END: {
-            long long underlyingSize = io_size64((IO) userdata) * 2;
+            long long underlyingSize = io_size64((IO) userdata);
             if (underlyingSize < 0)
                 return -1;
+
+            if (io_readable(io)) /* Multiply since underlying => hex is a growing transition and the underlying input stream is smaller */
+                underlyingSize *= 2;
+            else /* Divide since hex => underlying is a growing transition and the underlying output stream is larger */
+                underlyingSize /= 2;
 
             offset += underlyingSize;
             break;
@@ -156,25 +164,42 @@ static int hex_encode_seek64(void *userdata, long long int offset, int origin, I
         }
     }
 
-    if (io_seek64((IO) userdata, offset / 2, SEEK_SET) != 0)
-        return -1;
-
-    *io_tempdata(io) = 16;
-
-    if (offset & 1) /* Odd offset means read one character */
-        if (io_getc(io) == EOF)
+    if (io_readable(io)) { /* Divide since underlying => hex is a growing transition and the underlying input stream is smaller */
+        if (io_seek64((IO) userdata, offset / 2, SEEK_SET) < 0)
             return -1;
 
-    return 0;
+        *io_tempdata(io) = 16;
+
+        if (offset & 1) /* Odd offset means read one character */
+            if (io_getc(io) == EOF)
+                return -1;
+
+        return 0;
+    } else { /* Multiply since hex => underlying is a growing transition and the underlying output stream is larger */
+        if (io_seek64((IO) userdata, offset * 2, SEEK_SET) < 0)
+            return -1;
+
+        *io_tempdata(io) = 16;
+
+        return 0;
+    }
 }
 
 static int hex_decode_seek64(void *userdata, long long int offset, int origin, IO io) {
+    if (io_readable(io) && io_writable(io))
+        return -1;
+
     /* Translate all origins to SEEK_SET for ease of computation */
     switch (origin) {
         case SEEK_END: {
-            long long underlyingSize = io_size64((IO) userdata) / 2;
+            long long underlyingSize = io_size64((IO) userdata);
             if (underlyingSize < 0)
                 return -1;
+
+            if (io_readable(io)) /* Divide since underlying => hex is a shrinking transition and the underlying input stream is larger */
+                underlyingSize /= 2;
+            else /* Multiply since hex => underlying is a shrinking transition and the underlying output stream is smaller */
+                underlyingSize *= 2;
 
             offset += underlyingSize;
             break;
@@ -189,8 +214,17 @@ static int hex_decode_seek64(void *userdata, long long int offset, int origin, I
         }
     }
 
-    if (io_seek64((IO) userdata, offset * 2, SEEK_SET) != 0)
-        return -1;
+    if (io_readable(io)) { /* Multiply since underlying => hex is a shrinking transition and the underlying input stream is larger */
+        if (io_seek64((IO) userdata, offset * 2, SEEK_SET) < 0)
+            return -1;
+    } else { /* Divide since hex => underlying is a shrinking transition and the underlying output stream is smaller */
+        if (offset & 1) /* If odd, it means we're trying to seek to the middle of a hex pair before it gets written.
+                           This is not possible when writing though because we'd have to buffer every single hex nibble that was input. */
+            return -1;
+
+        if (io_seek64((IO) userdata, offset / 2, SEEK_SET) != 0)
+            return -1;
+    }
 
     *io_tempdata(io) = 16;
 
@@ -198,17 +232,36 @@ static int hex_decode_seek64(void *userdata, long long int offset, int origin, I
 }
 
 static long long hex_encode_tell64(void *userdata, IO io) {
-    UNUSED(io)
+    if (io_readable(io) && io_writable(io))
+        return -1;
 
     long long value = io_tell64((IO) userdata);
-    return value > 0? value * 2 - (*io_tempdata(io) < 16): value;
+    if (value < 0)
+        return -1;
+
+    if (io_readable(io)) /* Multiply since underlying => hex is a growing transition and the underlying input stream is smaller */
+        return value * 2 + (*io_tempdata(io) < 16); /* If extra nibble present, we already read the first half of the pair */
+    else { /* Divide since hex => underlying is a growing transition and the underlying output stream is larger */
+        if (value & 1) /* Should never happen unless underlying stream gets corrupted somehow. Writing one character to this stream writes two to the underlying stream */
+            return -1;
+
+        return value / 2;
+    }
 }
 
 static long long hex_decode_tell64(void *userdata, IO io) {
-    UNUSED(io)
+    if (io_readable(io) && io_writable(io))
+        return -1;
 
     long long value = io_tell64((IO) userdata);
-    return value > 0? value / 2 + (*io_tempdata(io) < 16): value;
+    if (value < 0)
+        return -1;
+
+    if (io_readable(io)) /* Divide since underlying => hex is a shrinking transition and the underlying input stream is larger */
+        return value / 2 + (*io_tempdata(io) < 16); /* If extra nibble present, we still need to read the second half of the pair */
+    else { /* Multiply since hex => underlying is a shrinking transition and the underlying output stream is smaller */
+        return value * 2 + (*io_tempdata(io) < 16); /* If extra nibble present, we've already written the first nibble */
+    }
 }
 
 static const char *hex_encode_what(void *userdata, IO io) {

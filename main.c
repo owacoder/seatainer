@@ -272,6 +272,25 @@ void test_c_io() {
 
 int main(int argc, char **argv, const char **envp)
 {
+    const char *str = "484548454c50";
+    IO dest = io_open_dynamic_buffer("wb");
+    IO io_seekable = io_open_cstring(str, "rb");
+    IO io_hex = io_open_hex_decode(io_seekable, "rb");
+
+    printf("Cur: %lld of %lld\n", io_tell64(io_hex), io_size64(io_seekable));
+    io_getc(io_hex);
+    printf("Cur: %lld of %lld\n", io_tell64(io_hex), io_size64(io_seekable));
+    io_getc(io_hex);
+    printf("Cur: %lld of %lld\n", io_tell64(io_hex), io_size64(io_seekable));
+    if (io_seek(io_hex, 3, SEEK_SET) < 0)
+        printf("Seek failed\n");
+
+    io_copy(io_hex, dest);
+
+    printf("%.*s\n", io_underlying_buffer_size(dest), io_underlying_buffer(dest));
+
+    return 0;
+
     test_new_io();
     //test_c_io();
 

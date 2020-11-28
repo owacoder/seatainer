@@ -215,6 +215,10 @@ struct InputOutputDeviceCallbacks {
 
     /** @brief Requests the current position of the read/write pointer.
      *
+     * The seek change should be from the perspective of this device, not any underlying device.
+     * For example, a hex encoder should seek on the underlying stream by twice the provided offset,
+     * whereas a hex decoder should seek on the underlying stream by half the offset.
+     *
      * If only one of `seek` or `seek64` are non-NULL, that overload will be used exclusively, with appropriate range handling.
      *
      * @param userdata The userdata stored in @p io.
