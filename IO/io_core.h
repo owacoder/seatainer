@@ -40,7 +40,6 @@ struct InputOutputDevice;
  *   - `t` - Open device in text mode. On Linux, the stream is left unchanged. On Windows, CRLF is converted to LF when reading, and vice versa when writing.
  *   - `b` - Open device in binary mode. This is the opposite of `t`. If both are specified, the last in the mode string is used.
  *   - `<` - Disable hardware acceleration. Currently only implemented for AES and SHA IO.
- *   - '*' - Forces reads and writes to the device to be atomic.
  *   - `g` - Grab ownership of handle when opening a native file descriptor.
  *   - `@ncp` - If specified in this order, the [n]ative [c]ode [p]age is used on Windows to open files instead of UTF-8.
  *
@@ -57,10 +56,9 @@ enum IO_Type
     IO_OwnFile, /* Internally-created FILE * object */
     IO_NativeFile, /* External native file descriptor */
     IO_OwnNativeFile, /* Internally-created native file descriptor */
-    IO_CString, /* NUL-terminated C-style string */
     IO_SizedBuffer, /* Size-limited buffer for reading and/or writing */
-    IO_MinimalBuffer, /* Dynamic buffer that only grows to fit exact space, does NOT free() buffer when closing */
-    IO_DynamicBuffer, /* Dynamic buffer with time-efficient buffer allocation, does NOT free() buffer when closing */
+    IO_ThreadBuffer, /* Thread-safe dynamically sized (or statically sized, if set with setbuf()/setvbuf()) send/receive buffer, all data written will to it will be read later */
+    IO_DynamicBuffer, /* Dynamic buffer with time-efficient buffer allocation, can release ownership of owned pointer */
     IO_Custom /* Custom callback for reading and/or writing */
 };
 
@@ -261,39 +259,37 @@ struct InputOutputDeviceCallbacks {
 };
 
 /* Whether IO device is readable or not */
-#define IO_FLAG_READABLE ((unsigned) 0x01)
+#define IO_FLAG_READABLE ((unsigned long) 0x01)
 /* Whether IO device is writable or not */
-#define IO_FLAG_WRITABLE ((unsigned) 0x02)
+#define IO_FLAG_WRITABLE ((unsigned long) 0x02)
 /* Whether IO device is opened for update or not */
-#define IO_FLAG_UPDATE ((unsigned) 0x04)
+#define IO_FLAG_UPDATE ((unsigned long) 0x04)
 /* Whether IO device is opened for append or not */
-#define IO_FLAG_APPEND ((unsigned) 0x08)
+#define IO_FLAG_APPEND ((unsigned long) 0x08)
 /* Whether IO device had an error */
-#define IO_FLAG_ERROR ((unsigned) 0x10)
+#define IO_FLAG_ERROR ((unsigned long) 0x10)
 /* Whether IO device reached the end of input */
-#define IO_FLAG_EOF ((unsigned) 0x20)
+#define IO_FLAG_EOF ((unsigned long) 0x20)
 /* Whether IO device should fail if the file exists already */
-#define IO_FLAG_FAIL_IF_EXISTS ((unsigned) 0x40)
+#define IO_FLAG_FAIL_IF_EXISTS ((unsigned long) 0x40)
 /* Whether IO device is in use (used for static-storage IO device allocation) */
-#define IO_FLAG_IN_USE ((unsigned) 0x100)
+#define IO_FLAG_IN_USE ((unsigned long) 0x100)
 /* Whether IO device is dynamically allocated and should be freed */
-#define IO_FLAG_DYNAMIC ((unsigned) 0x200)
+#define IO_FLAG_DYNAMIC ((unsigned long) 0x200)
 /* Whether IO device owns its vbuf */
-#define IO_FLAG_OWNS_BUFFER ((unsigned) 0x400)
+#define IO_FLAG_OWNS_BUFFER ((unsigned long) 0x400)
 /* Whether IO device was just read from */
-#define IO_FLAG_HAS_JUST_READ ((unsigned) 0x800)
+#define IO_FLAG_HAS_JUST_READ ((unsigned long) 0x800)
 /* Whether IO device was just written to */
-#define IO_FLAG_HAS_JUST_WRITTEN ((unsigned) 0x1000)
+#define IO_FLAG_HAS_JUST_WRITTEN ((unsigned long) 0x1000)
 /* Whether IO device is opened for text or binary */
-#define IO_FLAG_BINARY ((unsigned) 0x2000)
+#define IO_FLAG_BINARY ((unsigned long) 0x2000)
 
 #define IO_FLAG_RESET (IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_UPDATE | IO_FLAG_APPEND | IO_FLAG_ERROR | IO_FLAG_EOF | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN | IO_FLAG_BINARY)
 
 /* Flags for devices to specify support for various modes of operation */
 /* Whether IO device supports switching between reading and writing without an explicit state switch (e.g. `io_seek(io, 0, SEEK_CUR)`) */
-#define IO_FLAG_SUPPORTS_NO_STATE_SWITCH ((unsigned) 0x10000)
-/* Whether IO device requires atomic read and write operations */
-#define IO_FLAG_REQUIRES_ATOMIC ((unsigned) 0x20000)
+#define IO_FLAG_SUPPORTS_NO_STATE_SWITCH ((unsigned long) 0x10000)
 
 /* For Large File Support on Linux, the compile flag -D_FILE_OFFSET_BITS=64 must be used for
  * io_[seek/tell]64() functions to work with 64-bit offsets. io.c specifies these defines */
@@ -534,9 +530,8 @@ int io_error(IO io);
  *
  * @param io The IO device to set the error code of.
  * @param err The error code to set on the device. If @p err is 0, the error flag is cleared (but the EOF flag is unmodified).
- * @return 0 on success, EOF on failure.
  */
-int io_set_error(IO io, int err);
+void io_set_error(IO io, int err);
 
 /** @brief Returns the state of the EOF flag on an IO device.
  *
@@ -613,6 +608,7 @@ IO io_open_native_file(IONativeFileHandle descriptor, const char *mode);
 IO io_open_file(FILE *file);
 IO io_open_empty(void); /* No input is read (i.e. the first read returns EOF) and all writes fail to this device */
 IO io_open_cstring(const char *str, const char *mode);
+IO io_open_const_buffer(const char *buf, size_t size, const char *mode);
 IO io_open_buffer(char *buf, size_t size, const char *mode);
 IO io_open_minimal_buffer(const char *mode);
 IO io_open_dynamic_buffer(const char *mode);

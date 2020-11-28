@@ -155,7 +155,7 @@ static unsigned long buffer_flags(void *userdata, IO io) {
     UNUSED(userdata)
     UNUSED(io)
 
-    return IO_FLAG_SUPPORTS_NO_STATE_SWITCH | IO_FLAG_REQUIRES_ATOMIC;
+    return IO_FLAG_SUPPORTS_NO_STATE_SWITCH;
 }
 
 static const struct InputOutputDeviceCallbacks buffer_callbacks = {

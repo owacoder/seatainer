@@ -306,6 +306,41 @@ struct IO_sizes {
 static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO io);
 static size_t io_native_unbuffered_write(const void *ptr, size_t size, size_t count, IO io);
 
+struct IOFileState {
+    FILE *fptr;
+};
+
+struct IONativeFileState {
+    IONativeFileHandle native;
+    unsigned char *buffer; /* Just a temporary buffer that buffers read or write input. When reading, this buffer is always right-aligned, when writing, it's always left-aligned */
+    size_t buffer_size;
+    size_t buffer_bytes; /* Number of bytes in buffer waiting to be read or written */
+};
+
+struct IOSizedBufferState {
+    unsigned char *buffer; /* Buffer that doesn't ever get reallocated */
+    size_t buffer_size;
+    size_t buffer_pos;
+};
+
+struct IODynamicBufferState {
+    unsigned char *buffer; /* Buffer that can grow past the stored capacity */
+    size_t buffer_size;
+    size_t buffer_capacity;
+    size_t buffer_pos;
+};
+
+struct IOThreadBufferState {
+    unsigned char *buffer; /* Circular buffer for efficient thread communication */
+    size_t buffer_size;
+    size_t buffer_capacity;
+};
+
+struct IOCustomState {
+    void *ptr;
+    const struct InputOutputDeviceCallbacks *callbacks;
+};
+
 struct InputOutputDevice {
     /*
      * `ptr` stores the following:
@@ -357,17 +392,21 @@ struct InputOutputDevice {
      *  (the last character in the array is the first to be read)
      *
      */
-    void *ptr;
-    const struct InputOutputDeviceCallbacks *callbacks;
-    struct IO_sizes sizes;
-
-    unsigned char raw[3 * sizeof(void *)];
-    unsigned long flags;
-    Mutex mutex; /* Recursive mutex for locking */
+    union {
+        struct IOFileState file;
+        struct IONativeFileState native_file;
+        struct IOSizedBufferState sized_buffer;
+        struct IODynamicBufferState dynamic_buffer;
+        struct IOThreadBufferState thread_buffer;
+        struct IOCustomState custom;
+    } data;
 
     /** Stores the read timeout assigned to this IO device. Read timeouts are only relevant for sockets, or native file devices on Linux */
     long long read_timeout;
     long long write_timeout;
+
+    unsigned long flags;
+    unsigned char raw[3 * sizeof(void *)];
 
     enum IO_Type type;
     /** Stores the last platform-specific error code that occured while reading or writing */
@@ -408,12 +447,11 @@ static IO io_static_alloc(enum IO_Type type) {
         return NULL;
     }
 
-    io->mutex = NULL;
     io->type = type;
     io->flags = IO_FLAG_IN_USE;
-    io->callbacks = NULL;
     io->ungetAvail = 0;
     io->read_timeout = io->write_timeout = 0;
+    memset(&io->data, 0, sizeof(io->data));
 
     io_hint_next_open(io_device_open_permanent_hint, 0);
 
@@ -468,10 +506,8 @@ static IO io_alloc(enum IO_Type type) {
     if (io == NULL)
         return NULL;
 
-    io->mutex = NULL;
     io->type = type;
     io->flags = IO_FLAG_IN_USE | IO_FLAG_DYNAMIC;
-    io->callbacks = NULL;
 
     io_hint_next_open(io_permanent_open_hint(), 0);
 
@@ -483,11 +519,24 @@ static void io_destroy(IO io) {
         return;
 
     if (io->flags & IO_FLAG_OWNS_BUFFER) {
-        FREE(io->sizes.ptr2);
+        switch (io->type) {
+            case IO_NativeFile:
+            case IO_OwnNativeFile:
+                FREE(io->data.native_file.buffer);
+                break;
+            case IO_SizedBuffer:
+                FREE(io->data.sized_buffer.buffer);
+                break;
+            case IO_DynamicBuffer:
+                FREE(io->data.dynamic_buffer.buffer);
+                break;
+            case IO_ThreadBuffer:
+                FREE(io->data.thread_buffer.buffer);
+                break;
+        }
+
         io->flags &= ~IO_FLAG_OWNS_BUFFER;
     }
-
-    mutex_destroy(io->mutex);
 
     if (io->flags & IO_FLAG_DYNAMIC)
         FREE(io);
@@ -500,22 +549,18 @@ static void io_destroy(IO io) {
 static int io_grow(IO io, size_t size) {
     size_t growth;
 
-    if (size <= io->sizes.capacity)
+    if (size <= io->data.dynamic_buffer.buffer_capacity)
         return 0;
 
-    if (io->type == IO_MinimalBuffer)
+    growth = io->data.dynamic_buffer.buffer_capacity + (io->data.dynamic_buffer.buffer_capacity >> 1);
+    if (growth < size)
         growth = size;
-    else {
-        growth = io->sizes.capacity + (io->sizes.capacity >> 1);
-        if (growth < size)
-            growth = size;
-        if (growth < 16)
-            growth = 16;
-    }
+    if (growth < 16)
+        growth = 16;
 
     char *new_data = NULL;
     while (1) {
-        new_data = REALLOC(io->sizes.ptr2, growth);
+        new_data = REALLOC(io->data.dynamic_buffer.buffer, growth);
 
         if (new_data != NULL) /* Success! */
             break;
@@ -525,8 +570,8 @@ static int io_grow(IO io, size_t size) {
         growth = size;
     }
 
-    io->sizes.ptr2 = io->ptr = new_data;
-    io->sizes.capacity = growth;
+    io->data.dynamic_buffer.buffer = new_data;
+    io->data.dynamic_buffer.buffer_capacity = growth;
 
     return 0;
 }
@@ -557,6 +602,7 @@ static int io_begin_write(IO io) {
     return 0;
 }
 
+#if 0
 int io_can_lock(IO io) {return io->mutex != NULL;}
 
 void io_lock(IO io) {
@@ -583,12 +629,12 @@ long long io_unlockll(IO io, long long passthrough) {
     io_unlock(io);
     return passthrough;
 }
+#endif
 
 static int io_current_char(IO io) {
     switch (io->type) {
         default: return EOF;
-        case IO_CString:
-        case IO_SizedBuffer: return ((const unsigned char *) io->ptr)[io->sizes.pos];
+        case IO_SizedBuffer: return ((const unsigned char *) io->data.sized_buffer.buffer)[io->data.sized_buffer.buffer_pos];
     }
 }
 
@@ -597,8 +643,17 @@ static int io_from_unget_buffer(IO io) {
     if (io->ungetAvail == 0)
         return EOF;
 
-    if (io->type != IO_NativeFile && io->type != IO_OwnNativeFile && io->type != IO_Custom)
-        ++io->sizes.pos;
+    switch (io->type) {
+        case IO_Empty: return EOF;
+        case IO_File: break;
+        case IO_OwnFile: break;
+        case IO_NativeFile: break;
+        case IO_OwnNativeFile: break;
+        case IO_SizedBuffer: ++io->data.sized_buffer.buffer_pos;
+        case IO_ThreadBuffer: break; /* FIXME */
+        case IO_DynamicBuffer: ++io->data.dynamic_buffer.buffer_pos;
+        case IO_Custom: break;
+    }
 
     return io->ungetBuf[--io->ungetAvail];
 }
@@ -607,30 +662,38 @@ static int io_close_without_destroying(IO io) {
     int result = 0;
 
     switch (io->type) {
-        case IO_OwnFile: result = fclose(io->ptr); break;
+        case IO_OwnFile: result = fclose(io->data.file.fptr); break;
 #if LINUX_OS
         case IO_OwnNativeFile:
             if (io_writable(io))
                 result = io_flush(io);
 
-            result = (close((size_t) io->ptr) || result)? EOF: 0;
+            result = (close(io->data.native_file.native) || result)? EOF: 0;
             break;
 #elif WINDOWS_OS
         case IO_OwnNativeFile:
             if (io_writable(io))
                 result = io_flush(io);
 
-            result = (CloseHandle(io->ptr) || result)? EOF: 0;
+            result = (CloseHandle(io->data.native_file.native) || result)? EOF: 0;
             break;
 #endif
-        case IO_MinimalBuffer:
+        case IO_SizedBuffer:
+            if (io->flags & IO_FLAG_OWNS_BUFFER)
+                FREE(io->data.sized_buffer.buffer);
+            break;
+        case IO_ThreadBuffer:
+            if (io->flags & IO_FLAG_OWNS_BUFFER)
+                FREE(io->data.thread_buffer.buffer);
+            break;
         case IO_DynamicBuffer:
-            FREE(io->sizes.ptr2);
+            if (io->flags & IO_FLAG_OWNS_BUFFER)
+                FREE(io->data.dynamic_buffer.buffer);
             break;
         case IO_Custom:
-            if (io->callbacks->close == NULL)
+            if (io->data.custom.callbacks->close == NULL)
                 return 0;
-            return io->callbacks->close(io->ptr, io);
+            return io->data.custom.callbacks->close(io->data.custom.ptr, io);
         default: break;
     }
 
@@ -645,12 +708,12 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
 void io_clearerr(IO io) {
     switch (io->type) {
         case IO_Custom:
-            if (io->callbacks->clearerr != NULL)
-                io->callbacks->clearerr(io->ptr, io);
+            if (io->data.custom.callbacks->clearerr != NULL)
+                io->data.custom.callbacks->clearerr(io->data.custom.ptr, io);
             /* fallthrough */
         default: io->flags &= ~(IO_FLAG_ERROR | IO_FLAG_EOF); break;
         case IO_File:
-        case IO_OwnFile: clearerr(io->ptr); break;
+        case IO_OwnFile: clearerr(io->data.file.fptr); break;
     }
 }
 
@@ -732,33 +795,57 @@ void io_ungrab_file(IO io) {
 }
 
 void *io_userdata(IO io) {
-    return io->ptr;
-}
-
-void io_grab_underlying_buffer(IO io) {
-    if (io->type == IO_MinimalBuffer || io->type == IO_DynamicBuffer)
-        io->sizes.ptr2 = io->ptr;
-}
-
-char *io_take_underlying_buffer(IO io) {
-    if (io->type == IO_MinimalBuffer || io->type == IO_DynamicBuffer) {
-        io->sizes.ptr2 = NULL;
-        return io->ptr;
-    }
+    if (io->type == IO_Custom)
+        return io->data.custom.ptr;
 
     return NULL;
 }
 
+void io_grab_underlying_buffer(IO io) {
+    switch (io->type) {
+        default: break;
+        case IO_SizedBuffer:
+        case IO_ThreadBuffer: /* FIXME */
+        case IO_DynamicBuffer:
+            io->flags |= IO_FLAG_OWNS_BUFFER;
+            break;
+    }
+}
+
+char *io_take_underlying_buffer(IO io) {
+    switch (io->type) {
+        default: return NULL;
+        case IO_SizedBuffer: io->flags &= ~IO_FLAG_OWNS_BUFFER; return io->data.sized_buffer.buffer;
+        case IO_ThreadBuffer: return NULL; /* FIXME */
+        case IO_DynamicBuffer: io->flags &= ~IO_FLAG_OWNS_BUFFER; return io->data.dynamic_buffer.buffer;
+    }
+}
+
 char *io_underlying_buffer(IO io) {
-    return io->type == IO_MinimalBuffer || io->type == IO_DynamicBuffer? io->ptr: NULL;
+    switch (io->type) {
+        default: return NULL;
+        case IO_SizedBuffer: return io->data.sized_buffer.buffer;
+        case IO_ThreadBuffer: return io->data.thread_buffer.buffer; /* FIXME */
+        case IO_DynamicBuffer: return io->data.dynamic_buffer.buffer;
+    }
 }
 
 size_t io_underlying_buffer_size(IO io) {
-    return io->type == IO_MinimalBuffer || io->type == IO_DynamicBuffer? io->sizes.size: 0;
+    switch (io->type) {
+        default: return 0;
+        case IO_SizedBuffer: return io->data.sized_buffer.buffer_size;
+        case IO_ThreadBuffer: return io->data.thread_buffer.buffer_size; /* FIXME */
+        case IO_DynamicBuffer: return io->data.dynamic_buffer.buffer_size;
+    }
 }
 
 size_t io_underlying_buffer_capacity(IO io) {
-    return io->type == IO_MinimalBuffer || io->type == IO_DynamicBuffer? io->sizes.capacity: 0;
+    switch (io->type) {
+        default: return 0;
+        case IO_SizedBuffer: return io->data.sized_buffer.buffer_size;
+        case IO_ThreadBuffer: return io->data.thread_buffer.buffer_capacity; /* FIXME */
+        case IO_DynamicBuffer: return io->data.dynamic_buffer.buffer_capacity;
+    }
 }
 
 unsigned char *io_tempdata(IO io) {
@@ -774,30 +861,24 @@ int io_error(IO io) {
         default: return io->flags & IO_FLAG_ERROR? io->error: 0;
         case IO_File:
         case IO_OwnFile:
-            return ferror(io->ptr)? CC_EIO: 0;
+            return io->flags & IO_FLAG_ERROR? io->error: ferror(io->data.file.fptr)? CC_EIO: 0;
     }
 }
 
-int io_set_error(IO io, int err) {
-    switch (io->type) {
-        default:
-            if (err)
-                io->flags |= IO_FLAG_ERROR;
-            else
-                io->flags &= ~IO_FLAG_ERROR;
+void io_set_error(IO io, int err) {
+    if (err)
+        io->flags |= IO_FLAG_ERROR;
+    else
+        io->flags &= ~IO_FLAG_ERROR;
 
-            io->error = err;
-            return 0;
-        case IO_File:
-        case IO_OwnFile: return EOF;
-    }
+    io->error = err;
 }
 
 int io_eof(IO io) {
     switch (io->type) {
         default: return io->flags & IO_FLAG_EOF;
         case IO_File:
-        case IO_OwnFile: return feof(io->ptr);
+        case IO_OwnFile: return (io->flags & IO_FLAG_EOF) || feof(io->data.file.fptr);
     }
 }
 
@@ -805,49 +886,39 @@ int io_flush(IO io) {
     switch (io->type) {
         default: return 0;
         case IO_File:
-        case IO_OwnFile: return fflush(io->ptr);
+        case IO_OwnFile: return fflush(io->data.file.fptr);
         case IO_NativeFile:
         case IO_OwnNativeFile:
             if (io->flags & IO_FLAG_HAS_JUST_WRITTEN) {
-                if (io->sizes.ptr2 == NULL || io->sizes.pos == 0)
+                if ((io->flags & IO_FLAG_OWNS_BUFFER) || io->data.native_file.buffer_bytes == 0)
                     return 0;
 
 #if LINUX_OS
-                if (write((size_t) io->ptr, io->sizes.ptr2, io->sizes.pos) < (ssize_t) io->sizes.pos) {
+                if (write(io->data.native_file.native, io->data.native_file.buffer, io->data.native_file.buffer_bytes) < (ssize_t) io->data.native_file.buffer_bytes) {
                     io->flags |= IO_FLAG_ERROR;
                     io->error = errno;
                     return EOF;
                 }
 #elif WINDOWS_OS
                 DWORD written;
-                if (!WriteFile(io->ptr, io->sizes.ptr2, (DWORD) io->sizes.pos, &written, NULL) || written != io->sizes.pos) {
+                if (!WriteFile(io->data.native_file.native, io->data.native_file.buffer, (DWORD) io->data.native_file.buffer_bytes, &written, NULL) || written != io->data.native_file.buffer_bytes) {
                     io->flags |= IO_FLAG_ERROR;
                     io->error = GetLastError();
                     return EOF;
                 }
 #endif
-            } else if ((io->flags & IO_FLAG_HAS_JUST_READ) && io->sizes.pos) {
-                if (io_seek64(io, -((long long) io->sizes.pos), SEEK_CUR) < 0)
+            } else if ((io->flags & IO_FLAG_HAS_JUST_READ) && io->data.native_file.buffer_bytes) {
+                if (io_seek64(io, -((long long) io->data.native_file.buffer_bytes), SEEK_CUR) < 0)
                     return EOF;
             }
 
-            io->sizes.pos = 0;
+            io->data.native_file.buffer_bytes = 0;
             return 0;
         case IO_Custom:
-            if (io->flags & IO_FLAG_HAS_JUST_WRITTEN) {
-                if (io_native_unbuffered_write(io->sizes.ptr2, 1, io->sizes.pos, io) != io->sizes.pos)
-                    return EOF;
-            } else if ((io->flags & IO_FLAG_HAS_JUST_READ) && io->sizes.pos) {
-                if (io_seek64(io, -((long long) io->sizes.pos), SEEK_CUR) < 0)
-                    return EOF;
-            }
-
-            io->sizes.pos = 0;
-
-            if (io->callbacks->flush == NULL)
+            if (io->data.custom.callbacks->flush == NULL)
                 return 0;
 
-            if (io->callbacks->flush(io->ptr, io) != 0) {
+            if (io->data.custom.callbacks->flush(io->data.custom.ptr, io) != 0) {
                 io->flags |= IO_FLAG_ERROR;
                 return EOF;
             }
@@ -871,7 +942,7 @@ int io_resize(IO io, long long int size) {
         case IO_File:
         case IO_OwnFile: {
 #if LINUX_OS
-            if (ftruncate((size_t) io->ptr, (off_t) size)) {
+            if (ftruncate((size_t) io->data.file.fptr, (off_t) size)) {
                 io->flags |= IO_FLAG_ERROR;
                 io->error = errno;
                 return EOF;
@@ -882,7 +953,7 @@ int io_resize(IO io, long long int size) {
             if (io_seek64(io, size, SEEK_SET) != 0)
                 return EOF;
 
-            HANDLE osfhandle = (HANDLE) _get_osfhandle(_fileno(io->ptr));
+            HANDLE osfhandle = (HANDLE) _get_osfhandle(_fileno(io->data.file.fptr));
 
             if (osfhandle == INVALID_HANDLE_VALUE || !SetEndOfFile(osfhandle)) {
                 io->flags |= IO_FLAG_ERROR;
@@ -900,7 +971,7 @@ int io_resize(IO io, long long int size) {
         case IO_NativeFile:
         case IO_OwnNativeFile:
 #if LINUX_OS
-            if (ftruncate((size_t) io->ptr, (off_t) size)) {
+            if (ftruncate(io->data.native_file.native, (off_t) size)) {
                 io->flags |= IO_FLAG_ERROR;
                 io->error = errno;
                 return EOF;
@@ -911,7 +982,7 @@ int io_resize(IO io, long long int size) {
             if (io_seek64(io, size, SEEK_SET) != 0)
                 return EOF;
 
-            if (!SetEndOfFile(io->ptr)) {
+            if (!SetEndOfFile(io->data.native_file.native)) {
                 io->flags |= IO_FLAG_ERROR;
                 io->error = GetLastError();
                 return EOF;
@@ -919,37 +990,15 @@ int io_resize(IO io, long long int size) {
 
             return 0;
 #endif
-        case IO_MinimalBuffer:
-            if (io->sizes.size > (unsigned long long) size) /* Truncating */ {
-                char *new_ptr = MALLOC(size);
-                if (new_ptr == NULL) {
-                    io->flags |= IO_FLAG_ERROR;
-                    io->error = CC_ENOMEM;
-                    return EOF;
-                }
-
-                memcpy(new_ptr, io->ptr, size);
-                FREE(io->sizes.ptr2);
-
-                io->sizes.size = io->sizes.pos = size;
-                io->sizes.ptr2 = io->ptr = new_ptr;
-            } else /* Extending */ {
-                if (io_grow(io, size)) {
-                    io->flags |= IO_FLAG_ERROR;
-                    io->error = CC_ENOMEM;
-                    return EOF;
-                }
-
-                size -= io->sizes.size;
-                while (size--)
-                    if (io_putc(0, io) == EOF)
-                        return EOF;
+        case IO_DynamicBuffer:
+            if (size > SIZE_MAX) {
+                io->flags |= IO_FLAG_ERROR;
+                io->error = CC_EINVAL;
+                return EOF;
             }
 
-            return 0;
-        case IO_DynamicBuffer:
-            if (io->sizes.size > (unsigned long long) size) /* Truncating */ {
-                io->sizes.size = io->sizes.pos = size;
+            if (io->data.dynamic_buffer.buffer_size > (unsigned long long) size) /* Truncating */ {
+                io->data.dynamic_buffer.buffer_size = size;
             } else /* Extending */ {
                 if (io_grow(io, size)) {
                     io->flags |= IO_FLAG_ERROR;
@@ -957,10 +1006,9 @@ int io_resize(IO io, long long int size) {
                     return EOF;
                 }
 
-                size -= io->sizes.size;
-                while (size--)
-                    if (io_putc(0, io) == EOF)
-                        return EOF;
+                size -= io->data.dynamic_buffer.buffer_size;
+                if (io_putc_n(0, (size_t) size, io) == EOF)
+                    return EOF;
             }
 
             return 0;
@@ -1020,11 +1068,10 @@ static int io_getc_internal_helper(IO io) {
     switch (io->type) {
         default: io->flags |= IO_FLAG_EOF; return EOF;
         case IO_File:
-        case IO_OwnFile: return fgetc(io->ptr);
+        case IO_OwnFile: return fgetc(io->data.file.fptr);
         case IO_NativeFile:
         case IO_OwnNativeFile:
-        case IO_Custom:
-        {
+        case IO_Custom: {
             unsigned char buf;
 
             if (io_read_internal(&buf, 1, 1, io) != 1)
@@ -1032,29 +1079,22 @@ static int io_getc_internal_helper(IO io) {
 
             return buf;
         }
-        case IO_CString:
-        {
-            unsigned char ch = ((const char *) io->ptr)[io->sizes.pos];
-
-            if (ch == 0) {
+        case IO_SizedBuffer: {
+            if (io->data.sized_buffer.buffer_pos >= io->data.sized_buffer.buffer_size) {
                 io->flags |= IO_FLAG_EOF;
                 return EOF;
             }
 
-            io->sizes.pos++;
-
-            return ch;
+            return io->data.sized_buffer.buffer[io->data.sized_buffer.buffer_pos++];
         }
-        case IO_SizedBuffer:
-        case IO_MinimalBuffer:
-        case IO_DynamicBuffer:
-        {
-            if (io->sizes.pos >= io->sizes.size) {
+        case IO_ThreadBuffer: return 0; /* FIXME */
+        case IO_DynamicBuffer: {
+            if (io->data.dynamic_buffer.buffer_pos >= io->data.dynamic_buffer.buffer_size) {
                 io->flags |= IO_FLAG_EOF;
                 return EOF;
             }
 
-            return ((const unsigned char *) io->ptr)[io->sizes.pos++];
+            return io->data.dynamic_buffer.buffer[io->data.dynamic_buffer.buffer_pos++];
         }
     }
 }
@@ -1083,17 +1123,12 @@ int io_getc(IO io) {
 
 int io_getpos(IO io, IO_Pos *pos) {
     switch (io->type) {
-        default: pos->_pos = 0; return 0;
         case IO_File:
-        case IO_OwnFile: return fgetpos(io->ptr, &pos->_fpos);
-        case IO_CString:
-        case IO_SizedBuffer:
-        case IO_MinimalBuffer:
-        case IO_DynamicBuffer: pos->_pos = io->sizes.pos; return 0;
-        case IO_NativeFile:
-        case IO_OwnNativeFile:
-        case IO_Custom:
-        {
+        case IO_OwnFile: return fgetpos(io->data.file.fptr, &pos->_fpos);
+        case IO_SizedBuffer: pos->_pos = io->data.sized_buffer.buffer_pos; return 0;
+        case IO_ThreadBuffer: pos->_pos = 0; return 0; /* FIXME */
+        case IO_DynamicBuffer: pos->_pos = io->data.dynamic_buffer.buffer_pos; return 0;
+        default: {
             long long tell = io_tell64(io);
             if (tell < 0)
                 return -1;
@@ -1111,16 +1146,10 @@ char *io_gets(char *str, int num, IO io) {
         return NULL;
 
     switch (io->type) {
-        default: io->flags |= IO_FLAG_EOF; return NULL;
+        case IO_Empty: io->flags |= IO_FLAG_EOF; return NULL;
         case IO_File:
-        case IO_OwnFile: return fgets(str, num, io->ptr);
-        case IO_CString:
-        case IO_SizedBuffer:
-        case IO_NativeFile:
-        case IO_OwnNativeFile:
-        case IO_MinimalBuffer:
-        case IO_DynamicBuffer:
-        case IO_Custom:
+        case IO_OwnFile: return fgets(str, num, io->data.file.fptr);
+        default:
         {
             int ch = 0;
 
@@ -1154,21 +1183,12 @@ static int io_set_flags_for_mode(IO io, const char *mode, unsigned int *flags_) 
             case 'x': flags |= IO_FLAG_FAIL_IF_EXISTS; break;
             case 'b': flags |= IO_FLAG_BINARY; break;
             case 't': flags &= ~IO_FLAG_BINARY; break;
-            case '*': flags |= IO_FLAG_REQUIRES_ATOMIC; break;
         }
     }
 
     io->flags |= flags;
     if (flags_)
         *flags_ = flags;
-
-    if ((io->flags & IO_FLAG_REQUIRES_ATOMIC)) {
-        if (io->mutex == NULL)
-            io->mutex = mutex_create_recursive();
-
-        if (io->mutex == NULL)
-            return CC_ENOTSUP;
-    }
 
     return 0;
 }
@@ -1178,8 +1198,8 @@ IO io_open(const char *filename, const char *mode) {
     if (io == NULL)
         return NULL;
 
-    io->ptr = fopen(filename, mode);
-    if (io->ptr == NULL || io_set_flags_for_mode(io, mode, NULL)) {
+    io->data.file.fptr = fopen(filename, mode);
+    if (io->data.file.fptr == NULL || io_set_flags_for_mode(io, mode, NULL)) {
         io_destroy(io);
         return NULL;
     }
@@ -1198,9 +1218,7 @@ IO io_open_native_file(int descriptor, const char *mode) {
         return NULL;
     }
 
-    io->ptr = (void *) (size_t) descriptor;
-    io->sizes.ptr2 = NULL;
-    io->sizes.size = io->sizes.pos = 0;
+    io->data.native_file.native = descriptor;
 
     return io;
 }
@@ -1236,9 +1254,7 @@ IO io_open_native(const char *filename, const char *mode) {
         return NULL;
     }
 
-    io->ptr = (void *) (size_t) descriptor;
-    io->sizes.ptr2 = NULL;
-    io->sizes.size = io->sizes.pos = 0;
+    io->data.native_file.native = descriptor;
 
     return io;
 }
@@ -1253,9 +1269,7 @@ IO io_open_native_file(HANDLE descriptor, const char *mode) {
         return NULL;
     }
 
-    io->ptr = descriptor;
-    io->sizes.ptr2 = NULL;
-    io->sizes.size = io->sizes.pos = 0;
+    io->data.native_file.native = descriptor;
 
     return io;
 }
@@ -1319,9 +1333,7 @@ IO io_open_native(const char *filename, const char *mode) {
         return NULL;
     }
 
-    io->ptr = file;
-    io->sizes.ptr2 = NULL;
-    io->sizes.size = io->sizes.pos = 0;
+    io->data.native_file.native = file;
 
     return io;
 }
@@ -1335,7 +1347,7 @@ IO io_open_file(FILE *file) {
     if (io == NULL)
         return NULL;
 
-    io->ptr = file;
+    io->data.file.fptr = file;
 
     /* We really can't determine what mode the file was opened with, so assume read/write */
     io->flags |= IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_BINARY;
@@ -1351,14 +1363,32 @@ IO io_open_empty(void) {
 }
 
 IO io_open_cstring(const char *str, const char *mode) {
-    IO io = io_alloc(IO_CString);
+    IO io = io_alloc(IO_SizedBuffer);
     if (io == NULL || io_set_flags_for_mode(io, mode, NULL)) {
         io_destroy(io);
         return NULL;
     }
 
-    io->ptr = (char *) str;
-    io->sizes.pos = 0;
+    io->data.sized_buffer.buffer = (unsigned char *) str;
+    io->data.sized_buffer.buffer_size = strlen(str);
+
+    if (io->flags & IO_FLAG_WRITABLE) {
+        io_destroy(io);
+        return NULL;
+    }
+
+    return io;
+}
+
+IO io_open_const_buffer(const char *buf, size_t size, const char *mode) {
+    IO io = io_alloc(IO_SizedBuffer);
+    if (io == NULL || io_set_flags_for_mode(io, mode, NULL)) {
+        io_destroy(io);
+        return NULL;
+    }
+
+    io->data.sized_buffer.buffer = (unsigned char *) buf;
+    io->data.sized_buffer.buffer_size = size;
 
     if (io->flags & IO_FLAG_WRITABLE) {
         io_destroy(io);
@@ -1375,9 +1405,8 @@ IO io_open_buffer(char *buf, size_t size, const char *mode) {
         return NULL;
     }
 
-    io->ptr = buf;
-    io->sizes.size = size;
-    io->sizes.pos = 0;
+    io->data.sized_buffer.buffer = buf;
+    io->data.sized_buffer.buffer_size = size;
 
     if (0 == (io->flags & (IO_FLAG_READABLE | IO_FLAG_WRITABLE))) {
         io_destroy(io);
@@ -1390,15 +1419,15 @@ IO io_open_buffer(char *buf, size_t size, const char *mode) {
     return io;
 }
 
-static IO io_open_dynamic_buffer_helper(enum IO_Type type, const char *mode) {
-    IO io = io_alloc(type);
+IO io_open_dynamic_buffer(const char *mode) {
+    IO io = io_alloc(IO_DynamicBuffer);
     if (io == NULL || io_set_flags_for_mode(io, mode, NULL)) {
         io_destroy(io);
         return NULL;
     }
 
-    io->sizes.ptr2 = io->ptr = NULL;
-    io->sizes.size = io->sizes.pos = io->sizes.capacity = 0;
+    io->flags |= IO_FLAG_OWNS_BUFFER;
+    io->data.dynamic_buffer.buffer = NULL;
 
     if (0 == (io->flags & IO_FLAG_WRITABLE)) {
         io_destroy(io);
@@ -1406,14 +1435,6 @@ static IO io_open_dynamic_buffer_helper(enum IO_Type type, const char *mode) {
     }
 
     return io;
-}
-
-IO io_open_minimal_buffer(const char *mode) {
-    return io_open_dynamic_buffer_helper(IO_MinimalBuffer, mode);
-}
-
-IO io_open_dynamic_buffer(const char *mode) {
-    return io_open_dynamic_buffer_helper(IO_DynamicBuffer, mode);
 }
 
 IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdata, const char *mode) {
@@ -1426,13 +1447,11 @@ IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdat
         return NULL;
     }
 
-    io->ptr = userdata;
-    io->sizes.ptr2 = NULL;
-    io->sizes.size = io->sizes.pos = 0;
-    io->callbacks = custom;
+    io->data.custom.ptr = userdata;
+    io->data.custom.callbacks = custom;
 
     if (0 == (io->flags & (IO_FLAG_READABLE | IO_FLAG_WRITABLE)) ||
-            (custom->open != NULL && (io->ptr = custom->open(userdata, io)) == NULL)) {
+             (custom->open != NULL && (io->data.custom.ptr = custom->open(userdata, io)) == NULL)) {
         io_destroy(io);
         return NULL;
     }
@@ -2517,17 +2536,13 @@ static unsigned io_scanf_float(char fmt, IO io, unsigned width, unsigned len, va
 
 int io_putc_internal(int ch, IO io) {
     switch (io->type) {
-        default:
+        case IO_Empty:
             io->flags |= IO_FLAG_ERROR;
             io->error = CC_EWRITE;
             return EOF;
         case IO_File:
-        case IO_OwnFile: return fputc(ch, io->ptr);
-        case IO_NativeFile:
-        case IO_OwnNativeFile:
-        case IO_MinimalBuffer:
-        case IO_DynamicBuffer:
-        case IO_Custom:
+        case IO_OwnFile: return fputc(ch, io->data.file.fptr);
+        default:
         {
             unsigned char chr = ch;
 
@@ -2536,14 +2551,6 @@ int io_putc_internal(int ch, IO io) {
 
             return chr;
         }
-        case IO_SizedBuffer:
-            if (io->sizes.pos == io->sizes.size) {
-                io->flags |= IO_FLAG_ERROR;
-                io->error = CC_ENOBUFS;
-                return EOF;
-            }
-            ((char *) io->ptr)[io->sizes.pos++] = (char) ch;
-            return (unsigned char) ch;
     }
 }
 
@@ -3114,14 +3121,14 @@ static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO
         unsigned char *cptr = ptr;
         size_t read = 0;
 
-        if (io->callbacks->read == NULL ||
-                (read = io->callbacks->read(cptr, 1, max, io->ptr, io)) != max) {
+        if (io->data.custom.callbacks->read == NULL ||
+                (read = io->data.custom.callbacks->read(cptr, 1, max, io->data.custom.ptr, io)) != max) {
             if (read == SIZE_MAX || io_error(io)) {
                 if (read == SIZE_MAX)
                     read = 0;
 
                 io->flags |= IO_FLAG_ERROR;
-                if (io->callbacks->read == NULL)
+                if (io->data.custom.callbacks->read == NULL)
                     io->error = CC_ENOTSUP;
                 else if (io->error == 0)
                     io->error = CC_EREAD;
@@ -3139,7 +3146,7 @@ static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO
         size_t amount = max > SSIZE_MAX? SSIZE_MAX: max;
         ssize_t amountRead = 0;
 
-        if ((amountRead = read((size_t) io->ptr, ptr, amount)) <= 0) {
+        if ((amountRead = read(io->data.native_file.native, ptr, amount)) <= 0) {
             io->flags |= amountRead < 0? IO_FLAG_ERROR: IO_FLAG_EOF;
             io->error = errno;
             return totalRead / size;
@@ -3154,7 +3161,7 @@ static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO
         DWORD amount = max > 0xffffffffu? 0xffffffffu: (DWORD) max;
         DWORD amountRead = 0;
 
-        if (!ReadFile(io->ptr, ptr, amount, &amountRead, NULL)) {
+        if (!ReadFile(io->data.native_file.native, ptr, amount, &amountRead, NULL)) {
             io->flags |= IO_FLAG_ERROR;
             io->error = GetLastError();
             return totalRead / size;
@@ -3179,98 +3186,62 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
     switch (io->type) {
         default: io->flags |= IO_FLAG_EOF; return 0;
         case IO_File:
-        case IO_OwnFile: return fread(ptr, size, count, io->ptr);
+        case IO_OwnFile: return fread(ptr, size, count, io->data.file.fptr);
         case IO_NativeFile:
         case IO_OwnNativeFile:
-        case IO_Custom:
         {
             size_t max = size*count;
             unsigned char *cptr = ptr;
 
-            if (io->sizes.ptr2 == NULL) /* No buffering */
+            if (io->data.native_file.buffer == NULL) /* No buffering */
                 return io_native_unbuffered_read(ptr, size, count, io);
-            else if (io->sizes.pos >= max) { /* Enough in buffer to cover reading the entire amount */
-                memcpy(ptr, (char *) io->sizes.ptr2 + io->sizes.size - io->sizes.pos, max);
-                io->sizes.pos -= max;
+            else if (io->data.native_file.buffer_bytes >= max) { /* Enough in buffer to cover reading the entire amount */
+                memcpy(ptr, io->data.native_file.buffer + io->data.native_file.buffer_size - io->data.native_file.buffer_bytes, max);
+                io->data.native_file.buffer_bytes -= max;
                 return count;
             } else { /* Buffered and requested more than buffer holds */
-                size_t read = io->sizes.pos;
-                memcpy(cptr, (char *) io->sizes.ptr2 + io->sizes.size - io->sizes.pos, read);
+                size_t read = io->data.native_file.buffer_bytes;
+                memcpy(cptr, io->data.native_file.buffer + io->data.native_file.buffer_size - io->data.native_file.buffer_bytes, read);
 
                 max -= read;
                 cptr += read;
-                io->sizes.pos = 0;
+                io->data.native_file.buffer_bytes = 0;
 
                 /* Pull greater-than-buffer-size chunk directly into output, skipping the buffer entirely */
-                if (max >= io->sizes.size)
+                if (max >= io->data.native_file.buffer_size)
                     return (read + io_native_unbuffered_read(cptr, 1, max, io)) / size;
                 else {
                     /* Refill read buffer */
                     /* However, be careful since io_native_unbuffered_read() can set EOF long before we actually read to it
                      * (the buffer could be huge and the read tiny) */
-                    if ((io->sizes.pos = io_native_unbuffered_read(io->sizes.ptr2, 1, io->sizes.size, io)) != io->sizes.size && io_error(io)) {
+                    if ((io->data.native_file.buffer_bytes = io_native_unbuffered_read(io->data.native_file.buffer, 1, io->data.native_file.buffer_size, io)) != io->data.native_file.buffer_size && io_error(io)) {
                         return read / size;
                     }
 
-                    if (max < io->sizes.pos)
+                    if (max < io->data.native_file.buffer_bytes)
                         io->flags &= ~IO_FLAG_EOF;
 
                     /* Move front-aligned buffer to end-aligned buffer as needed */
-                    if (io->sizes.pos != io->sizes.size)
-                        memmove((char *) io->sizes.ptr2 + io->sizes.size - io->sizes.pos, io->sizes.ptr2, io->sizes.pos);
+                    if (io->data.native_file.buffer_bytes != io->data.native_file.buffer_size)
+                        memmove(io->data.native_file.buffer + io->data.native_file.buffer_size - io->data.native_file.buffer_bytes, io->data.native_file.buffer, io->data.native_file.buffer_bytes);
 
                     /* Allow for end of input */
-                    if (max > io->sizes.pos)
-                        max = io->sizes.pos;
+                    if (max > io->data.native_file.buffer_bytes)
+                        max = io->data.native_file.buffer_bytes;
 
-                    memcpy(cptr, (char *) io->sizes.ptr2 + io->sizes.size - io->sizes.pos, max);
-                    io->sizes.pos -= max;
+                    memcpy(cptr, io->data.native_file.buffer + io->data.native_file.buffer_size - io->data.native_file.buffer_bytes, max);
+                    io->data.native_file.buffer_bytes -= max;
 
                     return (read + max) / size;
                 }
             }
         }
-        case IO_CString:
-        {
-            unsigned char *cptr = ptr;
-            size_t blocks = 0;
-            size_t i = io->ungetAvail, max = size*count;
-            size_t start_pos = io->sizes.pos;
-
-            /* search for 0 character in C-string */
-            for (io->sizes.pos += io->ungetAvail; i < max && io_current_char(io) > 0; ++i)
-                io->sizes.pos++;
-
-            /* if i < max, the NUL is in the desired block,
-             * so truncate to reading the most complete blocks we can */
-            if (i < max)
-                io->flags |= IO_FLAG_EOF;
-            else if (i > max)
-                i = max;
-
-            i -= i % size;
-            io->sizes.pos = start_pos;
-            blocks = i;
-
-            /* then copy the blocks */
-            for (; i && io->ungetAvail; --i)
-                *cptr++ = io_from_unget_buffer(io);
-            memcpy(cptr, (char *) io->ptr + io->sizes.pos, i);
-            io->sizes.pos += i;
-
-            /* return number of blocks read */
-            return blocks / size;
-        }
-        case IO_SizedBuffer:
-        case IO_MinimalBuffer:
-        case IO_DynamicBuffer:
-        {
+        case IO_SizedBuffer: {
             unsigned char *cptr = ptr;
             size_t max = size*count, blocks = 0;
-            size_t avail = io->sizes.size - io->sizes.pos;
-
-            if (io->sizes.pos > io->sizes.size)
-                avail = 0;
+            size_t avail = io->data.sized_buffer.buffer_size > io->data.sized_buffer.buffer_size?
+                        io->data.sized_buffer.buffer_size - io->data.sized_buffer.buffer_pos:
+                        0;
 
             /* not enough to cover reading the requested blocks */
             if (avail < max)
@@ -3285,12 +3256,41 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
             /* then copy the blocks */
             for (; max && io->ungetAvail; --max)
                 *cptr++ = io_from_unget_buffer(io);
-            memcpy(cptr, (char *) io->ptr + io->sizes.pos, max);
-            io->sizes.pos += max;
+
+            memcpy(cptr, io->data.sized_buffer.buffer + io->data.sized_buffer.buffer_pos, max);
+            io->data.sized_buffer.buffer_pos += max;
 
             /* return number of blocks read */
             return blocks / size;
         }
+        case IO_DynamicBuffer: {
+            unsigned char *cptr = ptr;
+            size_t max = size*count, blocks = 0;
+            size_t avail = io->data.dynamic_buffer.buffer_size > io->data.dynamic_buffer.buffer_size?
+                        io->data.dynamic_buffer.buffer_size - io->data.dynamic_buffer.buffer_pos:
+                        0;
+
+            /* not enough to cover reading the requested blocks */
+            if (avail < max)
+            {
+                io->flags |= IO_FLAG_EOF;
+
+                max = avail - avail % size;
+            }
+
+            blocks = max;
+
+            /* then copy the blocks */
+            for (; max && io->ungetAvail; --max)
+                *cptr++ = io_from_unget_buffer(io);
+
+            memcpy(cptr, io->data.dynamic_buffer.buffer + io->data.dynamic_buffer.buffer_pos, max);
+            io->data.dynamic_buffer.buffer_pos += max;
+
+            /* return number of blocks read */
+            return blocks / size;
+        }
+        case IO_Custom: return io_native_unbuffered_read(ptr, size, count, io);
     }
 }
 
@@ -3340,17 +3340,17 @@ IO io_reopen(const char *filename, const char *mode, IO io) {
                 return NULL;
             }
 
-            io->ptr = f;
+            io->data.file.fptr = f;
             io->type = IO_OwnFile;
-            io->flags &= IO_FLAG_RESET;
+            io->flags &= ~IO_FLAG_RESET;
 
             return io;
         }
         case IO_File:
         case IO_OwnFile:
-            io->ptr = freopen(filename, mode, io->ptr);
+            io->data.file.fptr = freopen(filename, mode, io->data.file.fptr);
 
-            if (io->ptr == NULL)
+            if (io->data.file.fptr == NULL)
             {
                 io_destroy(io);
                 return NULL;
@@ -3596,14 +3596,14 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                 }
                 case 'n': {
                     switch (fmt_len) {
-                        case PRINTF_LEN_NONE: {int *n = va_arg(args_copy.args, int *); *n = bytes; break;}
-                        case PRINTF_LEN_HH: {signed char *n = va_arg(args_copy.args, signed char *); *n = bytes; break;}
-                        case PRINTF_LEN_H: {signed short *n = va_arg(args_copy.args, signed short *); *n = bytes; break;}
-                        case PRINTF_LEN_L: {long int *n = va_arg(args_copy.args, long int *); *n = bytes; break;}
-                        case PRINTF_LEN_LL: {long long int *n = va_arg(args_copy.args, long long int *); *n = bytes; break;}
-                        case PRINTF_LEN_J: {intmax_t *n = va_arg(args_copy.args, intmax_t *); *n = bytes; break;}
+                        case PRINTF_LEN_NONE: {int *n = va_arg(args_copy.args, int *); *n = (int) bytes; break;}
+                        case PRINTF_LEN_HH: {signed char *n = va_arg(args_copy.args, signed char *); *n = (signed char) bytes; break;}
+                        case PRINTF_LEN_H: {signed short *n = va_arg(args_copy.args, signed short *); *n = (unsigned char) bytes; break;}
+                        case PRINTF_LEN_L: {long int *n = va_arg(args_copy.args, long int *); *n = (long) bytes; break;}
+                        case PRINTF_LEN_LL: {long long int *n = va_arg(args_copy.args, long long int *); *n = (long long) bytes; break;}
+                        case PRINTF_LEN_J: {intmax_t *n = va_arg(args_copy.args, intmax_t *); *n = (intmax_t) bytes; break;}
                         case PRINTF_LEN_Z: {size_t *n = va_arg(args_copy.args, size_t *); *n = bytes; break;}
-                        case PRINTF_LEN_T: {ptrdiff_t *n = va_arg(args_copy.args, ptrdiff_t *); *n = bytes; break;}
+                        case PRINTF_LEN_T: {ptrdiff_t *n = va_arg(args_copy.args, ptrdiff_t *); *n = (ptrdiff_t) bytes; break;}
                     }
                     break;
                 }
@@ -3661,8 +3661,8 @@ int io_scanf(IO io, const char *fmt, ...) {
 }
 
 static int io_state_switch(IO io) {
-    if (io->type == IO_Custom && io->callbacks->stateSwitch != NULL) {
-        if (io->callbacks->stateSwitch(io->ptr, io))
+    if (io->type == IO_Custom && io->data.custom.callbacks->stateSwitch != NULL) {
+        if (io->data.custom.callbacks->stateSwitch(io->data.custom.ptr, io))
             return -1;
     }
 
@@ -3677,26 +3677,27 @@ int io_seek(IO io, long int offset, int origin) {
     if (offset == 0 && origin == SEEK_CUR)
         return io_state_switch(io);
 
-    io->ungetAvail = 0;
-
     switch (io->type) {
-        default: break;
+        default: return -1;
         case IO_File:
-        case IO_OwnFile: return fseek(io->ptr, offset, origin); break;
+        case IO_OwnFile:
+            if (fseek(io->data.file.fptr, offset, origin) < 0)
+                return -1;
+            break;
         case IO_NativeFile:
         case IO_OwnNativeFile:
             if ((io->flags & IO_FLAG_HAS_JUST_WRITTEN) && io_flush(io))
                 return -1;
             else if ((io->flags & IO_FLAG_HAS_JUST_READ) && origin == SEEK_CUR)
-                offset -= io->sizes.pos;
+                offset -= io->data.native_file.buffer_bytes;
 
 #if LINUX_OS
-            if (lseek((size_t) io->ptr, offset, origin) < 0)
+            if (lseek(io->data.native_file.native, offset, origin) < 0)
                 return -1;
 #elif WINDOWS_OS
             if (sizeof(long) == sizeof(LONG)) {
                 DWORD val;
-                if ((val = SetFilePointer(io->ptr, offset, NULL,
+                if ((val = SetFilePointer(io->data.native_file.native, offset, NULL,
                                              origin == SEEK_SET? FILE_BEGIN:
                                              origin == SEEK_CUR? FILE_CURRENT:
                                              origin == SEEK_END? FILE_END: FILE_BEGIN)) == INVALID_SET_FILE_POINTER)
@@ -3708,7 +3709,7 @@ int io_seek(IO io, long int offset, int origin) {
 
                 li.QuadPart = offset;
 
-                if ((li.LowPart = SetFilePointer(io->ptr, li.LowPart, &li.HighPart,
+                if ((li.LowPart = SetFilePointer(io->data.native_file.native, li.LowPart, &li.HighPart,
                                                  origin == SEEK_SET? FILE_BEGIN:
                                                  origin == SEEK_CUR? FILE_CURRENT:
                                                  origin == SEEK_END? FILE_END: FILE_BEGIN)) == INVALID_SET_FILE_POINTER &&
@@ -3717,97 +3718,72 @@ int io_seek(IO io, long int offset, int origin) {
             }
 #endif
 
-            io->sizes.pos = 0;
+            io->data.native_file.buffer_bytes = 0;
             break;
         case IO_Custom: {
             if ((io->flags & IO_FLAG_HAS_JUST_WRITTEN) && io_flush(io))
                 return -1;
-            else if ((io->flags & IO_FLAG_HAS_JUST_READ) && origin == SEEK_CUR)
-                offset -= io->sizes.pos;
 
             long seek;
 
-            if (io->callbacks->seek != NULL)
-                seek = io->callbacks->seek(io->ptr, offset, origin, io);
-            else if (io->callbacks->seek64 != NULL)
-                seek = io->callbacks->seek64(io->ptr, offset, origin, io);
+            if (io->data.custom.callbacks->seek != NULL)
+                seek = io->data.custom.callbacks->seek(io->data.custom.ptr, offset, origin, io);
+            else if (io->data.custom.callbacks->seek64 != NULL)
+                seek = io->data.custom.callbacks->seek64(io->data.custom.ptr, offset, origin, io);
             else
                 seek = -1;
 
             if (seek)
                 return seek;
 
-            io->sizes.pos = 0;
             break;
         }
-        case IO_CString:
-        {
+        case IO_SizedBuffer: {
             switch (origin) {
                 case SEEK_SET:
-                    if (offset < 0 || (io->sizes.pos < (unsigned long) offset && io->sizes.pos + strlen((const char *) io->ptr + io->sizes.pos) < (unsigned long) offset))
+                    if (offset < 0 || io->data.sized_buffer.buffer_size < (unsigned long) offset)
                         return -1;
-                    io->sizes.pos = offset;
+                    io->data.sized_buffer.buffer_pos = offset;
                     break;
                 case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long) -offset > io->sizes.pos) || (offset > 0 && strlen((const char *) io->ptr + io->sizes.pos) < (unsigned long) offset))
+                    if ((offset < 0 && (unsigned long) -offset > io->data.sized_buffer.buffer_pos) ||
+                            (offset > 0 && io->data.sized_buffer.buffer_size - io->data.sized_buffer.buffer_pos < (unsigned long) offset))
                         return -1;
-                    io->sizes.pos += offset;
+                    io->data.sized_buffer.buffer_pos += offset;
                     break;
                 case SEEK_END:
-                {
-                    size_t len = io->sizes.pos + strlen((const char *) io->ptr + io->sizes.pos);
-                    if (offset > 0 || (unsigned long) -offset > len)
+                    if (offset > 0 || (unsigned long) -offset > io->data.sized_buffer.buffer_size)
                         return -1;
-                    io->sizes.pos = len + offset;
-                    break;
-                }
-            }
-            break;
-        }
-        case IO_SizedBuffer:
-        case IO_MinimalBuffer:
-        {
-            switch (origin) {
-                case SEEK_SET:
-                    if (offset < 0 || io->sizes.size < (unsigned long) offset)
-                        return -1;
-                    io->sizes.pos = offset;
-                    break;
-                case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long) -offset > io->sizes.pos) || (offset > 0 && io->sizes.size - io->sizes.pos < (unsigned long) offset))
-                        return -1;
-                    io->sizes.pos += offset;
-                    break;
-                case SEEK_END:
-                    if (offset > 0 || (unsigned long) -offset > io->sizes.size)
-                        return -1;
-                    io->sizes.pos = io->sizes.size + offset;
+                    io->data.sized_buffer.buffer_pos = io->data.sized_buffer.buffer_size + offset;
                     break;
             }
             break;
         }
-        case IO_DynamicBuffer:
+        case IO_DynamicBuffer: {
             switch (origin) {
                 case SEEK_SET:
-                    if (offset < 0 || SIZE_MAX < (uintmax_t) offset)
+                    if (offset < 0 || io->data.dynamic_buffer.buffer_size < (unsigned long) offset)
                         return -1;
-                    io->sizes.pos = offset;
+                    io->data.dynamic_buffer.buffer_pos = offset;
                     break;
                 case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long) -offset > io->sizes.pos) || (offset > 0 && SIZE_MAX - io->sizes.pos < (unsigned long) offset))
+                    if ((offset < 0 && (unsigned long) -offset > io->data.dynamic_buffer.buffer_pos) ||
+                            (offset > 0 && io->data.dynamic_buffer.buffer_size - io->data.dynamic_buffer.buffer_pos < (unsigned long) offset))
                         return -1;
-                    io->sizes.pos += offset;
+                    io->data.dynamic_buffer.buffer_pos += offset;
                     break;
                 case SEEK_END:
-                    if (offset > 0 || (unsigned long) -offset > SIZE_MAX - io->sizes.size)
+                    if (offset > 0 || (unsigned long) -offset > io->data.dynamic_buffer.buffer_size)
                         return -1;
-                    io->sizes.pos = io->sizes.size + offset;
+                    io->data.dynamic_buffer.buffer_pos = io->data.dynamic_buffer.buffer_size + offset;
                     break;
             }
             break;
+        }
     }
 
     io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
+    io->ungetAvail = 0;
 
     return 0;
 }
@@ -3819,89 +3795,63 @@ static int io_seek64_helper(IO io, long long int offset, int origin)
         case IO_Custom:
             if ((io->flags & IO_FLAG_HAS_JUST_WRITTEN) && io_flush(io))
                 return -1;
-            else if ((io->flags & IO_FLAG_HAS_JUST_READ) && origin == SEEK_CUR)
-                offset -= io->sizes.pos;
 
-            if (io->callbacks->seek64 != NULL) {
-                int result = io->callbacks->seek64(io->ptr, offset, origin, io);
+            if (io->data.custom.callbacks->seek64 != NULL) {
+                int result = io->data.custom.callbacks->seek64(io->data.custom.ptr, offset, origin, io);
                 if (result)
                     return result;
             }
-            else if (offset >= LONG_MIN && offset <= LONG_MAX && io->callbacks->seek) {
-                int result = io->callbacks->seek(io->ptr, (long) offset, origin, io);
+            else if (offset >= LONG_MIN && offset <= LONG_MAX && io->data.custom.callbacks->seek) {
+                int result = io->data.custom.callbacks->seek(io->data.custom.ptr, (long) offset, origin, io);
                 if (result)
                     return result;
             }
             else
                 return -1;
 
-            io->sizes.pos = 0;
             break;
-        case IO_CString:
-        {
+        case IO_SizedBuffer: {
             switch (origin) {
                 case SEEK_SET:
-                    if (offset < 0 || (io->sizes.pos < (unsigned long long) offset && io->sizes.pos + strlen((const char *) io->ptr + io->sizes.pos) < (unsigned long long) offset))
+                    if (offset < 0 || io->data.sized_buffer.buffer_size < (unsigned long long) offset)
                         return -1;
-                    io->sizes.pos = offset;
+                    io->data.sized_buffer.buffer_pos = offset;
                     break;
                 case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long long) -offset > io->sizes.pos) || (offset > 0 && strlen((const char *) io->ptr + io->sizes.pos) < (unsigned long long) offset))
+                    if ((offset < 0 && (unsigned long long) -offset > io->data.sized_buffer.buffer_pos) ||
+                            (offset > 0 && io->data.sized_buffer.buffer_size - io->data.sized_buffer.buffer_pos < (unsigned long long) offset))
                         return -1;
-                    io->sizes.pos += offset;
+                    io->data.sized_buffer.buffer_pos += offset;
                     break;
                 case SEEK_END:
-                {
-                    size_t len = io->sizes.pos + strlen((const char *) io->ptr + io->sizes.pos);
-                    if (offset > 0 || (unsigned long long) -offset > len)
+                    if (offset > 0 || (unsigned long long) -offset > io->data.sized_buffer.buffer_size)
                         return -1;
-                    io->sizes.pos = len + offset;
-                    break;
-                }
-            }
-            break;
-        }
-        case IO_SizedBuffer:
-        case IO_MinimalBuffer:
-        {
-            switch (origin) {
-                case SEEK_SET:
-                    if (offset < 0 || io->sizes.size < (unsigned long long) offset)
-                        return -1;
-                    io->sizes.pos = offset;
-                    break;
-                case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long long) -offset > io->sizes.pos) || (offset > 0 && io->sizes.size - io->sizes.pos < (unsigned long long) offset))
-                        return -1;
-                    io->sizes.pos += offset;
-                    break;
-                case SEEK_END:
-                    if (offset > 0 || (unsigned long long) -offset > io->sizes.size)
-                        return -1;
-                    io->sizes.pos = io->sizes.size + offset;
+                    io->data.sized_buffer.buffer_pos = io->data.sized_buffer.buffer_size + offset;
                     break;
             }
             break;
         }
-        case IO_DynamicBuffer:
+        case IO_DynamicBuffer: {
             switch (origin) {
                 case SEEK_SET:
-                    if (offset < 0 || SIZE_MAX < (unsigned long long) offset)
+                    if (offset < 0 || io->data.dynamic_buffer.buffer_size < (unsigned long long) offset)
                         return -1;
-                    io->sizes.pos = offset;
+                    io->data.dynamic_buffer.buffer_pos = offset;
                     break;
                 case SEEK_CUR:
-                    if ((offset < 0 && (unsigned long long) -offset > io->sizes.pos) || (offset > 0 && SIZE_MAX - io->sizes.pos < (unsigned long long) offset))
+                    if ((offset < 0 && (unsigned long long) -offset > io->data.dynamic_buffer.buffer_pos) ||
+                            (offset > 0 && io->data.dynamic_buffer.buffer_size - io->data.dynamic_buffer.buffer_pos < (unsigned long long) offset))
                         return -1;
-                    io->sizes.pos += offset;
+                    io->data.dynamic_buffer.buffer_pos += offset;
                     break;
                 case SEEK_END:
-                    if (offset > 0 || (unsigned long long) -offset > SIZE_MAX - io->sizes.size)
+                    if (offset > 0 || (unsigned long long) -offset > io->data.dynamic_buffer.buffer_size)
                         return -1;
-                    io->sizes.pos = io->sizes.size + offset;
+                    io->data.dynamic_buffer.buffer_pos = io->data.dynamic_buffer.buffer_size + offset;
                     break;
             }
             break;
+        }
     }
 
     io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
@@ -3918,32 +3868,38 @@ int io_seek64(IO io, long long int offset, int origin) {
     switch (io->type) {
         default: return io_seek64_helper(io, offset, origin);
         case IO_File:
-        case IO_OwnFile: return _fseeki64(io->ptr, offset, origin);
+        case IO_OwnFile:
+            if (_fseeki64(io->data.file.fptr, offset, origin) < 0)
+                return -1;
+            break;
         case IO_NativeFile:
         case IO_OwnNativeFile: {
             if ((io->flags & IO_FLAG_HAS_JUST_WRITTEN) && io_flush(io))
                 return -1;
             else if ((io->flags & IO_FLAG_HAS_JUST_READ) && origin == SEEK_CUR)
-                offset -= io->sizes.pos;
+                offset -= io->data.native_file.buffer_bytes;
 
             LARGE_INTEGER li;
 
             li.QuadPart = offset;
 
-            if ((li.LowPart = SetFilePointer(io->ptr, li.LowPart, &li.HighPart,
+            if ((li.LowPart = SetFilePointer(io->data.native_file.native, li.LowPart, &li.HighPart,
                                              origin == SEEK_SET? FILE_BEGIN:
                                              origin == SEEK_CUR? FILE_CURRENT:
                                              origin == SEEK_END? FILE_END: FILE_BEGIN)) == INVALID_SET_FILE_POINTER &&
                     GetLastError() != NO_ERROR)
                 return -1;
 
-            io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
-            io->sizes.pos = 0;
-            io->ungetAvail = 0;
+            io->data.native_file.buffer_bytes = 0;
 
-            return 0;
+            break;
         }
     }
+
+    io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
+    io->ungetAvail = 0;
+
+    return 0;
 }
 #elif LINUX_OS
 int io_seek64(IO io, long long int offset, int origin) {
@@ -3953,23 +3909,29 @@ int io_seek64(IO io, long long int offset, int origin) {
     switch (io->type) {
         default: return io_seek64_helper(io, offset, origin);
         case IO_File:
-        case IO_OwnFile: return fseeko(io->ptr, offset, origin);
+        case IO_OwnFile:
+            if (fseeko(io->data.file.fptr, offset, origin) < 0)
+                return -1;
+            break;
         case IO_NativeFile:
         case IO_OwnNativeFile:
             if ((io->flags & IO_FLAG_HAS_JUST_WRITTEN) && io_flush(io))
                 return -1;
             else if ((io->flags & IO_FLAG_HAS_JUST_READ) && origin == SEEK_CUR)
-                offset -= io->sizes.pos;
+                offset -= io->data.native_file.buffer_bytes;
 
-            if (lseek64((size_t) io->ptr, offset, origin) < 0)
+            if (lseek64(io->data.native_file.native, offset, origin) < 0)
                 return -1;
 
-            io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
-            io->sizes.pos = 0;
-            io->ungetAvail = 0;
+            io->data.native_file.buffer_bytes = 0;
 
-            return 0;
+            break;
     }
+
+    io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
+    io->ungetAvail = 0;
+
+    return 0;
 }
 #else
 int io_seek64(IO io, long long offset, int origin) {
@@ -3989,94 +3951,80 @@ int io_seek64(IO io, long long offset, int origin) {
 
 int io_setpos(IO io, const IO_Pos *pos) {
     switch (io->type) {
-        default: return -1;
+        default: return io_seek64(io, pos->_pos, SEEK_SET);
         case IO_File:
         case IO_OwnFile:
-            return fsetpos(io->ptr, &pos->_fpos);
-        case IO_NativeFile:
-        case IO_OwnNativeFile:
-        case IO_Custom:
-            return io_seek64(io, pos->_pos, SEEK_SET);
-        case IO_CString:
-        case IO_SizedBuffer:
-        case IO_MinimalBuffer:
-        case IO_DynamicBuffer:
-            io->sizes.pos = pos->_pos;
-            io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
-            io->ungetAvail = 0;
-            return 0;
+            if (fsetpos(io->data.file.fptr, &pos->_fpos)) {
+                io_set_error(io, errno);
+                return -1;
+            }
+            break;
+        case IO_SizedBuffer: io->data.sized_buffer.buffer_pos = pos->_pos; break;
+        case IO_DynamicBuffer: io->data.dynamic_buffer.buffer_pos = pos->_pos; break;
     }
+
+    io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
+    io->ungetAvail = 0;
+
+    return 0;
 }
 
 long int io_tell(IO io) {
     switch (io->type) {
         default: return -1L;
         case IO_File:
-        case IO_OwnFile: return ftell(io->ptr);
+        case IO_OwnFile: return ftell(io->data.file.fptr);
         case IO_NativeFile:
         case IO_OwnNativeFile:
 #if LINUX_OS
         {
-            long off = lseek((size_t) io->ptr, 0, SEEK_CUR);
+            long off = lseek(io->data.native_file.native, 0, SEEK_CUR);
             if (off < 0)
                 return off;
 
             if (io->flags & IO_FLAG_HAS_JUST_READ)
-                return off - io->sizes.pos;
+                return off - io->data.native_file.buffer_bytes;
             else
-                return off + io->sizes.pos;
+                return off + io->data.native_file.buffer_bytes;
         }
 #elif WINDOWS_OS
             if (sizeof(long) == sizeof(LONG)) {
                 long offset;
                 DWORD val;
 
-                if ((val = SetFilePointer(io->ptr, 0, NULL, FILE_CURRENT)) == INVALID_SET_FILE_POINTER)
+                if ((val = SetFilePointer(io->data.native_file.native, 0, NULL, FILE_CURRENT)) == INVALID_SET_FILE_POINTER)
                     return -1;
                 else
                     offset = (long) val;
 
                 if (io->flags & IO_FLAG_HAS_JUST_READ)
-                    return offset - io->sizes.pos;
+                    return offset - io->data.native_file.buffer_bytes;
                 else
-                    return offset + io->sizes.pos;
+                    return offset + io->data.native_file.buffer_bytes;
             } else {
                 LARGE_INTEGER li;
 
                 li.QuadPart = 0;
 
-                if ((li.LowPart = SetFilePointer(io->ptr, li.LowPart, &li.HighPart, FILE_CURRENT)) == INVALID_SET_FILE_POINTER &&
+                if ((li.LowPart = SetFilePointer(io->data.native_file.native, li.LowPart, &li.HighPart, FILE_CURRENT)) == INVALID_SET_FILE_POINTER &&
                         GetLastError() != NO_ERROR)
                     return -1;
 
                 if (io->flags & IO_FLAG_HAS_JUST_READ)
-                    return li.QuadPart - io->sizes.pos;
+                    return li.QuadPart - io->data.native_file.buffer_bytes;
                 else
-                    return li.QuadPart + io->sizes.pos;
+                    return li.QuadPart + io->data.native_file.buffer_bytes;
             }
 #endif
         case IO_Custom:
         {
-            long offset;
-
-            if (io->callbacks->tell != NULL)
-                offset = io->callbacks->tell(io->ptr, io);
+            if (io->data.custom.callbacks->tell != NULL)
+                return io->data.custom.callbacks->tell(io->data.custom.ptr, io);
             else
                 return -1L;
-
-            if (offset < 0)
-                return -1;
-
-            if (io->flags & IO_FLAG_HAS_JUST_READ)
-                return offset - io->sizes.pos;
-            else
-                return offset + io->sizes.pos;
         }
-        case IO_CString:
-        case IO_SizedBuffer:
-        case IO_MinimalBuffer:
-        case IO_DynamicBuffer:
-            return io->sizes.pos;
+        case IO_SizedBuffer: return io->data.sized_buffer.buffer_pos;
+        case IO_DynamicBuffer: return io->data.dynamic_buffer.buffer_pos;
     }
 }
 
@@ -4085,28 +4033,15 @@ static long long int io_tell64_helper(IO io) {
         default: return -1LL;
         case IO_Custom:
         {
-            long long offset;
-
-            if (io->callbacks->tell64 != NULL)
-                offset = io->callbacks->tell64(io->ptr, io);
-            else if (io->callbacks->tell != NULL)
-                offset = io->callbacks->tell(io->ptr, io);
+            if (io->data.custom.callbacks->tell64 != NULL)
+                return io->data.custom.callbacks->tell64(io->data.custom.ptr, io);
+            else if (io->data.custom.callbacks->tell != NULL)
+                return io->data.custom.callbacks->tell(io->data.custom.ptr, io);
             else
                 return -1LL;
-
-            if (offset < 0)
-                return offset;
-
-            if (io->flags & IO_FLAG_HAS_JUST_READ)
-                return offset - io->sizes.pos;
-            else
-                return offset + io->sizes.pos;
         }
-        case IO_CString:
-        case IO_SizedBuffer:
-        case IO_MinimalBuffer:
-        case IO_DynamicBuffer:
-            return io->sizes.pos;
+        case IO_SizedBuffer: return io->data.sized_buffer.buffer_pos;
+        case IO_DynamicBuffer: return io->data.dynamic_buffer.buffer_pos;
     }
 }
 
@@ -4115,21 +4050,21 @@ long long int io_tell64(IO io) {
     switch (io->type) {
         default: return io_tell64_helper(io);
         case IO_File:
-        case IO_OwnFile: return _ftelli64(io->ptr);
+        case IO_OwnFile: return _ftelli64(io->data.file.fptr);
         case IO_NativeFile:
         case IO_OwnNativeFile: {
             LARGE_INTEGER li;
 
             li.QuadPart = 0;
 
-            if ((li.LowPart = SetFilePointer(io->ptr, li.LowPart, &li.HighPart, FILE_CURRENT)) == INVALID_SET_FILE_POINTER &&
+            if ((li.LowPart = SetFilePointer(io->data.native_file.native, li.LowPart, &li.HighPart, FILE_CURRENT)) == INVALID_SET_FILE_POINTER &&
                     GetLastError() != NO_ERROR)
                 return -1;
 
             if (io->flags & IO_FLAG_HAS_JUST_READ)
-                return li.QuadPart - io->sizes.pos;
+                return li.QuadPart - io->data.native_file.buffer_bytes;
             else
-                return li.QuadPart + io->sizes.pos;
+                return li.QuadPart + io->data.native_file.buffer_bytes;
         }
     }
 }
@@ -4138,18 +4073,18 @@ long long int io_tell64(IO io) {
     switch (io->type) {
         default: return io_tell64_helper(io);
         case IO_File:
-        case IO_OwnFile: return ftello(io->ptr);
+        case IO_OwnFile: return ftello(io->data.file.fptr);
         case IO_NativeFile:
         case IO_OwnNativeFile:
         {
-            long long off = lseek64((size_t) io->ptr, 0, SEEK_CUR);
+            long long off = lseek64(io->data.native_file.native, 0, SEEK_CUR);
             if (off < 0)
                 return off;
 
             if (io->flags & IO_FLAG_HAS_JUST_READ)
-                return off - io->sizes.pos;
+                return off - io->data.native_file.buffer_bytes;
             else
-                return off + io->sizes.pos;
+                return off + io->data.native_file.buffer_bytes;
         }
     }
 }
@@ -4201,13 +4136,13 @@ static size_t io_native_unbuffered_write(const void *ptr, size_t size, size_t co
     size_t max = size*count, totalWritten = 0;
 
     if (io_type(io) == IO_Custom) {
-        if (io->callbacks->write == NULL) {
+        if (io->data.custom.callbacks->write == NULL) {
             io->flags |= IO_FLAG_ERROR;
             io->error = CC_ENOTSUP;
             return 0;
         }
 
-        size_t written = io->callbacks->write(ptr, size, count, io->ptr, io);
+        size_t written = io->data.custom.callbacks->write(ptr, size, count, io->data.custom.ptr, io);
         if (written != count) {
             io->flags |= IO_FLAG_ERROR;
             if (io->error == 0)
@@ -4221,7 +4156,7 @@ static size_t io_native_unbuffered_write(const void *ptr, size_t size, size_t co
         size_t amount = max > SSIZE_MAX? SSIZE_MAX: max;
         ssize_t amountWritten = 0;
 
-        if ((amountWritten = write((size_t) io->ptr, ptr, amount)) < 0) {
+        if ((amountWritten = write(io->data.native_file.native, ptr, amount)) < 0) {
             io->flags |= IO_FLAG_ERROR;
             io->error = errno;
             return totalWritten / size;
@@ -4236,7 +4171,7 @@ static size_t io_native_unbuffered_write(const void *ptr, size_t size, size_t co
         DWORD amount = max > 0xffffffffu? 0xffffffffu: (DWORD) max;
         DWORD amountWritten = 0;
 
-        if (!WriteFile(io->ptr, ptr, amount, &amountWritten, NULL) || amountWritten != amount) {
+        if (!WriteFile(io->data.native_file.native, ptr, amount, &amountWritten, NULL) || amountWritten != amount) {
             io->flags |= IO_FLAG_ERROR;
             io->error = GetLastError();
             return (totalWritten + amountWritten) / size;
@@ -4258,11 +4193,9 @@ static size_t io_write_internal_helper(const void *ptr, size_t size, size_t coun
             io->error = CC_EWRITE;
             return 0;
         case IO_File:
-        case IO_OwnFile: return fwrite(ptr, size, count, io->ptr);
+        case IO_OwnFile: return fwrite(ptr, size, count, io->data.file.fptr);
         case IO_NativeFile:
-        case IO_OwnNativeFile:
-        case IO_Custom:
-        {
+        case IO_OwnNativeFile: {
             size_t max = size*count;
             const unsigned char *cptr = ptr;
 
@@ -4274,47 +4207,46 @@ static size_t io_write_internal_helper(const void *ptr, size_t size, size_t coun
                 }
             }
 
-            if (io->sizes.ptr2 == NULL) /* No buffering */
+            if (io->data.native_file.buffer == NULL) /* No buffering */
                 return io_native_unbuffered_write(ptr, size, count, io);
-            else if (io->sizes.size - io->sizes.pos >= max) { /* Room to add to buffer */
-                memcpy((char *) io->sizes.ptr2 + io->sizes.pos, ptr, max);
-                io->sizes.pos += max;
+            else if (io->data.native_file.buffer_size - io->data.native_file.buffer_bytes >= max) { /* Room to add to buffer */
+                memcpy(io->data.native_file.buffer + io->data.native_file.buffer_bytes, ptr, max);
+                io->data.native_file.buffer_bytes += max;
                 return count;
             } else { /* Buffered and requested output greater than buffer size */
-                const size_t initialAvailable = io->sizes.size - io->sizes.pos;
+                const size_t initialAvailable = io->data.native_file.buffer_size - io->data.native_file.buffer_bytes;
                 size_t written = 0;
-                memcpy((char *) io->sizes.ptr2 + io->sizes.pos, cptr, initialAvailable);
+                memcpy(io->data.native_file.buffer + io->data.native_file.buffer_bytes, cptr, initialAvailable);
 
                 max -= initialAvailable;
                 cptr += initialAvailable;
 
-                if ((written = io_native_unbuffered_write(io->sizes.ptr2, 1, io->sizes.size, io)) != io->sizes.size) {
-                    memmove(io->sizes.ptr2, (char *) io->sizes.ptr2 + written, io->sizes.size - written);
-                    io->sizes.pos = io->sizes.size - written;
+                if ((written = io_native_unbuffered_write(io->data.native_file.buffer, 1, io->data.native_file.buffer_size, io)) != io->data.native_file.buffer_size) {
+                    memmove(io->data.native_file.buffer, io->data.native_file.buffer + written, io->data.native_file.buffer_size - written);
+                    io->data.native_file.buffer_bytes = io->data.native_file.buffer_size - written;
 
-                    if (written < io->sizes.size - initialAvailable)
+                    if (written < io->data.native_file.buffer_size - initialAvailable)
                         return 0;
                     else
-                        return (written - (io->sizes.size - initialAvailable)) / size;
+                        return (written - (io->data.native_file.buffer_size - initialAvailable)) / size;
                 }
 
                 /* Push greater-than-buffer-size chunk directly into output, skipping the buffer entirely */
-                if (max >= io->sizes.size) {
-                    io->sizes.pos = 0;
+                if (max >= io->data.native_file.buffer_size) {
+                    io->data.native_file.buffer_bytes = 0;
                     return (initialAvailable + io_native_unbuffered_write(cptr, 1, max, io)) / size;
                 }
                 else {
-                    memcpy(io->sizes.ptr2, cptr, max);
-                    io->sizes.pos = max;
+                    memcpy(io->data.native_file.buffer, cptr, max);
+                    io->data.native_file.buffer_bytes = max;
 
                     return count;
                 }
             }
         }
-        case IO_SizedBuffer:
-        {
+        case IO_SizedBuffer: {
             size_t max = size*count;
-            size_t avail = io->sizes.size - io->sizes.pos;
+            size_t avail = io->data.sized_buffer.buffer_size - io->data.sized_buffer.buffer_pos;
 
             /* not enough to cover writing the requested blocks */
             if (avail < max)
@@ -4326,26 +4258,24 @@ static size_t io_write_internal_helper(const void *ptr, size_t size, size_t coun
             }
 
             /* then copy the blocks */
-            memcpy((char *) io->ptr + io->sizes.pos, ptr, max);
-            io->sizes.pos += max;
+            memcpy(io->data.sized_buffer.buffer + io->data.sized_buffer.buffer_pos, ptr, max);
+            io->data.sized_buffer.buffer_pos += max;
 
             /* return number of blocks written */
             return max / size;
         }
-        case IO_MinimalBuffer:
-        case IO_DynamicBuffer:
-        {
+        case IO_DynamicBuffer: {
             if (io->flags & IO_FLAG_APPEND)
-                io->sizes.pos = io->sizes.size;
+                io->data.dynamic_buffer.buffer_pos = io->data.dynamic_buffer.buffer_size;
 
             size_t max = size*count;
-            size_t avail = io->sizes.size - io->sizes.pos;
-            size_t required_size = io->sizes.size;
-            int grow_with_gap = io->sizes.pos > io->sizes.size;
+            size_t avail = io->data.dynamic_buffer.buffer_size - io->data.dynamic_buffer.buffer_pos;
+            size_t required_size = io->data.dynamic_buffer.buffer_size;
+            int grow_with_gap = io->data.dynamic_buffer.buffer_pos > io->data.dynamic_buffer.buffer_size;
 
             if (grow_with_gap) {
                 avail = 0;
-                required_size = io->sizes.pos + max;
+                required_size = io->data.dynamic_buffer.buffer_pos + max;
             } else if (max > avail)
                 required_size += (max - avail);
 
@@ -4356,17 +4286,18 @@ static size_t io_write_internal_helper(const void *ptr, size_t size, size_t coun
 
                 max = avail - avail % size;
                 if (grow_with_gap)
-                    required_size = io->sizes.size;
+                    required_size = io->data.dynamic_buffer.buffer_size;
             }
 
             /* then copy the blocks */
-            memcpy((char *) io->ptr + io->sizes.pos, ptr, max);
-            io->sizes.pos += max;
-            io->sizes.size = required_size;
+            memcpy(io->data.dynamic_buffer.buffer + io->data.dynamic_buffer.buffer_pos, ptr, max);
+            io->data.dynamic_buffer.buffer_pos += max;
+            io->data.dynamic_buffer.buffer_size = required_size;
 
             /* return number of blocks written */
             return max / size;
         }
+        case IO_Custom: return io_native_unbuffered_write(ptr, size, count, io);
     }
 }
 
@@ -4434,18 +4365,14 @@ void io_rewind(IO io) {
     io->ungetAvail = 0;
 
     switch (io->type) {
-        default:
-            io_seek(io, 0, SEEK_SET);
-            io->flags &= ~(IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
-            break;
+        default: io_seek(io, 0, SEEK_SET); break;
         case IO_File:
-        case IO_OwnFile: rewind(io->ptr); break;
-        case IO_CString:
-        case IO_SizedBuffer:
-            io->sizes.pos = 0;
-            io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
-            break;
+        case IO_OwnFile: rewind(io->data.file.fptr); break;
+        case IO_SizedBuffer: io->data.sized_buffer.buffer_pos = 0; break;
+        case IO_DynamicBuffer: io->data.dynamic_buffer.buffer_pos = 0; break;
     }
+
+    io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
 }
 
 void io_setbuf(IO io, char *buf) {
@@ -4453,14 +4380,18 @@ void io_setbuf(IO io, char *buf) {
         default: break;
         case IO_File:
         case IO_OwnFile:
-            setbuf(io->ptr, buf);
+            setbuf(io->data.file.fptr, buf);
             break;
         case IO_NativeFile:
         case IO_OwnNativeFile:
-        case IO_Custom:
-            io->sizes.ptr2 = buf;
-            io->sizes.size = buf? BUFSIZ: 0;
-            io->sizes.pos = 0;
+            if (io->flags & IO_FLAG_OWNS_BUFFER) {
+                FREE(io->data.native_file.buffer);
+                io->flags &= ~IO_FLAG_OWNS_BUFFER;
+            }
+
+            io->data.native_file.buffer = buf;
+            io->data.native_file.buffer_size = buf? BUFSIZ: 0;
+            io->data.native_file.buffer_bytes = 0;
             break;
     }
 }
@@ -4470,28 +4401,31 @@ int io_setvbuf(IO io, char *buf, int mode, size_t size) {
         default: return -1;
         case IO_File:
         case IO_OwnFile:
-            return setvbuf(io->ptr, buf, mode, size);
+            return setvbuf(io->data.file.fptr, buf, mode, size);
         case IO_NativeFile:
         case IO_OwnNativeFile:
-        case IO_Custom:
             if (io->flags & IO_FLAG_OWNS_BUFFER) {
-                FREE(io->sizes.ptr2);
+                FREE(io->data.native_file.buffer);
                 io->flags &= ~IO_FLAG_OWNS_BUFFER;
             }
 
             if (mode == _IONBF) {
-                io->sizes.ptr2 = NULL;
-                io->sizes.size = io->sizes.pos = 0;
+                io->data.native_file.buffer = NULL;
+                io->data.native_file.buffer_size = 0;
+                io->data.native_file.buffer_bytes = 0;
             } else if (buf == NULL) {
-                io->sizes.size = io->sizes.pos = 0;
-                if ((io->sizes.ptr2 = MALLOC(size)) == NULL)
-                    return -1;
-                io->sizes.size = size;
+                char *buf = MALLOC(size);
+                if (buf == NULL)
+                    return CC_ENOMEM;
+
+                io->data.native_file.buffer = buf;
+                io->data.native_file.buffer_size = size;
+                io->data.native_file.buffer_bytes = 0;
                 io->flags |= IO_FLAG_OWNS_BUFFER;
             } else {
-                io->sizes.ptr2 = buf;
-                io->sizes.size = size;
-                io->sizes.pos = 0;
+                io->data.native_file.buffer = buf;
+                io->data.native_file.buffer_size = size;
+                io->data.native_file.buffer_bytes = 0;
             }
 
             return 0;
@@ -4503,8 +4437,8 @@ IO io_tmpfile(void) {
     if (io == NULL)
         return NULL;
 
-    io->ptr = tmpfile();
-    if (io->ptr == NULL) {
+    io->data.file.fptr = tmpfile();
+    if (io->data.file.fptr == NULL) {
         io_destroy(io);
         return NULL;
     }
@@ -4525,7 +4459,7 @@ static int io_set_timeout(IO io, int type, long long usecs) {
             timeout_ms = 1;
         usecs = timeout_ms * 1000LL;
 
-        if (setsockopt((SOCKET) io->ptr, SOL_SOCKET, type, (const char *) &timeout_ms, sizeof(timeout_ms)) == SOCKET_ERROR)
+        if (setsockopt((SOCKET) io->data.native_file.native, SOL_SOCKET, type, (const char *) &timeout_ms, sizeof(timeout_ms)) == SOCKET_ERROR)
             return WSAGetLastError();
 
         if (type == SO_RCVTIMEO)
@@ -4547,7 +4481,7 @@ static int io_set_timeout(IO io, int type, long long usecs) {
         timeout_us.tv_sec = 0;
         timeout_us.tv_usec = usecs;
 
-        if (setsockopt((SOCKET) (uintptr_t) io->ptr, SOL_SOCKET, type, (const char *) &timeout_us, sizeof(timeout_us)))
+        if (setsockopt((SOCKET) io->data.native_file.native, SOL_SOCKET, type, (const char *) &timeout_us, sizeof(timeout_us)))
             return errno;
 
         if (type == SO_RCVTIMEO)
@@ -4590,15 +4524,13 @@ const char *io_description(IO io) {
         case IO_OwnFile: return "owned_file";
         case IO_NativeFile: return "native_file";
         case IO_OwnNativeFile: return "owned_native_file";
-        case IO_CString: return "cstring";
         case IO_SizedBuffer: return "sized_buffer";
-        case IO_MinimalBuffer: return "minimal_buffer";
         case IO_DynamicBuffer: return "dynamic_buffer";
         case IO_Custom:
-            if (io->callbacks->what == NULL)
+            if (io->data.custom.callbacks->what == NULL)
                 return "custom";
 
-            return io->callbacks->what(io_userdata(io), io);
+            return io->data.custom.callbacks->what(io_userdata(io), io);
     }
 }
 
@@ -4614,37 +4546,22 @@ int io_ungetc(int chr, IO io) {
         return EOF;
 
     switch (io->type) {
-        default: return EOF;
+        case IO_Empty: return EOF;
         case IO_File:
-        case IO_OwnFile: return ungetc(chr, io->ptr);
-        case IO_NativeFile:
-        case IO_OwnNativeFile:
-        case IO_Custom:
-            if (io->ungetAvail != sizeof(io->ungetBuf))
-            {
-                io->flags &= ~IO_FLAG_EOF;
-
-                return io->ungetBuf[io->ungetAvail++] = chr;
-            }
-
-            return EOF;
-        case IO_CString:
-            if (chr == 0)
-                return EOF;
-            /* fallthrough */
-        case IO_SizedBuffer:
-        case IO_MinimalBuffer:
-        case IO_DynamicBuffer:
-            if (io->ungetAvail != sizeof(io->ungetBuf))
-            {
-                io->flags &= ~IO_FLAG_EOF;
-
-                --io->sizes.pos;
-                return io->ungetBuf[io->ungetAvail++] = chr;
-            }
-
-            return EOF;
+        case IO_OwnFile: return ungetc(chr, io->data.file.fptr);
+        case IO_SizedBuffer: if (io->ungetAvail != sizeof(io->ungetBuf)) --io->data.sized_buffer.buffer_pos; break;
+        case IO_DynamicBuffer: if (io->ungetAvail != sizeof(io->ungetBuf)) --io->data.dynamic_buffer.buffer_pos; break;
+        default: break;
     }
+
+    if (io->ungetAvail != sizeof(io->ungetBuf))
+    {
+        io->flags &= ~IO_FLAG_EOF;
+
+        return io->ungetBuf[io->ungetAvail++] = chr;
+    }
+
+    return EOF;
 }
 
 int io_format_file_size(IO out, long long size) {
