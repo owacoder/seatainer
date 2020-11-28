@@ -34,6 +34,8 @@
 #include <windows.h>
 #endif
 
+#define IO_COPY_SIZE 256
+
 /*
  *  HANDLE REGISTERING OF TYPES AND FORMATS FOR SCANF() AND PRINTF()
  */
@@ -967,7 +969,7 @@ int io_resize(IO io, long long int size) {
 
 int io_copy_and_close(IO in, IO out) {
     if (!in || !out)
-        return CC_ENOMEM;
+        return CC_EINVAL;
 
     int result = io_copy(in, out);
     io_close(in);
@@ -993,7 +995,6 @@ int io_slow_copy(IO in, IO out) {
 }
 
 int io_copy(IO in, IO out) {
-#define IO_COPY_SIZE 256
     const size_t size = IO_COPY_SIZE;
     char data[IO_COPY_SIZE];
     size_t read = size;
@@ -2550,7 +2551,7 @@ static int io_putc_n_internal(int ch, size_t count, IO io) {
     if (count == 0)
         return 0;
 
-    unsigned char buffer[256];
+    unsigned char buffer[IO_COPY_SIZE];
     memset(buffer, ch, sizeof(buffer));
 
     while (count > sizeof(buffer)) {
