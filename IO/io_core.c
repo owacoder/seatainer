@@ -331,8 +331,10 @@ struct IODynamicBufferState {
 };
 
 struct IOThreadBufferState {
+    Mutex mutex;
     unsigned char *buffer; /* Circular buffer for efficient thread communication */
-    size_t buffer_size;
+    size_t buffer_pos; /* Pointer to first character in buffer */
+    size_t buffer_endpos; /* Pointer to one-after the last character in buffer. If equal to buffer_pos, buffer is empty */
     size_t buffer_capacity;
 };
 
@@ -532,6 +534,7 @@ static void io_destroy(IO io) {
                 break;
             case IO_ThreadBuffer:
                 FREE(io->data.thread_buffer.buffer);
+                mutex_destroy(io->data.thread_buffer.mutex);
                 break;
         }
 
@@ -546,7 +549,7 @@ static void io_destroy(IO io) {
 
 /* Attempts to grow the dynamic buffer stored in `io` to at least `size` capacity */
 /* Returns 0 on success, EOF on failure */
-static int io_grow(IO io, size_t size) {
+static int io_grow_dynamic(IO io, size_t size) {
     size_t growth;
 
     if (size <= io->data.dynamic_buffer.buffer_capacity)
@@ -602,40 +605,44 @@ static int io_begin_write(IO io) {
     return 0;
 }
 
-#if 0
-int io_can_lock(IO io) {return io->mutex != NULL;}
-
-void io_lock(IO io) {
-    if (io->mutex)
-        mutex_lock(io->mutex);
+static void io_lock(IO io) {
+    if (io->type == IO_ThreadBuffer)
+        mutex_lock(io->data.thread_buffer.mutex);
 }
 
-void io_unlock(IO io) {
-    if (io->mutex)
-        mutex_unlock(io->mutex);
+static void io_unlock(IO io) {
+    if (io->type == IO_ThreadBuffer)
+        mutex_unlock(io->data.thread_buffer.mutex);
 }
 
-int io_unlocki(IO io, int passthrough) {
+static int io_unlocki(IO io, int passthrough) {
     io_unlock(io);
     return passthrough;
 }
 
-unsigned long io_unlocklu(IO io, unsigned long passthrough) {
+static unsigned long io_unlockul(IO io, unsigned long passthrough) {
     io_unlock(io);
     return passthrough;
 }
 
-long long io_unlockll(IO io, long long passthrough) {
+static long io_unlockl(IO io, long passthrough) {
     io_unlock(io);
     return passthrough;
 }
-#endif
 
-static int io_current_char(IO io) {
-    switch (io->type) {
-        default: return EOF;
-        case IO_SizedBuffer: return ((const unsigned char *) io->data.sized_buffer.buffer)[io->data.sized_buffer.buffer_pos];
-    }
+static size_t io_unlockz(IO io, size_t passthrough) {
+    io_unlock(io);
+    return passthrough;
+}
+
+static void *io_unlockp(IO io, void *passthrough) {
+    io_unlock(io);
+    return passthrough;
+}
+
+static long long io_unlockll(IO io, long long passthrough) {
+    io_unlock(io);
+    return passthrough;
 }
 
 /* Gets a character from the unget buffer if available, and removes it, otherwise returns EOF */
@@ -650,7 +657,7 @@ static int io_from_unget_buffer(IO io) {
         case IO_NativeFile: break;
         case IO_OwnNativeFile: break;
         case IO_SizedBuffer: ++io->data.sized_buffer.buffer_pos;
-        case IO_ThreadBuffer: break; /* FIXME */
+        case IO_ThreadBuffer: break;
         case IO_DynamicBuffer: ++io->data.dynamic_buffer.buffer_pos;
         case IO_Custom: break;
     }
@@ -672,7 +679,7 @@ static int io_close_without_destroying(IO io) {
             break;
 #elif WINDOWS_OS
         case IO_OwnNativeFile:
-            if (io_writable(io))
+            if (io->flags & IO_FLAG_WRITABLE)
                 result = io_flush(io);
 
             result = (CloseHandle(io->data.native_file.native) || result)? EOF: 0;
@@ -705,7 +712,42 @@ static int io_putc_internal(int ch, IO io);
 static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io);
 static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO io);
 
-void io_clearerr(IO io) {
+static int io_ungetc_internal(int chr, IO io) {
+    if (!(io->flags & IO_FLAG_READABLE))
+    {
+        io->flags |= IO_FLAG_ERROR;
+        io->error = CC_EREAD;
+        return EOF;
+    }
+
+    if (chr == EOF)
+        return EOF;
+
+    switch (io->type) {
+        case IO_Empty: return EOF;
+        case IO_File:
+        case IO_OwnFile: return ungetc(chr, io->data.file.fptr);
+        case IO_SizedBuffer: if (io->ungetAvail != sizeof(io->ungetBuf)) --io->data.sized_buffer.buffer_pos; break;
+        case IO_DynamicBuffer: if (io->ungetAvail != sizeof(io->ungetBuf)) --io->data.dynamic_buffer.buffer_pos; break;
+        default: break;
+    }
+
+    if (io->ungetAvail != sizeof(io->ungetBuf))
+    {
+        io->flags &= ~IO_FLAG_EOF;
+
+        return io->ungetBuf[io->ungetAvail++] = chr;
+    }
+
+    return EOF;
+}
+
+int io_ungetc(int chr, IO io) {
+    io_lock(io);
+    return io_unlocki(io, io_ungetc_internal(chr, io));
+}
+
+static void io_clearerr_internal(IO io) {
     switch (io->type) {
         case IO_Custom:
             if (io->data.custom.callbacks->clearerr != NULL)
@@ -717,12 +759,21 @@ void io_clearerr(IO io) {
     }
 }
 
+void io_clearerr(IO io) {
+    io_lock(io);
+    io_clearerr_internal(io);
+    io_unlock(io);
+}
+
 int io_close(IO io) {
     if (io == NULL)
         return 0;
 
+    io_lock(io);
+
     int result = io_close_without_destroying(io);
 
+    io_unlock(io);
     io_destroy(io);
 
     return result;
@@ -742,39 +793,47 @@ int io_vclose(int count, ...) {
     return err? EOF: 0;
 }
 
-int io_readable(IO io) {
-    return io->flags & IO_FLAG_READABLE;
+unsigned long io_readable(IO io) {
+    io_lock(io);
+    return io_unlockul(io, io->flags & IO_FLAG_READABLE);
 }
 
-int io_writable(IO io) {
-    return io->flags & IO_FLAG_WRITABLE;
+unsigned long io_writable(IO io) {
+    io_lock(io);
+    return io_unlockul(io, io->flags & IO_FLAG_WRITABLE);
 }
 
 unsigned long io_flags(IO io) {
-    return io->flags;
+    io_lock(io);
+    return io_unlockul(io, io->flags);
 }
 
-int io_just_read(IO io) {
-    return io->flags & IO_FLAG_HAS_JUST_READ;
+unsigned long io_just_read(IO io) {
+    io_lock(io);
+    return io_unlockul(io, io->flags & IO_FLAG_HAS_JUST_READ);
 }
 
-int io_just_wrote(IO io) {
-    return io->flags & IO_FLAG_HAS_JUST_WRITTEN;
+unsigned long io_just_wrote(IO io) {
+    io_lock(io);
+    return io_unlockul(io, io->flags & IO_FLAG_HAS_JUST_WRITTEN);
 }
 
-int io_opened_for_update(IO io) {
-    return io->flags & IO_FLAG_UPDATE;
+unsigned long io_opened_for_update(IO io) {
+    io_lock(io);
+    return io_unlockul(io, io->flags & IO_FLAG_UPDATE);
 }
 
-int io_opened_for_append(IO io) {
-    return io->flags & IO_FLAG_APPEND;
+unsigned long io_opened_for_append(IO io) {
+    io_lock(io);
+    return io_unlockul(io, io->flags & IO_FLAG_APPEND);
 }
 
-int io_binary(IO io) {
-    return io->flags & IO_FLAG_BINARY;
+unsigned long io_binary(IO io) {
+    io_lock(io);
+    return io_unlockul(io, io->flags & IO_FLAG_BINARY);
 }
 
-int io_text(IO io) {
+unsigned long io_text(IO io) {
     return !io_binary(io);
 }
 
@@ -805,7 +864,6 @@ void io_grab_underlying_buffer(IO io) {
     switch (io->type) {
         default: break;
         case IO_SizedBuffer:
-        case IO_ThreadBuffer: /* FIXME */
         case IO_DynamicBuffer:
             io->flags |= IO_FLAG_OWNS_BUFFER;
             break;
@@ -816,7 +874,6 @@ char *io_take_underlying_buffer(IO io) {
     switch (io->type) {
         default: return NULL;
         case IO_SizedBuffer: io->flags &= ~IO_FLAG_OWNS_BUFFER; return io->data.sized_buffer.buffer;
-        case IO_ThreadBuffer: return NULL; /* FIXME */
         case IO_DynamicBuffer: io->flags &= ~IO_FLAG_OWNS_BUFFER; return io->data.dynamic_buffer.buffer;
     }
 }
@@ -825,16 +882,44 @@ char *io_underlying_buffer(IO io) {
     switch (io->type) {
         default: return NULL;
         case IO_SizedBuffer: return io->data.sized_buffer.buffer;
-        case IO_ThreadBuffer: return io->data.thread_buffer.buffer; /* FIXME */
         case IO_DynamicBuffer: return io->data.dynamic_buffer.buffer;
     }
+}
+
+/* Size of content stored in the circular thread buffer */
+static size_t io_thread_buffer_size(IO io) {
+    if (io->data.thread_buffer.buffer_pos <= io->data.thread_buffer.buffer_endpos)
+        return io->data.thread_buffer.buffer_endpos - io->data.thread_buffer.buffer_pos;
+    else /* buffer_pos > buffer_endpos, meaning the unused gap is in the middle or start of the array */
+        return io->data.thread_buffer.buffer_capacity - (io->data.thread_buffer.buffer_pos - io->data.thread_buffer.buffer_endpos);
+}
+
+/* Total unused space in the circular thread buffer */
+static size_t io_thread_buffer_empty_size(IO io) {
+    return io->data.thread_buffer.buffer_capacity - io_thread_buffer_size(io);
+}
+
+/* Maximum unused contiguous space after buffer_endpos in the circular thread buffer */
+static size_t io_thread_buffer_contiguous_empty_at_end(IO io) {
+    if (io->data.thread_buffer.buffer_pos <= io->data.thread_buffer.buffer_endpos)
+        return io->data.thread_buffer.buffer_capacity - io->data.thread_buffer.buffer_endpos;
+    else
+        return io->data.thread_buffer.buffer_pos - io->data.thread_buffer.buffer_endpos;
+}
+
+/* Maximum used contiguous space after buffer_pos in the circular thread buffer */
+static size_t io_thread_buffer_contiguous_stored_at_end(IO io) {
+    if (io->data.thread_buffer.buffer_pos <= io->data.thread_buffer.buffer_endpos)
+        return io->data.thread_buffer.buffer_endpos - io->data.thread_buffer.buffer_pos;
+    else
+        return io->data.thread_buffer.buffer_capacity - io->data.thread_buffer.buffer_pos;
 }
 
 size_t io_underlying_buffer_size(IO io) {
     switch (io->type) {
         default: return 0;
         case IO_SizedBuffer: return io->data.sized_buffer.buffer_size;
-        case IO_ThreadBuffer: return io->data.thread_buffer.buffer_size; /* FIXME */
+        case IO_ThreadBuffer: io_lock(io); return io_unlockz(io, io_thread_buffer_size(io));
         case IO_DynamicBuffer: return io->data.dynamic_buffer.buffer_size;
     }
 }
@@ -843,9 +928,49 @@ size_t io_underlying_buffer_capacity(IO io) {
     switch (io->type) {
         default: return 0;
         case IO_SizedBuffer: return io->data.sized_buffer.buffer_size;
-        case IO_ThreadBuffer: return io->data.thread_buffer.buffer_capacity; /* FIXME */
+        case IO_ThreadBuffer: io_lock(io); return io_unlockz(io, io->data.thread_buffer.buffer_capacity);
         case IO_DynamicBuffer: return io->data.dynamic_buffer.buffer_capacity;
     }
+}
+
+/* Attempts to grow the dynamic buffer stored in `io` to at least `size` capacity */
+/* Returns 0 on success, EOF on failure */
+static int io_grow_threadbuf(IO io, size_t size_of_data_to_append) {
+    size_of_data_to_append += 1;
+
+    if (io_thread_buffer_empty_size(io) < size_of_data_to_append) {
+        const size_t currently_used = io_thread_buffer_size(io);
+        const size_t new_size = MAX(io->data.thread_buffer.buffer_capacity + (io->data.thread_buffer.buffer_capacity >> 1), currently_used + size_of_data_to_append);
+
+        if (io->data.thread_buffer.buffer_pos != 0) { /* If data is not aligned to beginning already */
+            char *new_data = MALLOC(new_size);
+            if (new_data == NULL)
+                return CC_ENOMEM;
+
+            if (io->data.thread_buffer.buffer_pos <= io->data.thread_buffer.buffer_endpos) {
+                memcpy(new_data, io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_pos, currently_used);
+            } else {
+                const size_t offset = io->data.thread_buffer.buffer_capacity - io->data.thread_buffer.buffer_pos;
+                memcpy(new_data, io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_pos, offset);
+                memcpy(new_data + offset, io->data.thread_buffer.buffer, io->data.thread_buffer.buffer_endpos);
+            }
+
+            FREE(io->data.thread_buffer.buffer);
+            io->data.thread_buffer.buffer = new_data;
+            io->data.thread_buffer.buffer_capacity = new_size;
+            io->data.thread_buffer.buffer_pos = 0;
+            io->data.thread_buffer.buffer_endpos = currently_used;
+        } else { /* Data already aligned to start of buffer */
+            char *new_data = REALLOC(io->data.thread_buffer.buffer, new_size);
+            if (new_data == NULL)
+                return CC_ENOMEM;
+
+            io->data.thread_buffer.buffer = new_data;
+            io->data.thread_buffer.buffer_capacity = new_size;
+        }
+    }
+
+    return 0;
 }
 
 unsigned char *io_tempdata(IO io) {
@@ -856,16 +981,21 @@ size_t io_tempdata_size(IO io) {
     return io->type != IO_Custom? 0: sizeof(struct IO_sizes);
 }
 
-int io_error(IO io) {
+static int io_error_internal(IO io) {
     switch (io->type) {
-        default: return io->flags & IO_FLAG_ERROR? io->error: 0;
+        default: io->flags & IO_FLAG_ERROR? io->error: 0;
         case IO_File:
         case IO_OwnFile:
             return io->flags & IO_FLAG_ERROR? io->error: ferror(io->data.file.fptr)? CC_EIO: 0;
     }
 }
 
-void io_set_error(IO io, int err) {
+int io_error(IO io) {
+    io_lock(io);
+    return io_unlocki(io, io_error_internal(io));
+}
+
+static void io_set_error_internal(IO io, int err) {
     if (err)
         io->flags |= IO_FLAG_ERROR;
     else
@@ -874,12 +1004,23 @@ void io_set_error(IO io, int err) {
     io->error = err;
 }
 
-int io_eof(IO io) {
+void io_set_error(IO io, int err) {
+    io_lock(io);
+    io_set_error_internal(io, err);
+    io_unlock(io);
+}
+
+static unsigned long io_eof_internal(IO io) {
     switch (io->type) {
         default: return io->flags & IO_FLAG_EOF;
         case IO_File:
         case IO_OwnFile: return (io->flags & IO_FLAG_EOF) || feof(io->data.file.fptr);
     }
+}
+
+unsigned long io_eof(IO io) {
+    io_lock(io);
+    return io_unlockul(io, io_eof_internal(io));
 }
 
 int io_flush(IO io) {
@@ -928,17 +1069,19 @@ int io_flush(IO io) {
 }
 
 int io_resize(IO io, long long int size) {
+    io_lock(io);
+
     if (io_flush(io) != 0)
-        return EOF;
+        return io_unlocki(io, EOF);
 
     if (size < 0) {
         io->flags |= IO_FLAG_ERROR;
         io->error = CC_EINVAL;
-        return EOF;
+        return io_unlocki(io, EOF);
     }
 
     switch (io->type) {
-        default: io->flags |= IO_FLAG_ERROR; io->error = CC_ENOTSUP; return EOF;
+        default: io->flags |= IO_FLAG_ERROR; io->error = CC_ENOTSUP; return io_unlocki(io, EOF);
         case IO_File:
         case IO_OwnFile: {
 #if LINUX_OS
@@ -1000,7 +1143,7 @@ int io_resize(IO io, long long int size) {
             if (io->data.dynamic_buffer.buffer_size > (unsigned long long) size) /* Truncating */ {
                 io->data.dynamic_buffer.buffer_size = size;
             } else /* Extending */ {
-                if (io_grow(io, size)) {
+                if (io_grow_dynamic(io, size)) {
                     io->flags |= IO_FLAG_ERROR;
                     io->error = CC_ENOMEM;
                     return EOF;
@@ -1033,10 +1176,13 @@ int io_slow_copy(IO in, IO out) {
         if (ch != EOF) {
             if (io_putc(ch, out) == EOF)
                 return io_error(out);
-        } else if (io_error(in))
-            return io_error(in);
-        else
+        } else {
+            int err = io_error(in);
+            if (err)
+                return err;
+
             break;
+        }
     }
 
     return 0;
@@ -1046,12 +1192,13 @@ int io_copy(IO in, IO out) {
     const size_t size = IO_COPY_SIZE;
     char data[IO_COPY_SIZE];
     size_t read = size;
+    int err = 0;
 
     do {
         read = io_read(data, 1, size, in);
 
-        if (read != size && io_error(in)) {
-            return io_error(in);
+        if (read != size && (err = io_error(in))) {
+            return err;
         } else if (read && io_write(data, 1, read, out) != read) {
             return io_error(out);
         }
@@ -1060,18 +1207,16 @@ int io_copy(IO in, IO out) {
     return 0;
 }
 
-static int io_getc_internal_helper(IO io) {
+static int io_getc_internal(IO io) {
     int ch = io_from_unget_buffer(io);
     if (ch != EOF)
         return ch;
 
     switch (io->type) {
-        default: io->flags |= IO_FLAG_EOF; return EOF;
+        case IO_Empty: io->flags |= IO_FLAG_EOF; return EOF;
         case IO_File:
         case IO_OwnFile: return fgetc(io->data.file.fptr);
-        case IO_NativeFile:
-        case IO_OwnNativeFile:
-        case IO_Custom: {
+        default: {
             unsigned char buf;
 
             if (io_read_internal(&buf, 1, 1, io) != 1)
@@ -1079,46 +1224,16 @@ static int io_getc_internal_helper(IO io) {
 
             return buf;
         }
-        case IO_SizedBuffer: {
-            if (io->data.sized_buffer.buffer_pos >= io->data.sized_buffer.buffer_size) {
-                io->flags |= IO_FLAG_EOF;
-                return EOF;
-            }
-
-            return io->data.sized_buffer.buffer[io->data.sized_buffer.buffer_pos++];
-        }
-        case IO_ThreadBuffer: return 0; /* FIXME */
-        case IO_DynamicBuffer: {
-            if (io->data.dynamic_buffer.buffer_pos >= io->data.dynamic_buffer.buffer_size) {
-                io->flags |= IO_FLAG_EOF;
-                return EOF;
-            }
-
-            return io->data.dynamic_buffer.buffer[io->data.dynamic_buffer.buffer_pos++];
-        }
     }
-}
-
-static int io_getc_internal(IO io) {
-    int ch = io_getc_internal_helper(io), ch2;
-    if (!(io->flags & IO_FLAG_BINARY) && (ch == '\r' || ch == '\n')) {
-        ch2 = io_getc_internal_helper(io);
-        if (ch2 == EOF)
-            io_clearerr(io);
-        else if (ch2 + ch != '\r' + '\n')
-            io_ungetc(ch2, io);
-
-        ch = '\n';
-    }
-
-    return ch;
 }
 
 int io_getc(IO io) {
-    if (io_begin_read(io))
-        return EOF;
+    io_lock(io);
 
-    return io_getc_internal(io);
+    if (io_begin_read(io))
+        return io_unlocki(io, EOF);
+
+    return io_unlocki(io, io_getc_internal(io));
 }
 
 int io_getpos(IO io, IO_Pos *pos) {
@@ -1126,7 +1241,6 @@ int io_getpos(IO io, IO_Pos *pos) {
         case IO_File:
         case IO_OwnFile: return fgetpos(io->data.file.fptr, &pos->_fpos);
         case IO_SizedBuffer: pos->_pos = io->data.sized_buffer.buffer_pos; return 0;
-        case IO_ThreadBuffer: pos->_pos = 0; return 0; /* FIXME */
         case IO_DynamicBuffer: pos->_pos = io->data.dynamic_buffer.buffer_pos; return 0;
         default: {
             long long tell = io_tell64(io);
@@ -1142,8 +1256,10 @@ char *io_gets(char *str, int num, IO io) {
     char *oldstr = str;
     int oldnum = num;
 
+    io_lock(io);
+
     if (io_begin_read(io) || (io->flags & IO_FLAG_EOF))
-        return NULL;
+        return io_unlockp(io, NULL);
 
     switch (io->type) {
         case IO_Empty: io->flags |= IO_FLAG_EOF; return NULL;
@@ -1157,12 +1273,12 @@ char *io_gets(char *str, int num, IO io) {
                 *str++ = (char) ch;
 
             if (ch == EOF && num == oldnum - 1)
-                return NULL;
+                return io_unlockp(io, NULL);
 
             if (oldnum > 0)
                 *str = 0;
 
-            return io_error(io)? NULL: oldstr;
+            return io_unlockp(io, io_error_internal(io)? NULL: oldstr);
         }
     }
 }
@@ -1415,6 +1531,19 @@ IO io_open_buffer(char *buf, size_t size, const char *mode) {
 
     if ((io->flags & IO_FLAG_WRITABLE) && !(io->flags & IO_FLAG_UPDATE))
         memset(buf, 0, size);
+
+    return io;
+}
+
+IO io_open_thread_buffer() {
+    IO io = io_alloc(IO_ThreadBuffer);
+    if (io == NULL || (io->data.thread_buffer.mutex = mutex_create_recursive()) == NULL) {
+        io_destroy(io);
+        return NULL;
+    }
+
+    io->data.thread_buffer.buffer = NULL;
+    io->flags |= IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_SUPPORTS_NO_STATE_SWITCH;
 
     return io;
 }
@@ -2181,7 +2310,7 @@ static unsigned io_scanf_float_f(IO io, unsigned width, float *f) {
 
             ++word;
             if (!*word || *word != tolower(chr)) {
-                io_ungetc(chr, io);
+                io_ungetc_internal(chr, io);
                 break;
             }
         }
@@ -2210,7 +2339,7 @@ static unsigned io_scanf_float_f(IO io, unsigned width, float *f) {
 
         while (chr != EOF) {
             if (!isdigit(chr)) {
-                io_ungetc(chr, io);
+                io_ungetc_internal(chr, io);
                 break;
             }
 
@@ -2222,7 +2351,7 @@ static unsigned io_scanf_float_f(IO io, unsigned width, float *f) {
                 goto finish_early;
         }
     } else {
-        io_ungetc(chr, io);
+        io_ungetc_internal(chr, io);
     }
 
 finish: ;
@@ -2243,7 +2372,7 @@ finish: ;
     return --read;
 
 finish_early:
-    io_ungetc(chr, io);
+    io_ungetc_internal(chr, io);
     goto finish;
 
 cleanup:
@@ -2299,7 +2428,7 @@ static unsigned io_scanf_float_d(IO io, unsigned width, double *f) {
 
             ++word;
             if (!*word || *word != tolower(chr)) {
-                io_ungetc(chr, io);
+                io_ungetc_internal(chr, io);
                 break;
             }
         }
@@ -2325,7 +2454,7 @@ static unsigned io_scanf_float_d(IO io, unsigned width, double *f) {
 
         while (chr != EOF) {
             if (!isdigit(chr)) {
-                io_ungetc(chr, io);
+                io_ungetc_internal(chr, io);
                 break;
             }
 
@@ -2337,7 +2466,7 @@ static unsigned io_scanf_float_d(IO io, unsigned width, double *f) {
                 goto finish_early;
         }
     } else {
-        io_ungetc(chr, io);
+        io_ungetc_internal(chr, io);
     }
 
 finish: ;
@@ -2357,7 +2486,7 @@ finish: ;
     return --read;
 
 finish_early:
-    io_ungetc(chr, io);
+    io_ungetc_internal(chr, io);
     goto finish;
 
 cleanup:
@@ -2413,7 +2542,7 @@ static unsigned io_scanf_float_ld(IO io, unsigned width, long double *f) {
 
             ++word;
             if (!*word || *word != tolower(chr)) {
-                io_ungetc(chr, io);
+                io_ungetc_internal(chr, io);
                 break;
             }
         }
@@ -2439,7 +2568,7 @@ static unsigned io_scanf_float_ld(IO io, unsigned width, long double *f) {
 
         while (chr != EOF) {
             if (!isdigit(chr)) {
-                io_ungetc(chr, io);
+                io_ungetc_internal(chr, io);
                 break;
             }
 
@@ -2451,7 +2580,7 @@ static unsigned io_scanf_float_ld(IO io, unsigned width, long double *f) {
                 goto finish_early;
         }
     } else {
-        io_ungetc(chr, io);
+        io_ungetc_internal(chr, io);
     }
 
 finish: ;
@@ -2471,7 +2600,7 @@ finish: ;
     return --read;
 
 finish_early:
-    io_ungetc(chr, io);
+    io_ungetc_internal(chr, io);
     goto finish;
 
 cleanup:
@@ -2574,17 +2703,21 @@ static int io_putc_n_internal(int ch, size_t count, IO io) {
 }
 
 int io_putc(int ch, IO io) {
-    if (io_begin_write(io))
-        return EOF;
+    io_lock(io);
 
-    return io_putc_internal(ch, io);
+    if (io_begin_write(io))
+        return io_unlocki(io, EOF);
+
+    return io_unlocki(io, io_putc_internal(ch, io));
 }
 
 int io_putc_n(int ch, size_t count, IO io) {
-    if (io_begin_write(io))
-        return EOF;
+    io_lock(io);
 
-    return io_putc_n_internal(ch, count, io);
+    if (io_begin_write(io))
+        return io_unlocki(io, EOF);
+
+    return io_unlocki(io, io_putc_n_internal(ch, count, io));
 }
 
 int io_puts(const char *str, IO io) {
@@ -2653,6 +2786,8 @@ size_t io_put_uint64_be(IO io, uint64_t value) {
 #define CLEANUP(x) do {result = (x); goto cleanup;} while (0)
 
 int io_vprintf(IO io, const char *fmt, va_list args) {
+    io_lock(io);
+
     int result = 0;
     size_t written = 0;
 
@@ -2664,7 +2799,7 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
     state.flags = 0;
 
     if (io_begin_write(io))
-        return -1;
+        return io_unlocki(io, -1);
 
     va_copy(args_copy.args, args);
 
@@ -3100,7 +3235,7 @@ cleanup:
 
     va_end(args_copy.args);
 
-    return result;
+    return io_unlocki(io, result);
 }
 
 int io_printf(IO io, const char *fmt, ...) {
@@ -3123,7 +3258,7 @@ static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO
 
         if (io->data.custom.callbacks->read == NULL ||
                 (read = io->data.custom.callbacks->read(cptr, 1, max, io->data.custom.ptr, io)) != max) {
-            if (read == SIZE_MAX || io_error(io)) {
+            if (read == SIZE_MAX || io_error_internal(io)) {
                 if (read == SIZE_MAX)
                     read = 0;
 
@@ -3179,7 +3314,7 @@ static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO
     return totalRead / size;
 }
 
-static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
+static size_t io_read_internal_helper(void *ptr, size_t size, size_t count, IO io) {
     if (io->flags & IO_FLAG_EOF)
         return 0;
 
@@ -3214,7 +3349,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
                     /* Refill read buffer */
                     /* However, be careful since io_native_unbuffered_read() can set EOF long before we actually read to it
                      * (the buffer could be huge and the read tiny) */
-                    if ((io->data.native_file.buffer_bytes = io_native_unbuffered_read(io->data.native_file.buffer, 1, io->data.native_file.buffer_size, io)) != io->data.native_file.buffer_size && io_error(io)) {
+                    if ((io->data.native_file.buffer_bytes = io_native_unbuffered_read(io->data.native_file.buffer, 1, io->data.native_file.buffer_size, io)) != io->data.native_file.buffer_size && io_error_internal(io)) {
                         return read / size;
                     }
 
@@ -3239,7 +3374,7 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
         case IO_SizedBuffer: {
             unsigned char *cptr = ptr;
             size_t max = size*count, blocks = 0;
-            size_t avail = io->data.sized_buffer.buffer_size > io->data.sized_buffer.buffer_size?
+            size_t avail = io->data.sized_buffer.buffer_size > io->data.sized_buffer.buffer_pos?
                         io->data.sized_buffer.buffer_size - io->data.sized_buffer.buffer_pos:
                         0;
 
@@ -3263,10 +3398,33 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
             /* return number of blocks read */
             return blocks / size;
         }
+        case IO_ThreadBuffer: {
+            unsigned char *cptr = ptr;
+            size_t max = size*count;
+            size_t avail = io_thread_buffer_size(io);
+            size_t contiguous = io_thread_buffer_contiguous_stored_at_end(io);
+
+            /* not enough to cover reading the requested blocks */
+            if (avail < max)
+                max = avail / size * size;
+
+            if (max <= contiguous) {
+                memcpy(cptr, io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_pos, max);
+                io->data.thread_buffer.buffer_pos += max;
+                io->data.thread_buffer.buffer_pos %= io->data.thread_buffer.buffer_capacity;
+            } else {
+                memcpy(cptr, io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_pos, contiguous);
+                memcpy(cptr + contiguous, io->data.thread_buffer.buffer, max - contiguous);
+
+                io->data.thread_buffer.buffer_pos = max - contiguous;
+            }
+
+            return max / size;
+        }
         case IO_DynamicBuffer: {
             unsigned char *cptr = ptr;
             size_t max = size*count, blocks = 0;
-            size_t avail = io->data.dynamic_buffer.buffer_size > io->data.dynamic_buffer.buffer_size?
+            size_t avail = io->data.dynamic_buffer.buffer_size > io->data.dynamic_buffer.buffer_pos?
                         io->data.dynamic_buffer.buffer_size - io->data.dynamic_buffer.buffer_pos:
                         0;
 
@@ -3294,33 +3452,52 @@ static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
     }
 }
 
+static size_t io_read_internal(void *ptr, size_t size, size_t count, IO io) {
+    if (io->flags & IO_FLAG_BINARY)
+        return io_read_internal_helper(ptr, size, count, io);
+
+    const size_t total = size*count;
+    size_t max = total;
+    unsigned char *cptr = ptr;
+    for (; max; --max) {
+        char chr;
+        char chr2;
+
+        if (io_read_internal_helper(&chr, 1, 1, io) != 1)
+            break;
+
+        if (chr == '\n' || chr == '\r') {
+            if (io_read_internal_helper(&chr2, 1, 1, io) != 1) {
+                io_clearerr_internal(io);
+            } else if (chr + chr2 != '\r' + '\n')
+                io_ungetc_internal(chr2, io);
+
+            chr = '\n';
+        }
+
+        *cptr++ = chr;
+    }
+
+    return (total - max) / size;
+}
+
 size_t io_read(void *ptr, size_t size, size_t count, IO io) {
     const size_t total = safe_multiply(size, count);
+
+    io_lock(io);
 
     if (total == 0) {
         if (size && count) {
             io->flags |= IO_FLAG_ERROR;
             io->error = CC_EINVAL;
         }
-        return 0;
+        return io_unlockz(io, 0);
     }
 
     if (io_begin_read(io))
-        return 0;
+        return io_unlockz(io, 0);
 
-    if (io->flags & IO_FLAG_BINARY)
-        return io_read_internal(ptr, size, count, io);
-
-    size_t max = total;
-    unsigned char *cptr = ptr;
-    for (; max; --max) {
-        int ch = io_getc_internal(io);
-        if (ch == EOF)
-            break;
-        *cptr++ = ch;
-    }
-
-    return (total - max) / size;
+    return io_unlockz(io, io_read_internal(ptr, size, count, io));
 }
 
 IO io_reopen(const char *filename, const char *mode, IO io) {
@@ -3361,6 +3538,8 @@ IO io_reopen(const char *filename, const char *mode, IO io) {
 }
 
 int io_vscanf(IO io, const char *fmt, va_list args) {
+    io_lock(io);
+
     int items = 0;
     size_t bytes = 0;
 
@@ -3369,7 +3548,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
     va_copy(args_copy.args, args);
 
     if (io_begin_read(io))
-        return EOF;
+        return io_unlocki(io, EOF);
 
     for (; *fmt; ++fmt) {
         unsigned char chr = *fmt;
@@ -3425,7 +3604,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                 do {
                     chr = io_getc_internal(io);
                 } while (chr != EOF && isspace(chr));
-                io_ungetc(chr, io);
+                io_ungetc_internal(chr, io);
             }
 
             switch (*fmt) {
@@ -3439,7 +3618,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                     unsigned result = discardResult? io_scanf_int_no_arg(*fmt, io, fmt_width):
                                                      io_scanf_int(*fmt, io, fmt_width, fmt_len, &args_copy);
                     if (result == UINT_MAX || result == 0) {
-                        bytes += !io_eof(io) && !io_error(io);
+                        bytes += !io_eof_internal(io) && !io_error_internal(io);
                         goto cleanup;
                     }
                     bytes += result;
@@ -3456,7 +3635,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                     unsigned result = discardResult? io_scanf_float_no_arg(*fmt, io, fmt_width):
                                                      io_scanf_float(*fmt, io, fmt_width, fmt_len, &args_copy);
                     if (result == UINT_MAX || result == 0) {
-                        bytes += !io_eof(io) && !io_error(io);
+                        bytes += !io_eof_internal(io) && !io_error_internal(io);
                         goto cleanup;
                     }
                     bytes += result;
@@ -3479,7 +3658,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                         char *cptr = va_arg(args_copy.args, char *);
                         size_t read = 0;
 
-                        if ((read = io_read(cptr, 1, fmt_width, io)) != fmt_width) {
+                        if ((read = io_read_internal(cptr, 1, fmt_width, io)) != fmt_width) {
                             goto cleanup;
                         }
 
@@ -3494,7 +3673,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                     for (; fmt_width; --fmt_width) {
                         int chr = io_getc_internal(io);
                         if (chr == EOF || isspace(chr)) {
-                            io_ungetc(chr, io);
+                            io_ungetc_internal(chr, io);
                             break;
                         }
 
@@ -3546,7 +3725,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                         /* They may be pointing to the same char if it's a one-character set */
                         if (fmt == lastCharInSet) {
                             if ((negateSet? match == *fmt: match != *fmt)) {
-                                io_ungetc(match, io);
+                                io_ungetc_internal(match, io);
                                 break;
                             }
                         } else { /* Complex set, possibly negated */
@@ -3577,7 +3756,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                             }
 
                             if (!matched) {
-                                io_ungetc(match, io);
+                                io_ungetc_internal(match, io);
                                 break;
                             }
                         }
@@ -3621,7 +3800,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
             } while (charRead != EOF && isspace(charRead));
 
             if (charRead != EOF)
-                io_ungetc(charRead, io);
+                io_ungetc_internal(charRead, io);
 
             if (charRead == EOF)
                 goto cleanup;
@@ -3635,7 +3814,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
             if (charRead == EOF)
                 goto cleanup;
             else if (charRead != chr) {
-                io_ungetc(charRead, io);
+                io_ungetc_internal(charRead, io);
                 goto cleanup;
             }
 
@@ -3646,7 +3825,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
 cleanup:
     va_end(args_copy.args);
 
-    return bytes == 0? EOF: items;
+    return io_unlocki(io, bytes == 0? EOF: items);
 }
 
 int io_scanf(IO io, const char *fmt, ...) {
@@ -3669,8 +3848,11 @@ static int io_state_switch(IO io) {
     if (io_flush(io))
         return -1;
 
+    io_lock(io);
+
     io->flags &= ~(IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
-    return 0;
+
+    return io_unlocki(io, 0);
 }
 
 int io_seek(IO io, long int offset, int origin) {
@@ -3955,7 +4137,7 @@ int io_setpos(IO io, const IO_Pos *pos) {
         case IO_File:
         case IO_OwnFile:
             if (fsetpos(io->data.file.fptr, &pos->_fpos)) {
-                io_set_error(io, errno);
+                io_set_error_internal(io, errno);
                 return -1;
             }
             break;
@@ -4264,6 +4446,31 @@ static size_t io_write_internal_helper(const void *ptr, size_t size, size_t coun
             /* return number of blocks written */
             return max / size;
         }
+        case IO_ThreadBuffer: {
+            const char *cptr = ptr;
+            size_t max = size*count;
+            const size_t contiguous_to_end = io_thread_buffer_contiguous_empty_at_end(io);
+
+            int err = io_grow_threadbuf(io, max);
+            if (err) {
+                io_set_error_internal(io, err);
+                return 0;
+            }
+
+            if (contiguous_to_end >= max) {
+                memcpy(io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_endpos, cptr, max);
+                io->data.thread_buffer.buffer_endpos += size;
+                io->data.thread_buffer.buffer_endpos %= io->data.thread_buffer.buffer_capacity;
+            } else {
+                memcpy(io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_endpos, cptr, contiguous_to_end);
+                max -= contiguous_to_end;
+
+                memcpy(io->data.thread_buffer.buffer, cptr + contiguous_to_end, max);
+                io->data.thread_buffer.buffer_endpos = max;
+            }
+
+            return count;
+        }
         case IO_DynamicBuffer: {
             if (io->flags & IO_FLAG_APPEND)
                 io->data.dynamic_buffer.buffer_pos = io->data.dynamic_buffer.buffer_size;
@@ -4280,7 +4487,7 @@ static size_t io_write_internal_helper(const void *ptr, size_t size, size_t coun
                 required_size += (max - avail);
 
             /* grow to desired size */
-            if (io_grow(io, required_size)) {
+            if (io_grow_dynamic(io, required_size)) {
                 io->flags |= IO_FLAG_ERROR;
                 io->error = CC_ENOMEM;
 
@@ -4347,21 +4554,25 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
 size_t io_write(const void *ptr, size_t size, size_t count, IO io) {
     const size_t total = safe_multiply(size, count);
 
+    io_lock(io);
+
     if (total == 0) {
         if (size && count) {
             io->flags |= IO_FLAG_ERROR;
             io->error = CC_EINVAL;
         }
-        return 0;
+        return io_unlockz(io, 0);
     }
 
     if (io_begin_write(io))
-        return 0;
+        return io_unlockz(io, 0);
 
-    return io_write_internal(ptr, size, count, io);
+    return io_unlockz(io, io_write_internal(ptr, size, count, io));
 }
 
 void io_rewind(IO io) {
+    io_lock(io);
+
     io->ungetAvail = 0;
 
     switch (io->type) {
@@ -4369,10 +4580,13 @@ void io_rewind(IO io) {
         case IO_File:
         case IO_OwnFile: rewind(io->data.file.fptr); break;
         case IO_SizedBuffer: io->data.sized_buffer.buffer_pos = 0; break;
+        case IO_ThreadBuffer: io->data.thread_buffer.buffer_pos = io->data.thread_buffer.buffer_endpos = 0; break;
         case IO_DynamicBuffer: io->data.dynamic_buffer.buffer_pos = 0; break;
     }
 
     io->flags &= ~(IO_FLAG_EOF | IO_FLAG_ERROR | IO_FLAG_HAS_JUST_READ | IO_FLAG_HAS_JUST_WRITTEN);
+
+    io_unlock(io);
 }
 
 void io_setbuf(IO io, char *buf) {
@@ -4404,6 +4618,9 @@ int io_setvbuf(IO io, char *buf, int mode, size_t size) {
             return setvbuf(io->data.file.fptr, buf, mode, size);
         case IO_NativeFile:
         case IO_OwnNativeFile:
+            if (size > (uintmax_t) LONG_MAX)
+                return -1;
+
             if (io->flags & IO_FLAG_OWNS_BUFFER) {
                 FREE(io->data.native_file.buffer);
                 io->flags &= ~IO_FLAG_OWNS_BUFFER;
@@ -4447,6 +4664,9 @@ IO io_tmpfile(void) {
 }
 
 static int io_set_timeout(IO io, int type, long long usecs) {
+    if (io->type != IO_NativeFile)
+        return CC_ENOTSUP;
+
     const char *desc = io_description(io);
 
 #if WINDOWS_OS
@@ -4505,11 +4725,13 @@ int io_set_write_timeout(IO io, long long usecs) {
 }
 
 long long io_read_timeout(IO io) {
-    return io->read_timeout;
+    io_lock(io);
+    return io_unlockll(io, io->read_timeout);
 }
 
 long long io_write_timeout(IO io) {
-    return io->write_timeout;
+    io_lock(io);
+    return io_unlockll(io, io->write_timeout);
 }
 
 enum IO_Type io_type(IO io) {
@@ -4525,6 +4747,7 @@ const char *io_description(IO io) {
         case IO_NativeFile: return "native_file";
         case IO_OwnNativeFile: return "owned_native_file";
         case IO_SizedBuffer: return "sized_buffer";
+        case IO_ThreadBuffer: return "thread_buffer";
         case IO_DynamicBuffer: return "dynamic_buffer";
         case IO_Custom:
             if (io->data.custom.callbacks->what == NULL)
@@ -4532,36 +4755,6 @@ const char *io_description(IO io) {
 
             return io->data.custom.callbacks->what(io_userdata(io), io);
     }
-}
-
-int io_ungetc(int chr, IO io) {
-    if (!(io->flags & IO_FLAG_READABLE))
-    {
-        io->flags |= IO_FLAG_ERROR;
-        io->error = CC_EREAD;
-        return EOF;
-    }
-
-    if (chr == EOF)
-        return EOF;
-
-    switch (io->type) {
-        case IO_Empty: return EOF;
-        case IO_File:
-        case IO_OwnFile: return ungetc(chr, io->data.file.fptr);
-        case IO_SizedBuffer: if (io->ungetAvail != sizeof(io->ungetBuf)) --io->data.sized_buffer.buffer_pos; break;
-        case IO_DynamicBuffer: if (io->ungetAvail != sizeof(io->ungetBuf)) --io->data.dynamic_buffer.buffer_pos; break;
-        default: break;
-    }
-
-    if (io->ungetAvail != sizeof(io->ungetBuf))
-    {
-        io->flags &= ~IO_FLAG_EOF;
-
-        return io->ungetBuf[io->ungetAvail++] = chr;
-    }
-
-    return EOF;
 }
 
 int io_format_file_size(IO out, long long size) {

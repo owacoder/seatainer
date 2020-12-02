@@ -358,14 +358,14 @@ int io_vclose(int count, ...);
  * @param io The IO device on which to check read ability.
  * @return Non-zero if @p io is readable, zero otherwise.
  */
-int io_readable(IO io);
+unsigned long io_readable(IO io);
 
 /** @brief Detect whether an IO device is writable or not.
  *
  * @param io The IO device on which to check write ability.
  * @return Non-zero if @p io is writable, zero otherwise.
  */
-int io_writable(IO io);
+unsigned long io_writable(IO io);
 
 /** @brief Returns the IO flags specified for a device. The flags are ORed together.
  *
@@ -379,14 +379,14 @@ unsigned long io_flags(IO io);
  * @param io The IO device on which to check the last operation.
  * @return Non-zero if @p io was just read from, zero otherwise.
  */
-int io_just_read(IO io);
+unsigned long io_just_read(IO io);
 
 /** @brief Detect whether the last operation performed on an IO device was a write operation.
  *
  * @param io The IO device on which to check the last operation.
  * @return Non-zero if @p io was just written to, zero otherwise.
  */
-int io_just_wrote(IO io);
+unsigned long io_just_wrote(IO io);
 
 /** @brief Detect whether an IO device is opened for update.
  *
@@ -395,7 +395,7 @@ int io_just_wrote(IO io);
  * @param io The IO device to check the update status of.
  * @return Non-zero if @p io is opened for update.
  */
-int io_opened_for_update(IO io);
+unsigned long io_opened_for_update(IO io);
 
 /** @brief Detect whether an IO device is opened for append.
  *
@@ -404,7 +404,7 @@ int io_opened_for_update(IO io);
  * @param io The IO device to check the append status of.
  * @return Non-zero if @p io is opened for append.
  */
-int io_opened_for_append(IO io);
+unsigned long io_opened_for_append(IO io);
 
 /** @brief Detect whether an IO device is opened as a binary device.
  *
@@ -413,7 +413,7 @@ int io_opened_for_append(IO io);
  * @param io The IO device to check the binary/text status of.
  * @return Non-zero if @p io is a binary device.
  */
-int io_binary(IO io);
+unsigned long io_binary(IO io);
 
 /** @brief Detect whether an IO device is opened as a text device.
  *
@@ -423,7 +423,7 @@ int io_binary(IO io);
  * @param io The IO device to check the binary/text status of.
  * @return Non-zero if @p io is a binary device.
  */
-int io_text(IO io);
+unsigned long io_text(IO io);
 
 /** @brief If the IO device was opened accessing an external file, grabs ownership of that file descriptor.
  *
@@ -538,7 +538,7 @@ void io_set_error(IO io, int err);
  * @param io The IO device to get the EOF flag from.
  * @return Non-zero if the EOF flag is set, zero otherwise.
  */
-int io_eof(IO io);
+unsigned long io_eof(IO io);
 
 /** @brief Flushes the input or output buffer of an IO device, depending on the current mode.
  *

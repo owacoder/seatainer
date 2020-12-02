@@ -282,7 +282,7 @@ int main(int argc, char **argv, const char **envp)
     printf("Cur: %lld of %lld\n", io_tell64(io_hex), io_size64(io_seekable));
     io_getc(io_hex);
     printf("Cur: %lld of %lld\n", io_tell64(io_hex), io_size64(io_seekable));
-    if (io_seek(io_hex, 3, SEEK_SET) < 0)
+    if (io_seek(io_hex, 1, SEEK_SET) < 0)
         printf("Seek failed\n");
 
     io_copy(io_hex, dest);

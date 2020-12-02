@@ -39,7 +39,6 @@ SOURCES += \
     Containers/variant.c \
     IO/base64.c \
     IO/io_core.c \
-    IO/tbuffer.c \
     container_io.c \
     utility.c \
     IO/crypto_rand.c \
@@ -77,7 +76,6 @@ HEADERS += \
     Containers/variant.h \
     IO/base64.h \
     IO/io_core.h \
-    IO/tbuffer.h \
     container_io.h \
     containers.h \
     utility.h \
