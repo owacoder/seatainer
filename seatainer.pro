@@ -26,11 +26,12 @@ unix: !win32 {
 
 SOURCES += \
     Containers/common.c \
+    Containers/genericlinkedlist.c \
     Containers/genericlist.c \
     Containers/genericmap.c \
     Containers/genericset.c \
+    Containers/generictree.c \
     Containers/impl/avl.c \
-    Containers/impl/binarytree.c \
     Containers/recipes.c \
     Containers/sbuffer.c \
     Containers/stringlist.c \
@@ -63,11 +64,12 @@ SOURCES += \
 
 HEADERS += \
     Containers/common.h \
+    Containers/genericlinkedlist.h \
     Containers/genericlist.h \
     Containers/genericmap.h \
     Containers/genericset.h \
+    Containers/generictree.h \
     Containers/impl/avl.h \
-    Containers/impl/binarytree.h \
     Containers/recipes.h \
     Containers/sbuffer.h \
     Containers/stringlist.h \

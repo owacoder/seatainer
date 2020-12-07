@@ -28,11 +28,12 @@ struct StringSetStruct;
 struct BinarySetStruct;
 struct GenericMapStruct;
 struct StringMapStruct;
+struct GenericLinkedListStruct;
 
 typedef struct VariantStruct *Variant; /* Simple variant type that can hold integers, floating point values, strings, or other containers. Simple conversions can be performed */
 typedef struct GenericListStruct *GenericList; /* Simple list of generic pointers */
 typedef struct StringListStruct *StringList; /* Simple list of NUL-terminated strings */
-//typedef struct GenericLinkedListStruct *GenericLinkedList; /* Simple singly-linked list of generic pointers */
+typedef struct GenericLinkedListStruct *GenericLinkedList; /* Simple singly-linked list of generic pointers */
 //typedef struct StringLinkedListStruct *StringLinkedList; /* Simple singly-linked list of NUL-terminated strings */
 typedef struct GenericSetStruct *GenericSet; /* Simple exclusive set of generic items, each element only appears once. Elements are in ascending order */
 typedef struct StringSetStruct *StringSet; /* Simple exclusive set of NUL-terminated strings, each element only appears once. Elements are in ascending order */
@@ -244,5 +245,8 @@ void *generic_identitycopy(const void *p);
  * Use this function as a destructor when you don't want generic containers to free() their objects
  */
 void generic_nofree(void *p);
+
+#define MAKE_GENERIC(type, value) ((void *) ((type [1]) {(value)}))
+#define GENERIC_ITEM(type, generic) (*((type *) (generic)))
 
 #endif // COMMON_H

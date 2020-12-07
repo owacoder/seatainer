@@ -260,85 +260,6 @@ static void base64_clearerr(void *userdata, IO io) {
     io_clearerr(base64->io);
 }
 
-/* TODO: seeking and writing are not currently implemented */
-static int base64_encode_seek64(void *userdata, long long int offset, int origin, IO io) {
-    struct Base64Params *base64 = (struct Base64Params *) userdata;
-
-    /* Translate all origins to SEEK_SET for ease of computation */
-    switch (origin) {
-        case SEEK_END: {
-            long long underlyingSize = io_size64(base64->io);
-            if (underlyingSize < 0)
-                return -1;
-
-            offset += underlyingSize;
-            break;
-        }
-        case SEEK_CUR: {
-            long long current = io_tell64(io);
-            if (current < 0)
-                return -1;
-
-            offset += current;
-            break;
-        }
-    }
-
-    if (io_seek64((IO) userdata, offset / 2, SEEK_SET) != 0)
-        return -1;
-
-    *io_tempdata(io) = 16;
-
-    if (offset & 1) /* Odd offset means read one character */
-        if (io_getc(io) == EOF)
-            return -1;
-
-    return 0;
-}
-
-static int base64_decode_seek64(void *userdata, long long int offset, int origin, IO io) {
-    /* Translate all origins to SEEK_SET for ease of computation */
-    switch (origin) {
-        case SEEK_END: {
-            long long underlyingSize = io_size64((IO) userdata) / 2;
-            if (underlyingSize < 0)
-                return -1;
-
-            offset += underlyingSize;
-            break;
-        }
-        case SEEK_CUR: {
-            long long current = io_tell64(io);
-            if (current < 0)
-                return -1;
-
-            offset += current;
-            break;
-        }
-    }
-
-    if (io_seek64((IO) userdata, offset * 2, SEEK_SET) != 0)
-        return -1;
-
-    *io_tempdata(io) = 16;
-
-    return 0;
-}
-
-static long long base64_encode_tell64(void *userdata, IO io) {
-    UNUSED(io)
-
-    long long value = io_tell64((IO) userdata);
-    return value > 0? value * 2 - (*io_tempdata(io) < 16): value;
-}
-
-static long long base64_decode_tell64(void *userdata, IO io) {
-    UNUSED(io)
-
-    long long value = io_tell64((IO) userdata);
-    return value > 0? value / 2 + (*io_tempdata(io) < 16): value;
-}
-
 static const char *base64_encode_what(void *userdata, IO io) {
     UNUSED(userdata)
     UNUSED(io)
@@ -362,9 +283,9 @@ static const struct InputOutputDeviceCallbacks base64_encode_callbacks = {
     .clearerr = base64_clearerr,
     .stateSwitch = NULL,
     .tell = NULL,
-    .tell64 = base64_encode_tell64,
+    .tell64 = NULL,
     .seek = NULL,
-    .seek64 = base64_encode_seek64,
+    .seek64 = NULL,
     .flags = NULL,
     .what = base64_encode_what
 };
@@ -378,9 +299,9 @@ static const struct InputOutputDeviceCallbacks base64_decode_callbacks = {
     .clearerr = base64_clearerr,
     .stateSwitch = NULL,
     .tell = NULL,
-    .tell64 = base64_decode_tell64,
+    .tell64 = NULL,
     .seek = NULL,
-    .seek64 = base64_decode_seek64,
+    .seek64 = NULL,
     .flags = NULL,
     .what = base64_decode_what
 };

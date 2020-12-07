@@ -10,7 +10,6 @@
 #include "IO/io_core.h"
 #include "IO/aes.h"
 #include "IO/base64.h"
-#include "IO/tbuffer.h"
 #include "IO/concat.h"
 #include "IO/crypto_rand.h"
 #include "IO/hex.h"

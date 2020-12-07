@@ -787,10 +787,6 @@ const char *io_description(IO io);
 IO io_tmpfile(void);
 int io_ungetc(int chr, IO io);
 
-int io_can_lock(IO io);
-void io_lock(IO io);
-void io_unlock(IO io);
-
 /** @brief Format a file size as a string and output it to an IO device
  *
  * @param io the IO device to output the human-readable file size to

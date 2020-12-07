@@ -210,25 +210,26 @@ int path_set_current_working_dir_cstr(const char *path);
  */
 int path_set_current_working_dir(Path path);
 
-/** @brief Glob to see if string matches pattern.
- *
- * This function operates on single bytes, and does not support UTF-8.
- *
- * Pattern can contain the following:
- *
- *     '?' - Matches any single character. The character must be present, even if the '?' is at the end of the pattern.
- *     '*' - Matches any sequence of zero or more characters. If pattern starts and ends with '*', a substring is searched for.
- *     '[' - Begins a character set to search for. Sets can be ranges '[0-9a-z]' or distinct sets '[CBV]', and can be negated if the first character is '^'
- *           You can search for a literal ']' by including that as the first character in a set (i.e. to search for ']', use '[]]'; to search for '[', use '[[]'; and to search for either '[' or ']', use '[][]')
- *           This is because searching for the empty set is not allowed.
- *     xxx - Any other character matches itself. It must be present.
- *
- * @param str The string to check.
- * @param pattern The glob pattern to match @p str against.
- * @return 0 if `str` matches `pattern`, -1 if no match, and -2 if the pattern has improper syntax or is too complex.
- */
-int glob(const char *str, const char *pattern);
-int utf8glob(const char *str, const char *pattern);
+#if 0
+Directory dir_open(const char *dir);
+Directory dir_open_with_mode(const char *dir, const char *mode);
+DirectoryEntry dir_next(Directory dir);
+const char *dir_path(Directory dir);
+int dir_error(Directory dir);
+void dir_clearerr(Directory dir);
+void dir_close(Directory dir);
+
+DirectoryEntry dirent_open(const char *entrypath);
+DirectoryEntry dirent_open_with_mode(const char *entrypath, const char *mode);
+const char *dirent_path(DirectoryEntry entry);
+const char *dirent_name(DirectoryEntry entry);
+const char *dirent_fullname(DirectoryEntry entry);
+long long dirent_size(DirectoryEntry entry);
+int dirent_exists(DirectoryEntry entry);
+int dirent_error(DirectoryEntry entry);
+void dirent_clearerr(DirectoryEntry entry);
+void dirent_close(DirectoryEntry entry);
+#endif
 
 enum DirectorySort {
     DirSortNone = 0x00,

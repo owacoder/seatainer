@@ -184,7 +184,7 @@ int io_register_type(const char *name, CommonContainerBase *base) {
     return 0;
 }
 
-static const CommonContainerBase *io_get_registered_type(const char *name, size_t name_len) {
+const CommonContainerBase *io_get_registered_type(const char *name, size_t name_len) {
     const CommonContainerBase *base = NULL;
     spinlock_lock(&register_spinlock);
 
@@ -341,6 +341,7 @@ struct IOThreadBufferState {
 struct IOCustomState {
     void *ptr;
     const struct InputOutputDeviceCallbacks *callbacks;
+    unsigned char tempdata[3 * sizeof(void *)];
 };
 
 struct InputOutputDevice {
@@ -408,7 +409,6 @@ struct InputOutputDevice {
     long long write_timeout;
 
     unsigned long flags;
-    unsigned char raw[3 * sizeof(void *)];
 
     enum IO_Type type;
     /** Stores the last platform-specific error code that occured while reading or writing */
@@ -536,6 +536,7 @@ static void io_destroy(IO io) {
                 FREE(io->data.thread_buffer.buffer);
                 mutex_destroy(io->data.thread_buffer.mutex);
                 break;
+            default: break;
         }
 
         io->flags &= ~IO_FLAG_OWNS_BUFFER;
@@ -561,7 +562,7 @@ static int io_grow_dynamic(IO io, size_t size) {
     if (growth < 16)
         growth = 16;
 
-    char *new_data = NULL;
+    unsigned char *new_data = NULL;
     while (1) {
         new_data = REALLOC(io->data.dynamic_buffer.buffer, growth);
 
@@ -621,11 +622,6 @@ static int io_unlocki(IO io, int passthrough) {
 }
 
 static unsigned long io_unlockul(IO io, unsigned long passthrough) {
-    io_unlock(io);
-    return passthrough;
-}
-
-static long io_unlockl(IO io, long passthrough) {
     io_unlock(io);
     return passthrough;
 }
@@ -873,16 +869,16 @@ void io_grab_underlying_buffer(IO io) {
 char *io_take_underlying_buffer(IO io) {
     switch (io->type) {
         default: return NULL;
-        case IO_SizedBuffer: io->flags &= ~IO_FLAG_OWNS_BUFFER; return io->data.sized_buffer.buffer;
-        case IO_DynamicBuffer: io->flags &= ~IO_FLAG_OWNS_BUFFER; return io->data.dynamic_buffer.buffer;
+        case IO_SizedBuffer: io->flags &= ~IO_FLAG_OWNS_BUFFER; return (char *) io->data.sized_buffer.buffer;
+        case IO_DynamicBuffer: io->flags &= ~IO_FLAG_OWNS_BUFFER; return (char *) io->data.dynamic_buffer.buffer;
     }
 }
 
 char *io_underlying_buffer(IO io) {
     switch (io->type) {
         default: return NULL;
-        case IO_SizedBuffer: return io->data.sized_buffer.buffer;
-        case IO_DynamicBuffer: return io->data.dynamic_buffer.buffer;
+        case IO_SizedBuffer: return (char *) io->data.sized_buffer.buffer;
+        case IO_DynamicBuffer: return (char *) io->data.dynamic_buffer.buffer;
     }
 }
 
@@ -943,7 +939,7 @@ static int io_grow_threadbuf(IO io, size_t size_of_data_to_append) {
         const size_t new_size = MAX(io->data.thread_buffer.buffer_capacity + (io->data.thread_buffer.buffer_capacity >> 1), currently_used + size_of_data_to_append);
 
         if (io->data.thread_buffer.buffer_pos != 0) { /* If data is not aligned to beginning already */
-            char *new_data = MALLOC(new_size);
+            unsigned char *new_data = MALLOC(new_size);
             if (new_data == NULL)
                 return CC_ENOMEM;
 
@@ -961,7 +957,7 @@ static int io_grow_threadbuf(IO io, size_t size_of_data_to_append) {
             io->data.thread_buffer.buffer_pos = 0;
             io->data.thread_buffer.buffer_endpos = currently_used;
         } else { /* Data already aligned to start of buffer */
-            char *new_data = REALLOC(io->data.thread_buffer.buffer, new_size);
+            unsigned char *new_data = REALLOC(io->data.thread_buffer.buffer, new_size);
             if (new_data == NULL)
                 return CC_ENOMEM;
 
@@ -974,16 +970,16 @@ static int io_grow_threadbuf(IO io, size_t size_of_data_to_append) {
 }
 
 unsigned char *io_tempdata(IO io) {
-    return io->type != IO_Custom? NULL: io->raw;
+    return io->type != IO_Custom? NULL: io->data.custom.tempdata;
 }
 
 size_t io_tempdata_size(IO io) {
-    return io->type != IO_Custom? 0: sizeof(struct IO_sizes);
+    return io->type != IO_Custom? 0: sizeof(io->data.custom.tempdata);
 }
 
 static int io_error_internal(IO io) {
     switch (io->type) {
-        default: io->flags & IO_FLAG_ERROR? io->error: 0;
+        default: return io->flags & IO_FLAG_ERROR? io->error: 0;
         case IO_File:
         case IO_OwnFile:
             return io->flags & IO_FLAG_ERROR? io->error: ferror(io->data.file.fptr)? CC_EIO: 0;
@@ -1134,7 +1130,7 @@ int io_resize(IO io, long long int size) {
             return 0;
 #endif
         case IO_DynamicBuffer:
-            if (size > SIZE_MAX) {
+            if ((uintmax_t) size > SIZE_MAX) {
                 io->flags |= IO_FLAG_ERROR;
                 io->error = CC_EINVAL;
                 return EOF;
@@ -1521,7 +1517,7 @@ IO io_open_buffer(char *buf, size_t size, const char *mode) {
         return NULL;
     }
 
-    io->data.sized_buffer.buffer = buf;
+    io->data.sized_buffer.buffer = (unsigned char *) buf;
     io->data.sized_buffer.buffer_size = size;
 
     if (0 == (io->flags & (IO_FLAG_READABLE | IO_FLAG_WRITABLE))) {
@@ -3107,7 +3103,7 @@ done_with_flags:
                     if (!serializer) { /* If serializer not specified, it could be registered name, or if not present, in the type recipe */
                         if (formatname.data != NULL)
                             serializer = io_get_registered_format(formatname.data, formatname.length)->serializer;
-                        else
+                        else if (type->serialize)
                             serializer = type->serialize;
 
                         if (!serializer)
@@ -4603,7 +4599,7 @@ void io_setbuf(IO io, char *buf) {
                 io->flags &= ~IO_FLAG_OWNS_BUFFER;
             }
 
-            io->data.native_file.buffer = buf;
+            io->data.native_file.buffer = (unsigned char *) buf;
             io->data.native_file.buffer_size = buf? BUFSIZ: 0;
             io->data.native_file.buffer_bytes = 0;
             break;
@@ -4631,7 +4627,7 @@ int io_setvbuf(IO io, char *buf, int mode, size_t size) {
                 io->data.native_file.buffer_size = 0;
                 io->data.native_file.buffer_bytes = 0;
             } else if (buf == NULL) {
-                char *buf = MALLOC(size);
+                unsigned char *buf = MALLOC(size);
                 if (buf == NULL)
                     return CC_ENOMEM;
 
@@ -4640,7 +4636,7 @@ int io_setvbuf(IO io, char *buf, int mode, size_t size) {
                 io->data.native_file.buffer_bytes = 0;
                 io->flags |= IO_FLAG_OWNS_BUFFER;
             } else {
-                io->data.native_file.buffer = buf;
+                io->data.native_file.buffer = (unsigned char *) buf;
                 io->data.native_file.buffer_size = size;
                 io->data.native_file.buffer_bytes = 0;
             }

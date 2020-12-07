@@ -338,6 +338,9 @@ AVLNode *avltree_max_node(AVLTree *tree) {
 AVLNode *avltree_inorder_previous(AVLNode *node) {
     AVLNode *last = NULL;
 
+    if (node == NULL)
+        return NULL;
+
     if (node->left != NULL) {
         node = node->left;
 
@@ -360,6 +363,9 @@ AVLNode *avltree_inorder_previous(AVLNode *node) {
 
 AVLNode *avltree_inorder_next(AVLNode *node) {
     AVLNode *last = NULL;
+
+    if (node == NULL)
+        return NULL;
 
     if (node->right != NULL) {
         node = node->right;

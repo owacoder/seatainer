@@ -317,6 +317,26 @@ uint32_t utf8next_n(const char *utf8, size_t *remainingBytes, const char **next)
  */
 char *utf8append(char *utf8, uint32_t codepoint, size_t *remainingBytes);
 
+/** @brief Glob to see if string matches pattern.
+ *
+ * This function operates on single bytes, and does not support UTF-8.
+ *
+ * Pattern can contain the following:
+ *
+ *     '?' - Matches any single character. The character must be present, even if the '?' is at the end of the pattern.
+ *     '*' - Matches any sequence of zero or more characters. If pattern starts and ends with '*', a substring is searched for.
+ *     '[' - Begins a character set to search for. Sets can be ranges '[0-9a-z]' or distinct sets '[CBV]', and can be negated if the first character is '^'
+ *           You can search for a literal ']' by including that as the first character in a set (i.e. to search for ']', use '[]]'; to search for '[', use '[[]'; and to search for either '[' or ']', use '[][]')
+ *           This is because searching for the empty set is not allowed.
+ *     xxx - Any other character matches itself. It must be present.
+ *
+ * @param str The string to check.
+ * @param pattern The glob pattern to match @p str against.
+ * @return 0 if `str` matches `pattern`, -1 if no match, and -2 if the pattern has improper syntax or is too complex.
+ */
+int glob(const char *str, const char *pattern);
+int utf8glob(const char *str, const char *pattern);
+
 /** @brief Lowercases the ASCII string.
  *
  * @param str The string to lowercase.

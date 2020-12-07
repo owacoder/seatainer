@@ -18,6 +18,14 @@
  */
 int io_register_type(const char *name, CommonContainerBase *base);
 
+/** @brief Finds a registered type by its name.
+ *
+ * @param name The name of the registered type.
+ * @param name_len The length of the string pointed to by name. This can be a substring of another string if necessary.
+ * @return Returns the registered container base on success, or NULL if an error occurred or the type was not registered.
+ */
+const CommonContainerBase *io_get_registered_type(const char *name, size_t name_len);
+
 /** @brief Unregisters a type that was registered with io_register_type()
  *
  * @param name The name of the type to be removed.
@@ -39,15 +47,30 @@ int io_register_format(const char *name, Parser parser, Serializer serializer);
  */
 void io_unregister_format(const char *name);
 
-Variant json_parse(IO input);
-int json_serialize_stringlist(IO output, StringList list, struct SerializerIdentity *type);
-int json_serialize_stringmap(IO output, StringMap map, struct SerializerIdentity *type);
-int json_serialize_stringset(IO output, StringSet set, struct SerializerIdentity *type);
-int json_serialize_variantlist(IO output, GenericList variantlist, struct SerializerIdentity *type);
-int json_serialize_variantmap(IO output, GenericMap variantmap, struct SerializerIdentity *type);
+/** Default "UTF-8" serializers for known types */
+int io_serialize_boolean(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_char(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_short(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_ushort(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_int(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_uint(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_long(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_ulong(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_long_long(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_ulong_long(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_float(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_double(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_long_double(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_cstring(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_binary(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_variant(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_container(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 
-int json_serialize_variant(IO output, Variant data, struct SerializerIdentity *type);
-int json_serialize(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+/** Get the default "UTF-8" serializer given a type */
+Serializer io_default_serializer_for_type(const CommonContainerBase *base);
+
+/** Generic JSON serializer, supporting Variants and containers, as well as simple types */
+int io_serialize_json(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 
 StringList stringlist_split_io(IO input, const char *separator, int keep_empty);
 GenericList binarylist_split_io(IO input, const char *separator, size_t separator_len, int keep_empty);

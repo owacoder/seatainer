@@ -32,6 +32,7 @@ const CommonContainerBase *container_base_variant_recipe(void);
 const CommonContainerBase *container_base_genericlist_recipe();
 const CommonContainerBase *container_base_genericmap_recipe();
 const CommonContainerBase *container_base_genericset_recipe();
+const CommonContainerBase *container_base_genericlinkedlist_recipe();
 
 const CommonContainerBase *container_base_stringlist_recipe();
 const CommonContainerBase *container_base_stringmap_recipe();

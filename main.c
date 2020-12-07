@@ -23,7 +23,6 @@
 #include "IO/padding/pkcs7.h"
 #include "IO/repeat.h"
 #include "IO/limiter.h"
-#include "IO/tbuffer.h"
 #include "IO/base64.h"
 
 void test_io() {
@@ -272,6 +271,20 @@ void test_c_io() {
 
 int main(int argc, char **argv, const char **envp)
 {
+    srand(time(NULL));
+
+    GenericLinkedList gl = genericlinkedlist_create(container_base_int_recipe());
+    io_register_type("intlist", genericlinkedlist_build_recipe(gl));
+
+    for (int i = 0; i < 400; ++i)
+        genericlinkedlist_append(gl, MAKE_GENERIC(int, rand()));
+
+    genericlinkedlist_sort(gl, 1);
+
+    io_printf(io_stdout, "%{intlist}\n", gl);
+
+    return 0;
+
     const char *str = "484548454c50";
     IO dest = io_open_dynamic_buffer("wb");
     IO io_seekable = io_open_cstring(str, "rb");
@@ -368,9 +381,9 @@ int main(int argc, char **argv, const char **envp)
         CommonContainerBase *base = container_base_build_key_value_container(container_base_cstring_recipe(),
                                                                              container_base_double_recipe(),
                                                                              container_base_genericmap_recipe());
-        base->serialize = (Serializer) json_serialize;
+        base->serialize = (Serializer) io_serialize_json;
         io_register_type("mymap", base);
-        io_register_format("JSON", NULL, (Serializer) json_serialize);
+        io_register_format("JSON", NULL, (Serializer) io_serialize_json);
 
         GenericMap fmap = genericmap_create(container_base_cstring_recipe(),
                                             container_base_double_recipe());

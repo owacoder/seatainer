@@ -101,10 +101,10 @@ static const struct InputOutputDeviceCallbacks crypto_rand_callbacks = {
 };
 
 IO io_open_crypto_rand() {
-    return io_open_custom(&crypto_rand_callbacks, NULL, "r");
+    return io_open_custom(&crypto_rand_callbacks, NULL, "rb");
 }
 #elif LINUX_OS
 IO io_open_crypto_rand() {
-    return io_open("/dev/urandom", "r");
+    return io_open("/dev/urandom", "rb");
 }
 #endif

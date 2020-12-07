@@ -11,102 +11,320 @@
 #include <float.h>
 #include <math.h>
 
-//static char *json_parse_string_helper(IO input) {
-//    int escape_next = 0;
-//    Buffer buffer;
+/* Serializer basics:
+ *
+ * Value serializers are used where specified, if they're the same type as the format
+ * If the value is a native variant, serialize the variant
+ * If the value is a custom variant, attempt to serialize the contained value with the current serializer.
+ * If a serializer is specified with a different type, and the type is a collection, serialize the collection and call the current serializer for all elements
+ * If a serializer is specified with a different type, and the type is not a collection, attempt to serialize the item with the current serializer if it's a known type
+ * If no serializer is specified, and the type is a collection, serialize the collection and call the current serializer for all elements
+ * If no serializer is specified, and the type is not a collection, attempt to serialize the item with the current serializer if it's a known type
+ * Otherwise, an error occurs and serialization cannot continue
+ */
 
-//    /* TODO: bad messages should set the CC_EBADMSG error on the IO device */
-//    buffer_init(&buffer);
+int io_serialize_boolean(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_boolean, 1);
 
-//    while (1) {
-//        int ch = io_getc(input);
+    if (generic_types_compatible_compare(base, container_base_boolean_recipe()) != 0)
+        return CC_ENOTSUP;
 
-//        if (ch == EOF)
-//            return NULL;
+    return io_puts(*((const _Bool *) data)? "true": "false", output)? io_error(output): 0;
+}
 
-//        if (escape_next) {
-//            switch (ch) {
-//                case '"':
-//                case '\\':
-//                case '/':
-//                case 'b':
-//                case 'f':
-//                case 'n':
-//                case 'r':
-//                case 't':
-//                case 'u':
-//                default:
-//                    return NULL;
-//            }
-//            escape_next = 0;
-//        } else if (ch == '\\') {
-//            escape_next = 1;
-//            continue;
-//        } else if (ch == '"') {
-//            return buffer.data;
-//        }
-//    }
+int io_serialize_char(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_char, 1);
 
-//    return NULL;
-//}
+    if (generic_types_compatible_compare(base, container_base_char_recipe()) != 0)
+        return CC_ENOTSUP;
 
-//Variant json_parse(IO input) {
-//    char buffer[8];
+    return io_printf(output, "'%.1s'", data) < 0? io_error(output): 0;
+}
 
-//    /* TODO: bad messages should set the CC_EBADMSG error on the IO device */
+int io_serialize_short(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_short, 1);
 
-//    while (1) {
-//        int ch = io_getc(input);
+    if (generic_types_compatible_compare(base, container_base_short_recipe()) != 0)
+        return CC_ENOTSUP;
 
-//        switch (ch) {
-//            case EOF: return NULL;
-//            case 'n':
-//                if (io_read(buffer, 1, 3, input) != 3 || memcmp(buffer, "ull", 3))
-//                    return NULL;
+    return io_printf(output, "%hd", *((const short *) data)) < 0? io_error(output): 0;
+}
 
-//                return variant_create_null();
-//            case 't':
-//                if (io_read(buffer, 1, 3, input) != 3 || memcmp(buffer, "rue", 3))
-//                    return NULL;
+int io_serialize_ushort(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_ushort, 1);
 
-//                return variant_create_boolean(1);
-//            case 'f':
-//                if (io_read(buffer, 1, 4, input) != 4 || memcmp(buffer, "alse", 4))
-//                    return NULL;
+    if (generic_types_compatible_compare(base, container_base_ushort_recipe()) != 0)
+        return CC_ENOTSUP;
 
-//                return variant_create_boolean(0);
-//            case '-':
-//            case '0':
-//            case '1':
-//            case '2':
-//            case '3':
-//            case '4':
-//            case '5':
-//            case '6':
-//            case '7':
-//            case '8':
-//            case '9': /* Handle number */ {
-//                io_ungetc(ch, input);
+    return io_printf(output, "%hu", *((const unsigned short *) data)) < 0? io_error(output): 0;
+}
 
-//                double number;
+int io_serialize_int(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_int, 1);
 
-//                break;
-//            }
-//            case '"': /* Handle string */
-//            case '[': /* Handle array */
-//            case '{': /* Handle object */
-//            case ' ':
-//            case '\t':
-//            case '\n':
-//            case '\r':
-//                break;
-//        }
-//    }
+    if (generic_types_compatible_compare(base, container_base_int_recipe()) != 0)
+        return CC_ENOTSUP;
 
-//    return NULL;
-//}
+    return io_printf(output, "%d", *((const int *) data)) < 0? io_error(output): 0;
+}
 
-static size_t json_serialize_stringpart_io(const void *data, size_t size, size_t count, void *userdata, IO io) {
+int io_serialize_uint(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_uint, 1);
+
+    if (generic_types_compatible_compare(base, container_base_uint_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    return io_printf(output, "%u", *((const unsigned int *) data)) < 0? io_error(output): 0;
+}
+
+int io_serialize_long(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_long, 1);
+
+    if (generic_types_compatible_compare(base, container_base_long_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    return io_printf(output, "%ld", *((const long *) data)) < 0? io_error(output): 0;
+}
+
+int io_serialize_ulong(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_ulong, 1);
+
+    if (generic_types_compatible_compare(base, container_base_ulong_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    return io_printf(output, "%lu", *((const unsigned long *) data)) < 0? io_error(output): 0;
+}
+
+int io_serialize_long_long(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_long_long, 1);
+
+    if (generic_types_compatible_compare(base, container_base_long_long_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    return io_printf(output, "%lld", *((const long long *) data)) < 0? io_error(output): 0;
+}
+
+int io_serialize_ulong_long(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_ulong_long, 1);
+
+    if (generic_types_compatible_compare(base, container_base_ulong_long_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    return io_printf(output, "%llu", *((const unsigned long long *) data)) < 0? io_error(output): 0;
+}
+
+int io_serialize_float(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_float, 1);
+
+    if (generic_types_compatible_compare(base, container_base_float_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    return io_printf(output, "%.*g", FLT_DIG-1, *((const float *) data)) < 0? io_error(output): 0;
+}
+
+int io_serialize_double(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_double, 1);
+
+    if (generic_types_compatible_compare(base, container_base_double_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    return io_printf(output, "%.*g", DBL_DIG-1, *((const double *) data)) < 0? io_error(output): 0;
+}
+
+int io_serialize_long_double(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_long_double, 1);
+
+    if (generic_types_compatible_compare(base, container_base_long_double_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    return io_printf(output, "%.*Lg", LDBL_DIG-1, *((const long double *) data)) < 0? io_error(output): 0;
+}
+
+int io_serialize_cstring(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_cstring, 1);
+
+    if (generic_types_compatible_compare(base, container_base_cstring_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    return io_puts(data, output)? io_error(output): 0;
+}
+
+int io_serialize_binary(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_binary, 1);
+
+    if (generic_types_compatible_compare(base, container_base_cstring_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    const Binary *binary = data;
+
+    for (size_t i = 0; i < binary->length; ++i) {
+        unsigned char chr = binary->data[i];
+
+        if (chr > 0x80 || chr < 0x20) {
+            if (io_printf(output, "\\x%.2hhx", chr) < 0)
+                return io_error(output);
+        } else if (io_putc(chr, output) == EOF)
+            return io_error(output);
+    }
+
+    return 0;
+}
+
+int io_serialize_variant(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    while (1) {
+        SERIALIZER_DECLARE("UTF-8", io_serialize_variant, 1);
+
+        if (generic_types_compatible_compare(base, container_base_variant_recipe()) != 0)
+            return CC_ENOTSUP;
+
+        Variant v = (Variant) data;
+
+        switch (variant_get_type(v)) {
+            case VariantCustom:
+                data = variant_get_custom(v);
+                base = variant_get_custom_container_base(v);
+                continue;
+            case VariantNull: return io_puts("<null>", output)? io_error(output): 0;
+            case VariantBoolean: {
+                _Bool bool = variant_get_boolean(v);
+                return io_serialize_boolean(output, &bool, container_base_boolean_recipe(), NULL);
+            }
+            case VariantInteger: {
+                long long i = variant_get_int64(v);
+                return io_serialize_long_long(output, &i, container_base_long_long_recipe(), NULL);
+            }
+            case VariantUnsignedInteger: {
+                unsigned long long i = variant_get_uint64(v);
+                return io_serialize_ulong_long(output, &i, container_base_ulong_long_recipe(), NULL);
+            }
+            case VariantFloat: {
+                double d = variant_get_float(v);
+                return io_serialize_double(output, &d, container_base_double_recipe(), NULL);
+            }
+            case VariantString: {
+                const char *s = variant_get_string(v);
+                return io_serialize_double(output, s, container_base_cstring_recipe(), NULL);
+            }
+            case VariantBinary: {
+                Binary b = variant_get_binary(v);
+                return io_serialize_binary(output, &b, container_base_binary_recipe(), NULL);
+            }
+            default:
+                return CC_ENOTSUP;
+        }
+    }
+}
+
+int io_serialize_container(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_container, 1);
+
+    if (base->collection_begin == NULL ||
+            base->collection_next == NULL ||
+            base->collection_get_value == NULL)
+        return CC_ENOTSUP;
+
+    Serializer key_serialize = base->key_child? base->key_child->serialize: NULL;
+    if (key_serialize == NULL)
+        key_serialize = io_default_serializer_for_type(base->key_child);
+
+    Serializer value_serialize = base->value_child? base->value_child->serialize: NULL;
+    if (value_serialize == NULL)
+        value_serialize = io_default_serializer_for_type(base->value_child);
+
+    if (base->collection_get_key) {
+        if (key_serialize == NULL || value_serialize == NULL)
+            return CC_ENOTSUP;
+
+        if (io_putc('{', output) == EOF)
+            return io_error(output);
+
+        Iterator start = base->collection_begin(data);
+        for (Iterator it = start; it; it = base->collection_next(data, it)) {
+            if (it != start && io_puts(", ", output) == EOF)
+                return io_error(output);
+
+            int err = key_serialize(output, base->collection_get_key(data, it), base->key_child, NULL);
+            if (err)
+                return err;
+
+            if (io_puts(": ", output) == EOF)
+                return io_error(output);
+
+            err = value_serialize(output, base->collection_get_value(data, it), base->value_child, NULL);
+            if (err)
+                return err;
+        }
+
+        if (io_putc('}', output) == EOF)
+            return io_error(output);
+    } else {
+        if (value_serialize == NULL)
+            return CC_ENOTSUP;
+
+        if (io_putc('[', output) == EOF)
+            return io_error(output);
+
+        Iterator start = base->collection_begin(data);
+        for (Iterator it = start; it; it = base->collection_next(data, it)) {
+            if (it != start && io_puts(", ", output) == EOF)
+                return io_error(output);
+
+            int err = value_serialize(output, base->collection_get_value(data, it), base->value_child, NULL);
+            if (err)
+                return err;
+        }
+
+        if (io_putc(']', output) == EOF)
+            return io_error(output);
+    }
+
+    return 0;
+}
+
+Serializer io_default_serializer_for_type(const CommonContainerBase *base) {
+    if (generic_types_compatible_compare(base, container_base_boolean_recipe()) == 0)
+        return (Serializer) io_serialize_boolean;
+    else if (generic_types_compatible_compare(base, container_base_char_recipe()) == 0 ||
+             generic_types_compatible_compare(base, container_base_uchar_recipe()) == 0)
+        return (Serializer) io_serialize_char;
+    else if (generic_types_compatible_compare(base, container_base_short_recipe()) == 0)
+        return (Serializer) io_serialize_short;
+    else if (generic_types_compatible_compare(base, container_base_ushort_recipe()) == 0)
+        return (Serializer) io_serialize_ushort;
+    else if (generic_types_compatible_compare(base, container_base_int_recipe()) == 0)
+        return (Serializer) io_serialize_int;
+    else if (generic_types_compatible_compare(base, container_base_uint_recipe()) == 0)
+        return (Serializer) io_serialize_uint;
+    else if (generic_types_compatible_compare(base, container_base_long_recipe()) == 0)
+        return (Serializer) io_serialize_long;
+    else if (generic_types_compatible_compare(base, container_base_ulong_recipe()) == 0)
+        return (Serializer) io_serialize_ulong;
+    else if (generic_types_compatible_compare(base, container_base_long_long_recipe()) == 0)
+        return (Serializer) io_serialize_long_long;
+    else if (generic_types_compatible_compare(base, container_base_ulong_long_recipe()) == 0)
+        return (Serializer) io_serialize_ulong_long;
+    else if (generic_types_compatible_compare(base, container_base_float_recipe()) == 0)
+        return (Serializer) io_serialize_float;
+    else if (generic_types_compatible_compare(base, container_base_double_recipe()) == 0)
+        return (Serializer) io_serialize_double;
+    else if (generic_types_compatible_compare(base, container_base_long_double_recipe()) == 0)
+        return (Serializer) io_serialize_long_double;
+    else if (generic_types_compatible_compare(base, container_base_cstring_recipe()) == 0)
+        return (Serializer) io_serialize_cstring;
+    else if (generic_types_compatible_compare(base, container_base_binary_recipe()) == 0)
+        return (Serializer) io_serialize_binary;
+    else if (generic_types_compatible_compare(base, container_base_stringlist_recipe()) == 0 ||
+             generic_types_compatible_compare(base, container_base_genericlist_recipe()) == 0 ||
+             generic_types_compatible_compare(base, container_base_stringset_recipe()) == 0 ||
+             generic_types_compatible_compare(base, container_base_genericset_recipe()) == 0 ||
+             generic_types_compatible_compare(base, container_base_stringmap_recipe()) == 0 ||
+             generic_types_compatible_compare(base, container_base_genericmap_recipe()) == 0)
+        return (Serializer) io_serialize_container;
+    else
+        return NULL; /* Unknown default serializer type */
+}
+
+static size_t serialize_json_stringpart_io(const void *data, size_t size, size_t count, void *userdata, IO io) {
     IO output = (IO) userdata;
 
     size_t written = 0;
@@ -145,41 +363,29 @@ static size_t json_serialize_stringpart_io(const void *data, size_t size, size_t
         written += written_this_time;
         if (written_this_time != buffer_size) {
             if (io) io_set_error(io, io_error(output));
-            return written;
+            return written / size;
         }
     }
 
-    return written;
+    return written / size;
 }
 
-static int json_serialize_stringpart_internal(IO output, const Binary b) {
-    return json_serialize_stringpart_io(b.data, 1, b.length, output, NULL) == b.length? 0: io_error(output);
+static int serialize_json_stringpart_internal(IO output, const Binary b) {
+    return serialize_json_stringpart_io(b.data, 1, b.length, output, NULL) == b.length? 0: io_error(output);
 }
 
-static int json_serialize_string_internal(IO output, const Binary b) {
+static int serialize_json_string_internal(IO output, const Binary b) {
     if (io_putc('"', output) == EOF ||
-        json_serialize_stringpart_internal(output, b) ||
+        serialize_json_stringpart_internal(output, b) ||
         io_putc('"', output) == EOF)
         return io_error(output);
 
     return 0;
 }
 
-/* Serializer basics:
- *
- * Value serializers are used where specified, if they're the same type as the format
- * If the value is a native variant, serialize the variant
- * If the value is a custom variant, attempt to serialize the contained value with the current serializer.
- * If a serializer is specified with a different type, and the type is a collection, serialize the collection and call the current serializer for all elements
- * If a serializer is specified with a different type, and the type is not a collection, attempt to serialize the item with the current serializer if it's a known type
- * If no serializer is specified, and the type is a collection, serialize the collection and call the current serializer for all elements
- * If no serializer is specified, and the type is not a collection, attempt to serialize the item with the current serializer if it's a known type
- * Otherwise, an error occurs and serialization cannot continue
- */
-
-int json_serialize(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+int io_serialize_json(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
     while (1) {
-        SERIALIZER_DECLARE("JSON", json_serialize, 1);
+        SERIALIZER_DECLARE("JSON", io_serialize_json, 1);
 
         if (generic_types_compatible_compare(base, container_base_variant_recipe()) == 0) {
             if (variant_is_custom((Variant) data)) {
@@ -199,14 +405,14 @@ int json_serialize(IO output, const void *data, const CommonContainerBase *base,
                         if (fabs(flt) == (double) INFINITY || isnan(flt))
                             return CC_ENOTSUP;
 
-                        io_printf(output, "%.*g", DECIMAL_DIG-1, flt);
+                        io_printf(output, "%.*g", DBL_DIG-1, flt);
 
                         return io_error(output);
                     }
                     case VariantString: {
                         Binary b = variant_to_binary((Variant) data, NULL);
 
-                        return json_serialize_string_internal(output, b);
+                        return serialize_json_string_internal(output, b);
                     }
                     case VariantBinary:
                     default:
@@ -232,14 +438,14 @@ int json_serialize(IO output, const void *data, const CommonContainerBase *base,
                     const void *key = base->collection_get_key(data, it);
                     const void *value = base->collection_get_value(data, it);
 
-                    int err = json_serialize(output, key, base->key_child, NULL);
+                    int err = io_serialize_json(output, key, base->key_child, NULL);
                     if (err)
                         return err;
 
                     if (io_putc(':', output) == EOF)
                         return io_error(output);
 
-                    err = json_serialize(output, value, base->value_child, NULL);
+                    err = io_serialize_json(output, value, base->value_child, NULL);
                     if (err)
                         return err;
                 }
@@ -257,7 +463,7 @@ int json_serialize(IO output, const void *data, const CommonContainerBase *base,
 
                     const void *value = base->collection_get_value(data, it);
 
-                    int err = json_serialize(output, value, base->value_child, NULL);
+                    int err = io_serialize_json(output, value, base->value_child, NULL);
                     if (err)
                         return err;
                 }
@@ -268,7 +474,7 @@ int json_serialize(IO output, const void *data, const CommonContainerBase *base,
         } else { /* An atom */
             if (generic_types_compatible_compare(base, container_base_cstring_recipe()) == 0) {
                 Binary b = {.data = (char *) data, .length = strlen(data)};
-                return json_serialize_string_internal(output, b);
+                return serialize_json_string_internal(output, b);
             } else if (generic_types_compatible_compare(base, container_base_boolean_recipe()) == 0) {
                 const _Bool value = *((const _Bool *) data);
                 io_puts(value? "true": "false", output);
@@ -345,442 +551,6 @@ int json_serialize(IO output, const void *data, const CommonContainerBase *base,
         return 0;
     }
 }
-
-//int json_serialize_variant(IO output, Variant data, struct SerializerIdentity *type) {
-//    SERIALIZER_DECLARE("JSON", 1);
-
-//    switch (variant_get_type(data)) {
-//        case VariantNull: io_puts("null", output); return io_error(output);
-//        case VariantBoolean: io_puts(variant_get_boolean(data)? "true": "false", output); return io_error(output);
-//        case VariantInteger: io_printf(output, "%lld", variant_get_int64(data)); return io_error(output);
-//        case VariantUnsignedInteger: io_printf(output, "%llu", variant_get_uint64(data)); return io_error(output);
-//        case VariantFloat: {
-//            double flt = variant_get_float(data);
-//            if (fabs(flt) == (double) INFINITY || isnan(flt))
-//                return CC_ENOTSUP;
-
-//            int err;
-//            const char *str = variant_to_string(data, &err);
-
-//            if (err)
-//                return err;
-
-//            io_puts(str, output);
-
-//            return io_error(output);
-//        }
-//        case VariantString: {
-//            Binary b = variant_to_binary(data, NULL);
-
-//            return json_serialize_string_internal(output, b);
-//        }
-//        case VariantBinary: return CC_ENOTSUP;
-//        default: /* Custom datatypes, no serializer specified */ {
-//            if (variant_is_stringlist(data))
-//                return json_serialize_stringlist(output, variant_get_custom(data), type);
-//            else if (variant_is_stringmap(data))
-//                return json_serialize_stringmap(output, variant_get_custom(data), type);
-//            else if (variant_is_variantlist(data))
-//                return json_serialize_variantlist(output, variant_get_custom(data), type);
-//            else if (variant_is_variantmap(data))
-//                return json_serialize_variantmap(output, variant_get_custom(data), type);
-//            else
-//                return CC_ENOTSUP;
-//        }
-//    }
-//}
-
-//static size_t msgpack_serialize_stringpart_io(const void *data, size_t size, size_t count, void *userdata, IO io) {
-//    IO output = (IO) userdata;
-
-//    size_t written = 0;
-//    size_t max = size*count;
-
-//    for (size_t i = 0; i < max; ++i) {
-//        char buffer[8] = {'\\'};
-//        size_t buffer_size = 1;
-//        unsigned char c = ((unsigned char *) data)[i];
-
-//        switch (c) {
-//            case '\\':
-//            case '"': buffer[1] = c; buffer_size = 2; break;
-//            case '\b': buffer[1] = 'b'; buffer_size = 2; break;
-//            case '\f': buffer[1] = 'f'; buffer_size = 2; break;
-//            case '\n': buffer[1] = 'n'; buffer_size = 2; break;
-//            case '\r': buffer[1] = 'r'; buffer_size = 2; break;
-//            case '\t': buffer[1] = 't'; buffer_size = 2; break;
-//            default: {
-//                if (c < 0x20) {
-//                    const char alphabet[] = "0123456789ABCDEF";
-
-//                    buffer[1] = 'u';
-//                    buffer[2] = buffer[3] = '0';
-//                    buffer[4] = alphabet[c >> 4];
-//                    buffer[5] = alphabet[c & 0xf];
-//                    buffer_size = 6;
-//                } else
-//                    buffer[0] = c;
-
-//                break;
-//            }
-//        }
-
-//        size_t written_this_time = io_write(buffer, 1, buffer_size, output);
-//        written += written_this_time;
-//        if (written_this_time != buffer_size) {
-//            if (io) io_set_error(io, io_error(output));
-//            return written;
-//        }
-//    }
-
-//    return written;
-//}
-
-//static const char *msgpack_what(void *userdata, IO io) {
-//    UNUSED(userdata);
-//    UNUSED(io);
-
-//    return "msgpack";
-//}
-
-//static const struct InputOutputDeviceCallbacks msgpack_callbacks = {
-//    .read = NULL,
-//    .write = msgpack_serialize_stringpart_io,
-//    .open = NULL,
-//    .close = NULL,
-//    .flush = NULL,
-//    .clearerr = NULL,
-//    .stateSwitch = NULL,
-//    .tell = NULL,
-//    .tell64 = NULL,
-//    .seek = NULL,
-//    .seek64 = NULL,
-//    .flags = NULL,
-//    .what = msgpack_what
-//};
-
-//static int msgpack_serialize_stringpart_internal(IO output, const Binary b) {
-//    return msgpack_serialize_stringpart_io(b.data, 1, b.length, output, NULL) == b.length? 0: io_error(output);
-//}
-
-//static int msgpack_serialize_string_internal(IO output, const Binary b) {
-//    if (io_putc('"', output) == EOF ||
-//        msgpack_serialize_stringpart_internal(output, b) ||
-//        io_putc('"', output) == EOF)
-//        return io_error(output);
-
-//    return 0;
-//}
-
-//int msgpack_serialize_stringlist(IO output, StringList list, struct SerializerIdentity *type) {
-//    SERIALIZER_DECLARE("MessagePack", 0);
-
-//    int err = 0;
-//    if (serialize_raw_was_serialized(output,
-//                                     list,
-//                                     stringlist_get_container_base(list),
-//                                     "MessagePack",
-//                                     &err,
-//                                     &msgpack_callbacks,
-//                                     serialize_is_utf8)) {
-//        return err;
-//    }
-
-//    if (io_putc('[', output) == EOF)
-//        return io_error(output);
-
-//    for (size_t i = 0; i < stringlist_size(list); ++i) {
-//        if (i > 0 && io_putc(',', output) == EOF)
-//            return io_error(output);
-
-//        Binary b = {.data = stringlist_array(list)[i], .length = strlen(stringlist_array(list)[i])};
-
-//        int err = msgpack_serialize_string_internal(output, b);
-//        if (err)
-//            return err;
-//    }
-
-//    if (io_putc(']', output) == EOF)
-//        return io_error(output);
-
-//    return 0;
-//}
-
-//int msgpack_serialize_variantlist(IO output, GenericList list, struct SerializerIdentity *type) {
-//    SERIALIZER_DECLARE("MessagePack", 0);
-
-//    int err = 0;
-//    if (serialize_raw_was_serialized(output,
-//                                     list,
-//                                     genericlist_get_container_base(list),
-//                                     "MessagePack",
-//                                     &err,
-//                                     &msgpack_callbacks,
-//                                     serialize_is_utf8)) {
-//        return err;
-//    }
-
-//    if (io_putc('[', output) == EOF)
-//        return io_error(output);
-
-//    for (size_t i = 0; i < genericlist_size(list); ++i) {
-//        if (i > 0 && io_putc(',', output) == EOF)
-//            return io_error(output);
-
-//        int err = msgpack_serialize_variant(output, (Variant) genericlist_array(list)[i], type);
-//        if (err)
-//            return err;
-//    }
-
-//    if (io_putc(']', output) == EOF)
-//        return io_error(output);
-
-//    return 0;
-//}
-
-//int msgpack_serialize_stringmap(IO output, StringMap map, struct SerializerIdentity *type) {
-//    SERIALIZER_DECLARE("MessagePack", 0);
-
-//    int err = 0;
-//    if (serialize_raw_was_serialized(output,
-//                                     map,
-//                                     stringmap_get_container_base(map),
-//                                     "MessagePack",
-//                                     &err,
-//                                     &msgpack_callbacks,
-//                                     serialize_is_utf8)) {
-//        return err;
-//    }
-
-//    Iterator start = stringmap_begin(map);
-
-//    if (io_putc('{', output) == EOF)
-//        return io_error(output);
-
-//    for (Iterator it = start; it; it = stringmap_next(map, it)) {
-//        if (it != start && io_putc(',', output) == EOF)
-//            return io_error(output);
-
-//        int err;
-//        Binary b;
-
-//        b.data = (char *) stringmap_key_of(map, it);
-//        b.length = strlen(b.data);
-
-//        err = msgpack_serialize_string_internal(output, b);
-//        if (err)
-//            return err;
-
-//        if (io_putc(':', output) == EOF)
-//            return io_error(output);
-
-//        b.data = stringmap_value_of(map, it);
-//        b.length = strlen(b.data);
-
-//        err = msgpack_serialize_string_internal(output, b);
-//        if (err)
-//            return err;
-//    }
-
-//    if (io_putc('}', output) == EOF)
-//        return io_error(output);
-
-//    return 0;
-//}
-
-//int msgpack_serialize_variantmap(IO output, GenericMap map, struct SerializerIdentity *type) {
-//    SERIALIZER_DECLARE("MessagePack", 0);
-
-//    int err = 0;
-//    if (serialize_raw_was_serialized(output,
-//                                     map,
-//                                     genericmap_get_container_base(map),
-//                                     "MessagePack",
-//                                     &err,
-//                                     &msgpack_callbacks,
-//                                     serialize_is_utf8)) {
-//        return err;
-//    }
-
-//    Iterator start = genericmap_begin(map);
-
-//    if (io_putc('{', output) == EOF)
-//        return io_error(output);
-
-//    for (Iterator it = start; it; it = genericmap_next(map, it)) {
-//        if (it != start && io_putc(',', output) == EOF)
-//            return io_error(output);
-
-//        int err;
-
-//        err = msgpack_serialize_string_internal(output, genericmap_key_of(map, it));
-//        if (err)
-//            return err;
-
-//        if (io_putc(':', output) == EOF)
-//            return io_error(output);
-
-//        err = msgpack_serialize_variant(output, (Variant) genericmap_value_of(map, it), type);
-//        if (err)
-//            return err;
-//    }
-
-//    if (io_putc('}', output) == EOF)
-//        return io_error(output);
-
-//    return 0;
-//}
-
-//int msgpack_serialize_variant(IO output, Variant data, struct SerializerIdentity *type) {
-//    SERIALIZER_DECLARE("MessagePack", 0);
-
-//    int err = 0;
-//    if (serialize_variant_was_serialized(output,
-//                                         data,
-//                                         "MessagePack",
-//                                         &err,
-//                                         &msgpack_callbacks,
-//                                         serialize_is_utf8)) {
-//        return err;
-//    }
-
-//    switch (variant_get_type(data)) {
-//        case VariantNull: io_putc(0xc0, output); return io_error(output);
-//        case VariantBoolean: io_putc(0xc2 + !!variant_get_boolean(data), output); return io_error(output);
-//        case VariantInteger: io_printf(output, "%lld", variant_get_int64(data)); return io_error(output);
-//        case VariantUnsignedInteger: io_printf(output, "%llu", variant_get_uint64(data)); return io_error(output);
-//        case VariantFloat: {
-//            double flt = variant_get_float(data);
-//            if (fabs(flt) == INFINITY || isnan(flt))
-//                return CC_EINVAL;
-
-//            int err;
-//            const char *str = variant_to_string(data, &err);
-
-//            if (err)
-//                return err;
-
-//            io_puts(str, output);
-
-//            return io_error(output);
-//        }
-//        case VariantString: {
-//            Binary b = variant_to_binary(data, NULL);
-
-//            return msgpack_serialize_string_internal(output, b);
-//        }
-//        case VariantBinary: return CC_ENOTSUP;
-//        default: /* Custom datatypes, no serializer specified */ {
-//            if (variant_is_stringlist(data))
-//                return msgpack_serialize_stringlist(output, variant_get_custom(data), type);
-//            else if (variant_is_stringmap(data))
-//                return msgpack_serialize_stringmap(output, variant_get_custom(data), type);
-//            else if (variant_is_variantlist(data))
-//                return msgpack_serialize_variantlist(output, variant_get_custom(data), type);
-//            else if (variant_is_variantmap(data))
-//                return msgpack_serialize_variantmap(output, variant_get_custom(data), type);
-//            else
-//                return CC_ENOTSUP;
-//        }
-//    }
-//}
-
-//int serialize_is_utf8(const struct SerializerIdentity *identity) {
-//    return identity->is_utf8;
-//}
-
-//int serialize_raw_was_serialized(IO output, const void *data, const CommonContainerBase *base, const char *type, int *err, const struct InputOutputDeviceCallbacks *filter_callbacks, int (*supports_identity)(const struct SerializerIdentity *)) {
-//    if (base->serialize) {
-//        IO sub_output = output;
-//        int error = 0;
-//        struct SerializerIdentity identity;
-
-//        if ((error = base->serialize(NULL, NULL, &identity)) != 0) {
-//            ;
-//        } else if (strcmp(type, identity.type)) {
-//            if (base->cvt_expects_variant) /* We can't do anything if it expects a variant, since we don't have one to work with */
-//                return 0;
-
-//            /* - Expects raw data. Outputs in a different format, so we need to run the serializer */
-
-//            if ((supports_identity && !supports_identity(&identity))) {
-//                if (err) *err = CC_ENOTSUP;
-//                return 1;
-//            }
-
-//            sub_output = filter_callbacks? io_open_custom(filter_callbacks, output, "wb"): io_open_dynamic_buffer("wb");
-//            if (sub_output == NULL) {
-//                if (err) *err = CC_ENOMEM;
-//                return 1;
-//            }
-
-//            error = base->serialize(sub_output, data, NULL);
-
-//            if (!filter_callbacks && !error && /* Using dynamic buffer and no errors so far */
-//                    io_write(io_underlying_buffer(sub_output), 1, io_underlying_buffer_size(sub_output), output) != io_underlying_buffer_size(sub_output))
-//                error = io_error(output);
-
-//            int close_error = io_close(sub_output);
-//            if (!error)
-//                error = close_error;
-//        } else if (!base->cvt_expects_variant) { /* Serializer expects raw data. Outputs in same format, so we don't need special handling */
-//            error = base->serialize(output, data, NULL);
-//        } else
-//            return 0;
-
-//        if (err)
-//            *err = error;
-
-//        return 1;
-//    }
-
-//    return 0;
-//}
-
-//int serialize_variant_was_serialized(IO output, const Variant data, const char *type, int *err, const struct InputOutputDeviceCallbacks *filter_callbacks, int (*supports_identity)(const struct SerializerIdentity *)) {
-//    if (variant_get_container_base(data)->serialize) {
-//        IO sub_output = output;
-//        int error = 0;
-//        struct SerializerIdentity identity;
-
-//        if ((error = variant_get_container_base(data)->serialize(NULL, NULL, &identity)) != 0) {
-//            ;
-//        } else if (strcmp(type, identity.type)) {
-//            if (supports_identity && !supports_identity(&identity)) {
-//                if (err) *err = CC_ENOTSUP;
-//                return 1;
-//            }
-
-//            sub_output = filter_callbacks? io_open_custom(filter_callbacks, output, "wb"): io_open_dynamic_buffer("wb");
-//            if (sub_output == NULL) {
-//                if (err) *err = CC_ENOMEM;
-//                return 1;
-//            }
-
-//            /* - Expects a variant, but outputs a different format. We need to run the serializer anyway, or */
-//            /* - Expects raw data from variant. Outputs in a different format, so we need to run the serializer */
-//            error = variant_serialize(sub_output, data, NULL);
-
-//            if (!filter_callbacks && !error && /* Using dynamic buffer and no errors so far */
-//                    io_write(io_underlying_buffer(sub_output), 1, io_underlying_buffer_size(sub_output), output) != io_underlying_buffer_size(sub_output))
-//                error = io_error(output);
-
-//            int close_error = io_close(sub_output);
-//            if (!error)
-//                error = close_error;
-//        } else if (!variant_get_container_base(data)->cvt_expects_variant) { /* Serializer expects raw data from variant. Outputs in same format, so we don't need special handling */
-//            error = variant_serialize(output, data, NULL);
-//        } else
-//            return 0;
-
-//        if (err)
-//            *err = error;
-
-//        return 1;
-//    }
-
-//    return 0;
-//}
 
 StringList stringlist_split_io(IO input, const char *separator, int keep_empty) {
     Buffer data_buffer;

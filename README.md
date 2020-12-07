@@ -6,7 +6,7 @@ C generic library implementation, including generic containers, generic IO inter
 
 C has a very apalling lack of containers. That's because it is inherently a low-level language, and has no template ability.
 Seatainer attempts to remedy this somewhat by implementing generic and specialized containers in C. Unfortunately, there is a small performance hit due
-to an additional layer of indirection, but the performance is near optimal for generic C code, and the containers are easy to use.
+to additional indirection, but the performance is near optimal for generic C code, and the containers are easy to use.
 
 Seatainer also contains a generic IO interface. The usage is not much different than the internal `FILE *` type, so it should be very easy to use.
 Seatainer's IO system even includes HTTP support. HTTPS support is available if OpenSSL is available too.
@@ -28,6 +28,7 @@ Seatainer officially supports C99 and newer.
  - `CC_IO_STATIC_INSTANCES` - Define to a non-negative integer to allow fast allocation of a limited number of IO instances. If this limit is reached, the subsequent devices will be dynamically allocated. If this value is not defined, all allocations will be dynamic.
  - `CC_INCLUDE_NETWORK` - Define to specify that network access through sockets should be built.
  - `CC_INCLUDE_ZLIB` - Define to specify that the ZLib wrapper should be built.
+ - `GLOB_MAX_POSITIONS` - Define to specify the maximum number of '*' characters that can be present in a glob.
 
 ### IO devices
 

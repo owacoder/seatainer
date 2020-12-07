@@ -11,6 +11,7 @@
 #include "Containers/genericlist.h"
 #include "Containers/genericmap.h"
 #include "Containers/genericset.h"
+#include "Containers/genericlinkedlist.h"
 #include "Containers/stringlist.h"
 #include "Containers/stringmap.h"
 #include "Containers/stringset.h"
