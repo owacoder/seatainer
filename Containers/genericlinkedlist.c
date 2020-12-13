@@ -115,7 +115,7 @@ GenericLinkedList genericlinkedlist_from_array(const void **items, const CommonC
 
     for (; *ptr; ++ptr, ++count);
 
-    return genericlist_from_array_n(items, count, base);
+    return genericlinkedlist_from_array_n(items, count, base);
 }
 
 GenericLinkedList genericlinkedlist_from_array_n(const void **items, size_t count, const CommonContainerBase *base) {
@@ -287,7 +287,7 @@ size_t genericlinkedlist_remove_after(GenericLinkedList list, Iterator it) {
     return 1;
 }
 
-static Iterator genericlinkedlist_find_helper(GenericLinkedList list, Iterator after, const void *item, Iterator *prior) {
+Iterator genericlinkedlist_find(GenericLinkedList list, const void *item, Iterator after, Iterator *prior) {
     if (list->base->compare == NULL)
         return NULL;
 
@@ -311,7 +311,7 @@ static Iterator genericlinkedlist_find_helper(GenericLinkedList list, Iterator a
 
 size_t genericlinkedlist_remove_one(GenericLinkedList list, const void *item) {
     Iterator prior;
-    Iterator found = genericlinkedlist_find_helper(list, NULL, item, &prior);
+    Iterator found = genericlinkedlist_find(list, item, NULL, &prior);
     if (found == NULL)
         return 0;
 
@@ -323,7 +323,7 @@ size_t genericlinkedlist_remove_all(GenericLinkedList list, const void *item) {
     Iterator last = NULL;
 
     while (1) {
-        Iterator it = genericlinkedlist_find_helper(list, last, item, &last);
+        Iterator it = genericlinkedlist_find(list, item, last, &last);
         if (it == NULL)
             return count;
 
@@ -332,11 +332,7 @@ size_t genericlinkedlist_remove_all(GenericLinkedList list, const void *item) {
 }
 
 int genericlinkedlist_contains(GenericLinkedList list, const void *item) {
-    return genericlinkedlist_find_helper(list, NULL, item, NULL) != NULL;
-}
-
-Iterator genericlinkedlist_find(GenericLinkedList list, const void *item, Iterator after, Iterator *prior) {
-    return genericlinkedlist_find_helper(list, after, item, prior);
+    return genericlinkedlist_find(list, item, NULL, NULL) != NULL;
 }
 
 int genericlinkedlist_compare(GenericLinkedList list, GenericLinkedList other) {
@@ -428,7 +424,7 @@ static struct GenericLinkedListNode *genericlinkedlist_merge_sort_helper(struct 
 }
 
 static struct GenericLinkedListNode *genericlinkedlist_merge_sort(struct GenericLinkedListNode *list, size_t length, Compare compare, int descending, struct GenericLinkedListNode **tailptr) {
-    struct GenericLinkedListNode *right = list, *last = NULL;
+    struct GenericLinkedListNode *right = list, *last = list;
 
     if (length <= 1) {
         if (tailptr)

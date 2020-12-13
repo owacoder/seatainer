@@ -318,7 +318,12 @@ size_t stringlist_erase(StringList list, size_t begin_index, size_t end_index) {
 }
 
 char **stringlist_array(StringList list) {
-    return (char **) genericlist_array((GenericList) list);
+    /* This is possible because any type greater than or equal to sizeof(void*) will be stored directly as a pointer by genericlist
+     * Since a char * is the same size as a void *, it is guaranteed that we hold a reference to a (NULL-terminated) (char **) by taking genericlist_data().
+     *
+     * In contrast, storing a short in a genericlist would require us to cast genericlist_data to a `short *` to get the 0-terminated list of shorts
+     */
+    return (char **) genericlist_data((GenericList) list);
 }
 
 int stringlist_contains(StringList list, const char *item) {

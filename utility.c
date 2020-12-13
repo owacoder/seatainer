@@ -665,11 +665,11 @@ void thread_close(Thread t) {
 }
 
 int memswap(void *p, void *q, size_t size) {
-    char *pchar = p, *qchar = q;
+    unsigned char *pchar = p, *qchar = q;
 
     while (size--)
     {
-        char tmp = *pchar;
+        unsigned char tmp = *pchar;
         *pchar++ = *qchar;
         *qchar++ = tmp;
     }

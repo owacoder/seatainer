@@ -83,7 +83,7 @@ char *buffer_take(Buffer *buf) {
     char *buffer = buf->data;
 
     if (buffer == buf->small_data)
-        buffer = strdup(buffer);
+        buffer = strdup_alloc(buffer);
 
     if (buffer)
         buffer_init(buf);

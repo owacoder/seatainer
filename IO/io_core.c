@@ -3503,8 +3503,6 @@ IO io_reopen(const char *filename, const char *mode, IO io) {
     {
         default:
         {
-            io_close_without_destroying(io);
-
             FILE *f = fopen(filename, mode);
 
             if (f == NULL)
@@ -3513,6 +3511,7 @@ IO io_reopen(const char *filename, const char *mode, IO io) {
                 return NULL;
             }
 
+            io_close_without_destroying(io);
             io->data.file.fptr = f;
             io->type = IO_OwnFile;
             io->flags &= ~IO_FLAG_RESET;
@@ -3544,7 +3543,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
     va_copy(args_copy.args, args);
 
     if (io_begin_read(io))
-        return io_unlocki(io, EOF);
+        goto cleanup;
 
     for (; *fmt; ++fmt) {
         unsigned char chr = *fmt;
@@ -3874,14 +3873,11 @@ int io_seek(IO io, long int offset, int origin) {
                 return -1;
 #elif WINDOWS_OS
             if (sizeof(long) == sizeof(LONG)) {
-                DWORD val;
-                if ((val = SetFilePointer(io->data.native_file.native, offset, NULL,
+                if (SetFilePointer(io->data.native_file.native, offset, NULL,
                                              origin == SEEK_SET? FILE_BEGIN:
                                              origin == SEEK_CUR? FILE_CURRENT:
-                                             origin == SEEK_END? FILE_END: FILE_BEGIN)) == INVALID_SET_FILE_POINTER)
+                                             origin == SEEK_END? FILE_END: FILE_BEGIN) == INVALID_SET_FILE_POINTER)
                     return -1;
-
-                return offset = (long) val;
             } else {
                 LARGE_INTEGER li;
 

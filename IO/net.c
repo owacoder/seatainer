@@ -139,7 +139,7 @@ Url url_from_percent_encoded(const char *url) {
             /* Password exists */
             if (colon != NULL && (at == NULL || colon < at)) {
                 *colon = 0;
-                result->password = string = colon + 1;
+                result->password = colon + 1;
             } else
                 result->password = NULL;
 
@@ -631,6 +631,8 @@ static void *net_open(void *userdata, IO io) {
     if (WSAStartup(MAKEWORD(2, 0), &wsaData)) {
         if (params->err)
             *params->err = WSAGetLastError();
+
+        FREE(context);
         return NULL;
     }
 #endif

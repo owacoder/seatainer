@@ -112,6 +112,14 @@ struct SerializerIdentity {
  */
 typedef int (*Serializer)(void *output, const void *data, const struct CommonContainerBaseStruct *base, struct SerializerIdentity *type);
 
+typedef enum {
+    CompareError = -2,
+    CompareLess = -1,
+    CompareEqual = 0,
+    CompareGreater = 1,
+    CompareUnordered = 2
+} CompareResult;
+
 /** Compares two items
  *
  * If performing a search for an item inside a collection, the item being searched for should be passed as the first parameter
@@ -122,21 +130,25 @@ typedef int (*Compare)(const void *a, const void *b);
  *
  * The collection may be unordered, in which case no significance is placed on the beginning of a collection
  */
-typedef Iterator (*IteratorBegin)(const void *container);
+typedef Iterator (*CollectionBegin)(const void *container);
 
 /** Returns an element following the current iterator in a container, or NULL if the end of the container was reached
  *
  * The collection may be unordered, in which case no significance is placed on the beginning of a collection
  */
-typedef Iterator (*IteratorNext)(const void *container, Iterator it);
+typedef Iterator (*CollectionNext)(const void *container, Iterator it);
 
 /** Returns the key being stored at the position represented by the current iterator, or NULL if the container doesn't support keys
  */
-typedef const void * (*IteratorKey)(const void *container, Iterator it);
+typedef const void *(*CollectionKey)(const void *container, Iterator it);
 
 /** Returns the value being stored at the position represented by the current iterator
  */
-typedef void * (*IteratorValue)(const void *container, Iterator it);
+typedef void *(*CollectionValue)(const void *container, Iterator it);
+
+/** Obtains a container's size
+ */
+typedef size_t (*CollectionSize)(const void *container);
 
 /** Copies an item
  *
@@ -158,13 +170,17 @@ struct CommonContainerBaseStruct {
     Deleter deleter;
     Parser parse;
     Serializer serialize;
-    IteratorBegin collection_begin;
-    IteratorNext collection_next;
-    IteratorKey collection_get_key;
-    IteratorValue collection_get_value;
-    char dynamic; /* Specifies whether traits should be dynamically copied and stored (1) instead of statically referenced (0) */
+    CollectionSize collection_size;
+    CollectionBegin collection_begin;
+    CollectionNext collection_next;
+    CollectionKey collection_get_key;
+    CollectionValue collection_get_value;
     CommonContainerBase *value_child; /* Used for child value type, if it exists */
     CommonContainerBase *key_child; /* References key type of children, if it exists */
+    size_t size; /* Specifies element size in bytes in memory if a POD type (non-zero).
+                    If not a POD type (zero), this type will be stored in a `void *`.
+                    If a POD type (non-zero), the copier and deleter functions are irrelevant and will not be used */
+    char dynamic; /* Specifies whether traits should be dynamically copied and stored (1) instead of statically referenced (0) */
 };
 
 /* Copies a container base and makes the newly allocated one dynamic
@@ -226,7 +242,7 @@ int generic_types_compatible_compare(const CommonContainerBase *lhs, const Commo
  *
  * This function cannot be used as a Copier parameter.
  */
-void *generic_pod_alloc(const void *p, size_t bytes);
+void *generic_pod_copy_alloc(const void *p, size_t bytes);
 
 /** @brief A copier function that always returns NULL
  *
@@ -246,7 +262,7 @@ void *generic_identitycopy(const void *p);
  */
 void generic_nofree(void *p);
 
-#define MAKE_GENERIC(type, value) ((void *) ((type [1]) {(value)}))
-#define GENERIC_ITEM(type, generic) (*((type *) (generic)))
+#define REFERENCE(type, value) ((void *) ((type [1]) {(value)}))
+#define VALUE(type, generic) (*((type *) (generic)))
 
 #endif // COMMON_H

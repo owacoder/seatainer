@@ -264,7 +264,7 @@ void binary_destroy(Binary *b) {
     }
 }
 
-void *generic_pod_alloc(const void *p, size_t bytes) {
+void *generic_pod_copy_alloc(const void *p, size_t bytes) {
     if (p == NULL)
         return NULL;
 

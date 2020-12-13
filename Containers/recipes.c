@@ -17,11 +17,13 @@ static const CommonContainerBase container_base_empty_recipe_ = {
     .deleter = NULL,
     .parse = NULL,
     .serialize = NULL,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = 0,
     .key_child = NULL,
     .value_child = NULL
 };
@@ -43,11 +45,13 @@ static const CommonContainerBase container_base_voidptr_recipe_ = {
     .deleter = NULL,
     .parse = NULL,
     .serialize = NULL,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(void *),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -57,7 +61,7 @@ const CommonContainerBase *container_base_voidptr_recipe(void) {
 }
 
 _Bool *container_base_copy_boolean(const _Bool *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_boolean(const _Bool *a, const _Bool *b) {
@@ -70,11 +74,13 @@ static const CommonContainerBase container_base_boolean_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_boolean,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(_Bool),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -84,7 +90,7 @@ const CommonContainerBase *container_base_boolean_recipe(void) {
 }
 
 signed char *container_base_copy_char(const signed char *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_char(const signed char *a, const signed char *b) {
@@ -97,11 +103,13 @@ static const CommonContainerBase container_base_char_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_char,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(signed char),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -111,7 +119,7 @@ const CommonContainerBase *container_base_char_recipe(void) {
 }
 
 unsigned char *container_base_copy_uchar(const unsigned char *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_uchar(const unsigned char *a, const unsigned char *b) {
@@ -124,11 +132,13 @@ static const CommonContainerBase container_base_uchar_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_char,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(unsigned char),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -138,7 +148,7 @@ const CommonContainerBase *container_base_uchar_recipe(void) {
 }
 
 signed short *container_base_copy_short(const signed short *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_short(const signed short *a, const signed short *b) {
@@ -151,11 +161,13 @@ static const CommonContainerBase container_base_short_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_short,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(short),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -165,7 +177,7 @@ const CommonContainerBase *container_base_short_recipe(void) {
 }
 
 unsigned short *container_base_copy_ushort(const unsigned short *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_ushort(const unsigned short *a, const unsigned short *b) {
@@ -178,11 +190,13 @@ static const CommonContainerBase container_base_ushort_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_ushort,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(unsigned short),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -192,7 +206,7 @@ const CommonContainerBase *container_base_ushort_recipe(void) {
 }
 
 int *container_base_copy_int(const int *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_int(const int *a, const int *b) {
@@ -205,11 +219,13 @@ static const CommonContainerBase container_base_int_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_int,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(int),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -219,7 +235,7 @@ const CommonContainerBase *container_base_int_recipe(void) {
 }
 
 int *container_base_copy_uint(const unsigned int *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_uint(const unsigned int *a, const unsigned int *b) {
@@ -232,11 +248,13 @@ static const CommonContainerBase container_base_uint_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_uint,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(unsigned int),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -246,7 +264,7 @@ const CommonContainerBase *container_base_uint_recipe(void) {
 }
 
 long *container_base_copy_long(const long *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_long(const long *a, const long *b) {
@@ -259,11 +277,13 @@ static const CommonContainerBase container_base_long_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_long,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(long),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -273,7 +293,7 @@ const CommonContainerBase *container_base_long_recipe(void) {
 }
 
 unsigned long *container_base_copy_ulong(const unsigned long *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_ulong(const unsigned long *a, const unsigned long *b) {
@@ -286,11 +306,13 @@ static const CommonContainerBase container_base_ulong_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_ulong,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(unsigned long),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -300,7 +322,7 @@ const CommonContainerBase *container_base_ulong_recipe(void) {
 }
 
 long long *container_base_copy_long_long(const long long *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_long_long(const long long *a, const long long *b) {
@@ -313,11 +335,13 @@ static const CommonContainerBase container_base_long_long_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_long_long,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(long long),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -327,7 +351,7 @@ const CommonContainerBase *container_base_long_long_recipe(void) {
 }
 
 unsigned long long *container_base_copy_ulong_long(const unsigned long long *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_ulong_long(const unsigned long long *a, const unsigned long long *b) {
@@ -340,11 +364,13 @@ static const CommonContainerBase container_base_ulong_long_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_ulong_long,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(unsigned long long),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -354,7 +380,7 @@ const CommonContainerBase *container_base_ulong_long_recipe(void) {
 }
 
 float *container_base_copy_float(const float *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_float(const float *a, const float *b) {
@@ -367,11 +393,13 @@ static const CommonContainerBase container_base_float_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_float,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(float),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -381,7 +409,7 @@ const CommonContainerBase *container_base_float_recipe(void) {
 }
 
 double *container_base_copy_double(const double *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_double(const double *a, const double *b) {
@@ -394,11 +422,13 @@ static const CommonContainerBase container_base_double_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_double,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(double),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -408,7 +438,7 @@ const CommonContainerBase *container_base_double_recipe(void) {
 }
 
 long double *container_base_copy_long_double(const long double *v) {
-    return generic_pod_alloc(v, sizeof(*v));
+    return generic_pod_copy_alloc(v, sizeof(*v));
 }
 
 int container_base_compare_long_double(const long double *a, const long double *b) {
@@ -421,11 +451,13 @@ static const CommonContainerBase container_base_long_double_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_long_double,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
     .collection_get_value = NULL,
     .dynamic = 0,
+    .size = sizeof(long double),
     .key_child = NULL,
     .value_child = NULL
 };
@@ -440,6 +472,7 @@ static const CommonContainerBase container_base_cstring_recipe_ = {
     .deleter = (Deleter) FREE,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_cstring,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
@@ -459,6 +492,7 @@ static const CommonContainerBase container_base_binary_recipe_ = {
     .deleter = (Deleter) binary_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_binary,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
@@ -478,6 +512,7 @@ static const CommonContainerBase container_base_variant_recipe_ = {
     .deleter = (Deleter) variant_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_variant,
+    .collection_size = NULL,
     .collection_begin = NULL,
     .collection_next = NULL,
     .collection_get_key = NULL,
@@ -497,10 +532,11 @@ static const CommonContainerBase container_base_genericlist_recipe_ = {
     .deleter = (Deleter) genericlist_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_container,
-    .collection_begin = (IteratorBegin) genericlist_begin,
-    .collection_next = (IteratorNext) genericlist_next,
+    .collection_size = (CollectionSize) genericlist_size,
+    .collection_begin = (CollectionBegin) genericlist_begin,
+    .collection_next = (CollectionNext) genericlist_next,
     .collection_get_key = NULL,
-    .collection_get_value = (IteratorValue) genericlist_value_of,
+    .collection_get_value = (CollectionValue) genericlist_value_of,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = NULL
@@ -516,10 +552,11 @@ static const CommonContainerBase container_base_genericmap_recipe_ = {
     .deleter = (Deleter) genericmap_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_container,
-    .collection_begin = (IteratorBegin) genericmap_begin,
-    .collection_next = (IteratorNext) genericmap_next,
-    .collection_get_key = (IteratorKey) genericmap_key_of,
-    .collection_get_value = (IteratorValue) genericmap_value_of,
+    .collection_size = (CollectionSize) genericmap_size,
+    .collection_begin = (CollectionBegin) genericmap_begin,
+    .collection_next = (CollectionNext) genericmap_next,
+    .collection_get_key = (CollectionKey) genericmap_key_of,
+    .collection_get_value = (CollectionValue) genericmap_value_of,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = NULL
@@ -535,10 +572,11 @@ static const CommonContainerBase container_base_genericset_recipe_ = {
     .deleter = (Deleter) genericset_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_container,
-    .collection_begin = (IteratorBegin) genericset_begin,
-    .collection_next = (IteratorNext) genericset_next,
+    .collection_size = (CollectionSize) genericset_size,
+    .collection_begin = (CollectionBegin) genericset_begin,
+    .collection_next = (CollectionNext) genericset_next,
     .collection_get_key = NULL,
-    .collection_get_value = (IteratorValue) genericset_value_of,
+    .collection_get_value = (CollectionValue) genericset_value_of,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = NULL
@@ -554,10 +592,11 @@ static const CommonContainerBase container_base_genericlinkedlist_recipe_ = {
     .deleter = (Deleter) genericlinkedlist_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_container,
-    .collection_begin = (IteratorBegin) genericlinkedlist_begin,
-    .collection_next = (IteratorNext) genericlinkedlist_next,
+    .collection_size = (CollectionSize) genericlinkedlist_size,
+    .collection_begin = (CollectionBegin) genericlinkedlist_begin,
+    .collection_next = (CollectionNext) genericlinkedlist_next,
     .collection_get_key = NULL,
-    .collection_get_value = (IteratorValue) genericlinkedlist_value_of,
+    .collection_get_value = (CollectionValue) genericlinkedlist_value_of,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = NULL
@@ -573,10 +612,11 @@ static const CommonContainerBase container_base_variantlist_recipe_ = {
     .deleter = (Deleter) genericlist_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_container,
-    .collection_begin = (IteratorBegin) genericlist_begin,
-    .collection_next = (IteratorNext) genericlist_next,
+    .collection_size = (CollectionSize) genericlist_size,
+    .collection_begin = (CollectionBegin) genericlist_begin,
+    .collection_next = (CollectionNext) genericlist_next,
     .collection_get_key = NULL,
-    .collection_get_value = (IteratorValue) genericlist_value_of,
+    .collection_get_value = (CollectionValue) genericlist_value_of,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = (CommonContainerBase *) &container_base_variant_recipe_
@@ -592,10 +632,11 @@ static const CommonContainerBase container_base_variantmap_recipe_ = {
     .deleter = (Deleter) genericmap_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_container,
-    .collection_begin = (IteratorBegin) genericmap_begin,
-    .collection_next = (IteratorNext) genericmap_next,
-    .collection_get_key = (IteratorKey) genericmap_key_of,
-    .collection_get_value = (IteratorValue) genericmap_value_of,
+    .collection_size = (CollectionSize) genericmap_size,
+    .collection_begin = (CollectionBegin) genericmap_begin,
+    .collection_next = (CollectionNext) genericmap_next,
+    .collection_get_key = (CollectionKey) genericmap_key_of,
+    .collection_get_value = (CollectionValue) genericmap_value_of,
     .dynamic = 0,
     .key_child = (CommonContainerBase *) &container_base_cstring_recipe_,
     .value_child = (CommonContainerBase *) &container_base_variant_recipe_
@@ -611,10 +652,11 @@ static const CommonContainerBase container_base_variantset_recipe_ = {
     .deleter = (Deleter) genericset_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_container,
-    .collection_begin = (IteratorBegin) genericset_begin,
-    .collection_next = (IteratorNext) genericset_next,
+    .collection_size = (CollectionSize) genericset_size,
+    .collection_begin = (CollectionBegin) genericset_begin,
+    .collection_next = (CollectionNext) genericset_next,
     .collection_get_key = NULL,
-    .collection_get_value = (IteratorValue) genericset_value_of,
+    .collection_get_value = (CollectionValue) genericset_value_of,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = (CommonContainerBase *) &container_base_variant_recipe_
@@ -630,10 +672,11 @@ static const CommonContainerBase container_base_stringlist_recipe_ = {
     .deleter = (Deleter) stringlist_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_container,
-    .collection_begin = (IteratorBegin) stringlist_begin,
-    .collection_next = (IteratorNext) stringlist_next,
+    .collection_size = (CollectionSize) stringlist_size,
+    .collection_begin = (CollectionBegin) stringlist_begin,
+    .collection_next = (CollectionNext) stringlist_next,
     .collection_get_key = NULL,
-    .collection_get_value = (IteratorValue) stringlist_value_of,
+    .collection_get_value = (CollectionValue) stringlist_value_of,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = (CommonContainerBase *) &container_base_cstring_recipe_
@@ -649,10 +692,11 @@ static const CommonContainerBase container_base_stringmap_recipe_ = {
     .deleter = (Deleter) stringmap_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_container,
-    .collection_begin = (IteratorBegin) stringmap_begin,
-    .collection_next = (IteratorNext) stringmap_next,
-    .collection_get_key = (IteratorKey) stringmap_key_of,
-    .collection_get_value = (IteratorValue) stringmap_value_of,
+    .collection_size = (CollectionSize) stringmap_size,
+    .collection_begin = (CollectionBegin) stringmap_begin,
+    .collection_next = (CollectionNext) stringmap_next,
+    .collection_get_key = (CollectionKey) stringmap_key_of,
+    .collection_get_value = (CollectionValue) stringmap_value_of,
     .dynamic = 0,
     .key_child = (CommonContainerBase *) &container_base_cstring_recipe_,
     .value_child = (CommonContainerBase *) &container_base_cstring_recipe_
@@ -668,10 +712,11 @@ static const CommonContainerBase container_base_stringset_recipe_ = {
     .deleter = (Deleter) stringset_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_container,
-    .collection_begin = (IteratorBegin) stringset_begin,
-    .collection_next = (IteratorNext) stringset_next,
+    .collection_size = (CollectionSize) stringset_size,
+    .collection_begin = (CollectionBegin) stringset_begin,
+    .collection_next = (CollectionNext) stringset_next,
     .collection_get_key = NULL,
-    .collection_get_value = (IteratorValue) stringset_value_of,
+    .collection_get_value = (CollectionValue) stringset_value_of,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = (CommonContainerBase *) &container_base_cstring_recipe_
@@ -687,10 +732,11 @@ static const CommonContainerBase container_base_binarylist_recipe_ = {
     .deleter = (Deleter) genericlist_destroy,
     .parse = NULL,
     .serialize = (Serializer) io_serialize_container,
-    .collection_begin = (IteratorBegin) genericlist_begin,
-    .collection_next = (IteratorNext) genericlist_next,
+    .collection_size = (CollectionSize) genericlist_size,
+    .collection_begin = (CollectionBegin) genericlist_begin,
+    .collection_next = (CollectionNext) genericlist_next,
     .collection_get_key = NULL,
-    .collection_get_value = (IteratorValue) genericlist_value_of,
+    .collection_get_value = (CollectionValue) genericlist_value_of,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = (CommonContainerBase *) &container_base_binary_recipe_

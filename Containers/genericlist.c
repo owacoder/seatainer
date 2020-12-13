@@ -12,12 +12,36 @@
 #include "variant.h"
 #include "genericmap.h"
 
+#define MERGE_SORT_INSERTION_SORT_CUTOFF 8
+
 struct GenericListStruct {
     CommonContainerBase *base;
-    void **array;
-    size_t array_size;
-    size_t array_capacity;
+    size_t array_size; /* Number of elements in array (not bytes) */
+    size_t array_capacity; /* Capacity in elements of array (not bytes) */
+    void *array;
 };
+
+static inline size_t genericlist_stored_element_size(const CommonContainerBase *base) {
+    return base->size? MIN(base->size, sizeof(void*)): sizeof(void*);
+}
+
+static int genericlist_grow(GenericList list, size_t added) {
+    if (list->array_size+added >= list->array_capacity) {
+        size_t new_capacity = MAX(list->array_capacity + (list->array_capacity / 2), list->array_size + added) + 1;
+        size_t new_size = safe_multiply(new_capacity, genericlist_stored_element_size(list->base));
+        if (!new_size || new_capacity < list->array_capacity)
+            return CC_ENOMEM;
+
+        void **new_array = REALLOC(list->array, new_size);
+        if (!new_array)
+            return CC_ENOMEM;
+
+        list->array_capacity = new_capacity;
+        list->array = new_array;
+    }
+
+    return 0;
+}
 
 Variant variant_from_genericlist(GenericList list) {
     return variant_create_custom_adopt(list, genericlist_build_recipe(list));
@@ -54,15 +78,21 @@ GenericList genericlist_create_reserve(size_t reserve, const CommonContainerBase
     if (base == NULL)
         return NULL;
 
-    const size_t minimum_size = 8;
     GenericList list = CALLOC(1, sizeof(*list));
     CommonContainerBase *new_base = container_base_copy_if_dynamic(base);
     if (!list || !new_base)
         goto cleanup;
 
+    const size_t element_size = genericlist_stored_element_size(base);
+    const size_t minimum_size = 8;
+
     list->array_capacity = MAX(minimum_size, reserve);
     while (1) {
-        list->array = MALLOC(list->array_capacity * sizeof(*list->array));
+        const size_t malloc_size = safe_multiply(list->array_capacity, element_size);
+        if (!malloc_size)
+            goto cleanup;
+
+        list->array = MALLOC(malloc_size);
         if (list->array == NULL) {
             if (list->array_capacity > minimum_size) {
                 list->array_capacity = minimum_size; /* Fall back to minimum size if trying to allocate too much */
@@ -72,7 +102,7 @@ GenericList genericlist_create_reserve(size_t reserve, const CommonContainerBase
             goto cleanup;
         }
 
-        list->array[0] = NULL;
+        memset(list->array, 0, element_size);
         list->base = new_base;
 
         return list;
@@ -85,13 +115,12 @@ cleanup:
 }
 
 GenericList genericlist_copy(GenericList other) {
-    void **array = genericlist_array(other);
     GenericList list = genericlist_create_reserve(other->array_size, other->base);
     if (!list)
         return NULL;
 
     for (size_t i = 0; i < genericlist_size(other); ++i)
-        if (genericlist_append(list, array[i])) {
+        if (genericlist_append(list, genericlist_value_at(other, i))) {
             genericlist_destroy(list);
             return NULL;
         }
@@ -108,16 +137,14 @@ GenericList genericlist_concatenate(GenericList left, GenericList right) {
     if (result == NULL)
         return NULL;
 
-    void **array = genericlist_array(left);
     for (size_t i = 0; i < genericlist_size(left); ++i)
-        if (genericlist_append(result, array[i])) {
+        if (genericlist_append(result, genericlist_value_at(left, i))) {
             genericlist_destroy(result);
             return NULL;
         }
 
-    array = genericlist_array(right);
     for (size_t i = 0; i < genericlist_size(right); ++i)
-        if (genericlist_append(result, array[i])) {
+        if (genericlist_append(result, genericlist_value_at(right, i))) {
             genericlist_destroy(result);
             return NULL;
         }
@@ -185,53 +212,75 @@ GenericList genericlist_copy_slice(GenericList other, size_t begin_index, size_t
     if (list == NULL)
         return NULL;
 
-    void **array = genericlist_array(other);
-    for (size_t i = 0; i < length; ++i) {
-        if (genericlist_append(list, array[begin_index+i])) {
+    if (list->base->size && list->base->size <= sizeof(void*)) {
+        if (genericlist_grow(list, length)) {
             genericlist_destroy(list);
             return NULL;
+        }
+
+        const size_t element_size = list->base->size;
+
+        memcpy(list->array, other->array, length * element_size);
+        memset((char *) list->array + length * element_size, 0, element_size);
+        list->array_size = length;
+    } else {
+        for (size_t i = 0; i < length; ++i) {
+            if (genericlist_append(list, genericlist_value_at(other, begin_index+i))) {
+                genericlist_destroy(list);
+                return NULL;
+            }
         }
     }
 
     return list;
 }
 
-static int genericlist_grow(GenericList list, size_t added) {
-    if (list->array_size+added >= list->array_capacity) {
-        size_t new_capacity = MAX(list->array_capacity + (list->array_capacity / 2), list->array_size + added) + 1;
-        size_t new_size = safe_multiply(new_capacity, sizeof(*list->array));
-        if (!new_size || new_capacity < list->array_capacity)
-            return CC_ENOMEM;
-
-        void **new_array = REALLOC(list->array, new_size);
-        if (!new_array)
-            return CC_ENOMEM;
-
-        list->array_capacity = new_capacity;
-        list->array = new_array;
-    }
-
-    return 0;
-}
-
 int genericlist_fill(GenericList list, const void *item, size_t size) {
-    if (list->base->copier == NULL)
-        return CC_ENOTSUP;
-
     size_t fill_size = MIN(genericlist_size(list), size);
 
     int error = genericlist_resize(list, size, item);
     if (error)
         return error;
 
-    for (size_t i = 0; i < fill_size; ++i) {
-        void *duplicate = list->base->copier(item);
-        if (duplicate == NULL && item != NULL)
-            return CC_ENOMEM;
+    if (list->base->size > sizeof(void*)) { /* Large POD */
+        const size_t element_size = list->base->size;
+        void **array = (void **) list->array;
 
-        if (list->base->deleter)
-            list->base->deleter(list->array[i]);
-        list->array[i] = duplicate;
+        for (size_t i = 0; i < fill_size; ++i) {
+            void *duplicate = generic_pod_copy_alloc(item, element_size);
+            if (duplicate == NULL && item != NULL)
+                return CC_ENOMEM;
+
+            FREE(array[i]);
+
+            array[i] = duplicate;
+        }
+    } else if (list->base->size) { /* Small POD type */
+        const size_t element_size = list->base->size;
+
+        if (element_size == 1) {
+            memset(list->array, *((unsigned char *) item), size);
+        } else {
+            for (size_t i = 0; i < fill_size; ++i) {
+                memcpy((char*) list->array + (i * element_size), item, element_size);
+            }
+        }
+    } else { /* Non-POD type */
+        if (list->base->copier == NULL)
+            return CC_ENOTSUP;
+
+        void **array = (void **) list->array;
+
+        for (size_t i = 0; i < fill_size; ++i) {
+            void *duplicate = list->base->copier(item);
+            if (duplicate == NULL && item != NULL)
+                return CC_ENOMEM;
+
+            if (list->base->deleter)
+                list->base->deleter(array[i]);
+
+            array[i] = duplicate;
+        }
     }
 
     return 0;
@@ -240,43 +289,83 @@ int genericlist_fill(GenericList list, const void *item, size_t size) {
 int genericlist_resize(GenericList list, size_t size, const void *empty_item) {
     size_t original_size = genericlist_size(list);
 
+    int error = genericlist_grow(list, size - original_size);
+    if (error)
+        return error;
+
     if (size > original_size) {
-        if (list->base->copier == NULL)
-            return CC_ENOTSUP;
+        if (list->base->size > sizeof(void*)) { /* Large POD */
+            const size_t element_size = list->base->size;
+            void **array = (void **) list->array;
 
-        int error = genericlist_grow(list, size - original_size);
-        if (error)
-            return error;
+            for (size_t i = original_size; i < size; ++i) {
+                void *duplicate = generic_pod_copy_alloc(empty_item, element_size);
+                if (duplicate == NULL && empty_item != NULL) {
+                    list->array_size = i;
+                    goto cleanup;
+                }
 
-        for (size_t i = original_size; i < size; ++i) {
-            void *duplicate = list->base->copier(empty_item);
-            if (duplicate == NULL && empty_item != NULL) {
-                list->array_size = i;
-                goto cleanup;
+                array[i] = duplicate;
             }
 
-            list->array[i] = duplicate;
+            array[size] = NULL;
+        } else if (list->base->size) { /* Small POD type */
+            const size_t element_size = list->base->size;
+
+            if (element_size == 1) {
+                memset((char *) list->array + original_size, *((unsigned char *) empty_item), element_size);
+            } else {
+                for (size_t i = original_size; i < size; ++i) {
+                    memcpy((char *) list->array + (i * element_size), empty_item, element_size);
+                }
+            }
+
+            memset((char *) list->array + (size * element_size), 0, element_size);
+        } else {
+            if (list->base->copier == NULL)
+                return CC_ENOTSUP;
+
+            void **array = (void **) list->array;
+
+            for (size_t i = original_size; i < size; ++i) {
+                void *duplicate = list->base->copier(empty_item);
+                if (duplicate == NULL && empty_item != NULL) {
+                    list->array_size = i;
+                    goto cleanup;
+                }
+
+                array[i] = duplicate;
+            }
+
+            array[size] = NULL;
         }
-    } else if (size < original_size && list->base->deleter) {
-        for (size_t i = size; i < original_size; ++i) {
-            list->base->deleter(list->array[i]);
+    } else if (size < original_size) {
+        if (list->base->size && list->base->size <= sizeof(void*)) { /* Small POD type */
+            const size_t element_size = list->base->size;
+
+            memset((char *) list->array + (size * element_size), 0, element_size);
+        } else { /* Large POD or non-POD type */
+            void **array = (void **) list->array;
+            Deleter d = list->base->size?
+                                          FREE: /* Large POD */
+                                          list->base->deleter; /* Non-POD */
+
+            if (d) {
+                for (size_t i = size; i < original_size; ++i) {
+                    d(array[i]);
+                }
+            }
+
+            array[size] = NULL;
         }
     }
 
     list->array_size = size;
-    list->array[list->array_size] = NULL;
 
     return 0;
 
 cleanup:
-    if (list->base->deleter) {
-        for (size_t i = original_size; i < list->array_size; ++i) {
-            list->base->deleter(list->array[i]);
-        }
-    }
-
-    list->array_size = original_size;
-    list->array[list->array_size] = NULL;
+    genericlist_erase(list, original_size, list->array_size);
 
     return CC_ENOMEM;
 }
@@ -288,170 +377,257 @@ int genericlist_append_list(GenericList list, GenericList other) {
     size_t other_size = genericlist_size(other);
 
     for (size_t i = 0; i < other_size; ++i)
-        if ((err = genericlist_append(list, genericlist_array(other)[i])) != 0)
+        if ((err = genericlist_append(list, genericlist_value_at(other, i))) != 0)
             goto cleanup;
 
     return 0;
 
 cleanup:
-    if (list->base->deleter) {
-        for (size_t i = original_size; i < genericlist_size(list); ++i) {
-            list->base->deleter(list->array[i]);
-        }
-    }
+    genericlist_erase(list, original_size, list->array_size);
 
-    list->array_size = original_size;
-    list->array[list->array_size] = NULL;
     return err;
 }
 
 int genericlist_append_move(GenericList list, void *item) {
-    int error = genericlist_grow(list, 1);
-    if (error)
-        return error;
-
-    list->array[list->array_size++] = item;
-    list->array[list->array_size] = NULL;
-    return 0;
+    return genericlist_insert_move(list, item, list->array_size);
 }
 
 int genericlist_append(GenericList list, const void *item) {
-    if (list->base->copier == NULL)
-        return CC_ENOTSUP;
-
-    void *duplicate = list->base->copier(item);
-    if (duplicate == NULL && item != NULL)
-        return CC_ENOMEM;
-
-    int err = genericlist_append_move(list, duplicate);
-    if (err && list->base->deleter)
-        list->base->deleter(duplicate);
-
-    return err;
+    return genericlist_insert(list, item, list->array_size);
 }
 
 int genericlist_insert_list(GenericList list, GenericList other, size_t before_index) {
-    if (list->base->copier == NULL)
-        return CC_ENOTSUP;
+    if (generic_types_compatible_compare(genericlist_get_container_base(list), genericlist_get_container_base(other)) != 0)
+        return CC_EINVAL;
 
     if (before_index >= genericlist_size(list))
         before_index = genericlist_size(list);
 
     const size_t original_size = genericlist_size(list);
     const size_t other_size = genericlist_size(other);
-    size_t rollback_location = 0;
     int err = genericlist_grow(list, other_size);
     if (err)
         return err;
 
-    /* One is added at the end of the move so the trailing NULL will be moved as well */
-    memmove(list->array + before_index + other_size, list->array + before_index, sizeof(*list->array) * (original_size - before_index + 1));
+    if (list->base->size && list->base->size <= sizeof(void*)) {
+        const size_t element_size = list->base->size;
 
-    if (list == other) { /* Inserting list into itself */
-        for (size_t i = 0; i < original_size; ++i) {
-            size_t source_index = i;
-            size_t destination_index = before_index + i;
+        /* One is added at the end of the move so the trailing 0-element will be moved as well */
+        memmove((char *) list->array + ((before_index + other_size) * element_size),
+                (char *) list->array + ((before_index             ) * element_size),
+                (original_size - before_index + 1) * element_size);
 
-            if (source_index >= before_index)
-                source_index += original_size;
+        if (list == other) { /* Inserting list into itself */
+            memcpy((char *) list->array + (before_index * element_size),
+                   list->array,
+                   before_index * element_size);
 
-            const void *other_item = list->array[source_index];
-            void *duplicate = list->base->copier(other_item);
-            if (duplicate == NULL && other_item != NULL) {
-                rollback_location = destination_index;
-                goto cleanup;
-            }
-
-            list->array[destination_index] = duplicate;
+            memcpy((char *) list->array + (before_index*2 * element_size),
+                   (char *) list->array + ((before_index + original_size) * element_size),
+                   (original_size - before_index) * element_size);
+        } else {
+            memcpy((char *) list->array + (before_index * element_size), other->array, other_size * element_size);
         }
+
+        list->array_size += other_size;
     } else {
-        for (size_t i = before_index; i < before_index + other_size; ++i) {
-            const void *other_item = other->array[i-before_index];
-            void *duplicate = list->base->copier(other_item);
-            if (duplicate == NULL && other_item != NULL) {
-                rollback_location = i;
-                goto cleanup;
+        size_t rollback_location = 0;
+        void **array = (void **) list->array;
+        void **other_array = (void **) other->array;
+
+        if (list->base->copier == NULL)
+            return CC_ENOTSUP;
+
+        /* One is added at the end of the move so the trailing NULL will be moved as well */
+        memmove(array + before_index + other_size, array + before_index, sizeof(*array) * (original_size - before_index + 1));
+
+        if (list == other) { /* Inserting list into itself */
+            for (size_t i = 0; i < original_size; ++i) {
+                size_t source_index = i;
+                size_t destination_index = before_index + i;
+
+                if (source_index >= before_index)
+                    source_index += original_size;
+
+                const void *other_item = array[source_index];
+                void *duplicate = list->base->copier(other_item);
+                if (duplicate == NULL && other_item != NULL) {
+                    rollback_location = destination_index;
+                    goto non_pod_cleanup;
+                }
+
+                array[destination_index] = duplicate;
             }
+        } else {
+            for (size_t i = before_index; i < before_index + other_size; ++i) {
+                const void *other_item = other_array[i-before_index];
+                void *duplicate = list->base->copier(other_item);
+                if (duplicate == NULL && other_item != NULL) {
+                    rollback_location = i;
+                    goto non_pod_cleanup;
+                }
 
-            list->array[i] = duplicate;
+                array[i] = duplicate;
+            }
         }
-    }
 
-    list->array_size += other_size;
-    list->array[list->array_size] = NULL;
+        list->array_size += other_size;
+
+non_pod_cleanup: ;
+        Deleter d = list->base->size? FREE: list->base->deleter;
+
+        if (d) {
+            for (size_t i = before_index; i < rollback_location; ++i) {
+                d(array[i]);
+            }
+        }
+
+        /* One is added at the end of the move so the trailing NULL will be moved back as well */
+        memmove(array + before_index, array + before_index + other_size, sizeof(*array) * (original_size - before_index + 1));
+
+        return CC_ENOMEM;
+    }
 
     return 0;
-
-cleanup:
-    if (list->base->deleter) {
-        for (size_t i = before_index; i < rollback_location; ++i) {
-            list->base->deleter(list->array[i]);
-        }
-    }
-
-    /* One is added at the end of the move so the trailing NULL will be moved back as well */
-    memmove(list->array + before_index, list->array + before_index + other_size, sizeof(*list->array) * (original_size - before_index + 1));
-
-    return CC_ENOMEM;
 }
 
 int genericlist_insert_move(GenericList list, void *item, size_t before_index) {
-    if (before_index >= genericlist_size(list))
-        before_index = genericlist_size(list);
+    if (list->base->size && list->base->size <= sizeof(void*)) { /* Small POD type */
+        int err = genericlist_insert(list, item, before_index);
+        if (err)
+            return err;
 
-    int error = genericlist_grow(list, 1);
-    if (error)
-        return error;
+        FREE(item);
 
-    /* Make space in list */
-    memmove(list->array + before_index + 1, list->array + before_index, (genericlist_size(list) - before_index) * sizeof(*list->array));
+        return 0;
+    } else { /* Non-POD type */
+        if (before_index >= genericlist_size(list))
+            before_index = genericlist_size(list);
 
-    /* Insert into list */
-    list->array[before_index] = item;
-    list->array[++list->array_size] = NULL;
+        int error = genericlist_grow(list, 1);
+        if (error)
+            return error;
+
+        void **array = (void **) list->array;
+
+        /* Make space in list */
+        memmove(array + before_index + 1, array + before_index, (genericlist_size(list) - before_index) * sizeof(*array));
+
+        array[before_index] = item;
+        array[++list->array_size] = NULL;
+    }
 
     return 0;
 }
 
 int genericlist_insert(GenericList list, const void *item, size_t before_index) {
-    if (list->base->copier == NULL)
-        return CC_ENOTSUP;
+    if (list->base->size > sizeof(void*)) { /* Large POD type */
+        const size_t element_size = list->base->size;
 
-    void *duplicate = list->base->copier(item);
-    if (duplicate == NULL && item != NULL)
-        return CC_ENOMEM;
+        void *duplicate = generic_pod_copy_alloc(item, element_size);
+        if (duplicate == NULL && item != NULL)
+            return CC_ENOMEM;
 
-    int err = genericlist_insert_move(list, duplicate, before_index);
-    if (err && list->base->deleter)
-        list->base->deleter(duplicate);
+        int err = genericlist_insert_move(list, duplicate, before_index);
+        if (err)
+            FREE(duplicate);
 
-    return err;
+        return err;
+    } else if (list->base->size) { /* Small POD type */
+        unsigned char temp_buffer[sizeof(void*)]; /* Allows us to save the data of the specified item,
+                                                     in case it's a reference to an element in this list
+                                                     that will possibly get invalidated if we grow it. */
+        const size_t element_size = list->base->size;
+
+        if (before_index >= genericlist_size(list))
+            before_index = genericlist_size(list);
+
+        memcpy(temp_buffer, item, element_size);
+
+        int error = genericlist_grow(list, 1);
+        if (error)
+            return error;
+
+        /* Make space in list */
+        memmove((char *) list->array + ((before_index+1) * element_size),
+                (char *) list->array + ((before_index+0) * element_size),
+                (genericlist_size(list) - before_index)  * element_size);
+
+        /* Insert into list */
+        memcpy((char *) list->array + (before_index * element_size), temp_buffer, element_size);
+        ++list->array_size;
+
+        /* Terminate list */
+        memset((char *) list->array + (list->array_size * element_size), 0, element_size);
+
+        return 0;
+    } else {
+        if (list->base->copier == NULL)
+            return CC_ENOTSUP;
+
+        void *duplicate = list->base->copier(item);
+        if (duplicate == NULL && item != NULL)
+            return CC_ENOMEM;
+
+        int err = genericlist_insert_move(list, duplicate, before_index);
+        if (err && list->base->deleter)
+            list->base->deleter(duplicate);
+
+        return err;
+    }
 }
 
 int genericlist_replace_move_at(GenericList list, size_t index, void *item) {
-    if (index >= list->array_size)
-        return CC_EINVAL;
+    if (list->base->size > sizeof(void*)) { /* Large POD type */
+        void **array = (void **) list->array;
 
-    if (list->base->deleter)
-        list->base->deleter(list->array[index]);
+        FREE(array[index]);
 
-    list->array[index] = item;
+        array[index] = item;
+    } else if (list->base->size) { /* Small POD type */
+        const size_t element_size = list->base->size;
+
+        memcpy((char *) list->array + (index * element_size), item, element_size);
+
+        FREE(item);
+    } else { /* Non-POD type */
+        void **array = (void **) list->array;
+
+        if (list->base->deleter)
+            list->base->deleter(array[index]);
+
+        array[index] = item;
+    }
+
     return 0;
 }
 
 int genericlist_replace_at(GenericList list, size_t index, const void *item) {
-    if (list->base->copier == NULL)
-        return CC_ENOTSUP;
+    if (list->base->size > sizeof(void*)) { /* Large POD type */
+        const size_t element_size = list->base->size;
+        void **array = (void **) list->array;
 
-    void *duplicate = list->base->copier(item);
-    if (duplicate == NULL && item != NULL)
-        return CC_ENOMEM;
+        memmove(array[index], item, element_size);
+    } else if (list->base->size) { /* Small POD type */
+        const size_t element_size = list->base->size;
 
-    int err = genericlist_replace_move_at(list, index, duplicate);
-    if (err && list->base->deleter)
-        list->base->deleter(duplicate);
+        memmove((char *) list->array + (index * element_size), item, element_size);
+    } else { /* Non-POD type */
+        if (list->base->copier == NULL)
+            return CC_ENOTSUP;
 
-    return err;
+        void *duplicate = list->base->copier(item);
+        if (duplicate == NULL && item != NULL)
+            return CC_ENOMEM;
+
+        int err = genericlist_replace_move_at(list, index, duplicate);
+        if (err && list->base->deleter)
+            list->base->deleter(duplicate);
+
+        return err;
+    }
+
+    return 0;
 }
 
 size_t genericlist_remove_at(GenericList list, size_t index) {
@@ -480,27 +656,35 @@ size_t genericlist_remove_all(GenericList list, const void *item) {
 }
 
 size_t genericlist_erase(GenericList list, size_t begin_index, size_t end_index) {
-    if (begin_index >= genericlist_size(list))
+    if (begin_index >= MIN(genericlist_size(list), end_index))
         return 0;
 
     if (end_index > genericlist_size(list))
         end_index = genericlist_size(list);
 
+    const size_t element_size = genericlist_stored_element_size(list->base);
+    Deleter deleter = list->base->size? list->base->size <= sizeof(void*)? NULL: FREE: list->base->deleter;
+
     size_t length = end_index - begin_index;
-    if (list->base->deleter) {
+    if (deleter) {
+        void **array = (void **) list->array;
+
         for (size_t i = begin_index; i < end_index; ++i) {
-            list->base->deleter(list->array[i]);
+            deleter(array[i]);
         }
     }
 
-    memmove(list->array + begin_index, list->array + end_index, (genericlist_size(list) - end_index) * sizeof(*list->array));
+    memmove((char *) list->array + (begin_index  * element_size),
+            (char *) list->array + (end_index    * element_size),
+            (genericlist_size(list) - end_index) * element_size);
+
     list->array_size -= length;
-    list->array[list->array_size] = NULL;
+    memset((char *) list->array + (list->array_size * element_size), 0, element_size);
 
     return length;
 }
 
-void **genericlist_array(GenericList list) {
+void *genericlist_data(GenericList list) {
     return list->array;
 }
 
@@ -516,22 +700,49 @@ size_t genericlist_bsearch(GenericList list, const void *item) {
     size_t hi = highest;
     size_t lo = 0;
 
-    while (lo <= hi) {
-        const size_t mid = lo + ((hi - lo) / 2);
-        int cmp = list->base->compare(item, list->array[mid]);
-        if (cmp == 0)
-            return mid;
+    if (list->base->size && list->base->size <= sizeof(void*)) {
+        const size_t element_size = list->base->size;
 
-        if (cmp < 0) { /* Less than the compared element */
-            if (mid == 0)
-                break;
+        while (lo <= hi) {
+            const size_t mid = lo + ((hi - lo) / 2);
 
-            hi = mid-1;
-        } else { /* Greater than the compared element */
-            if (mid == highest)
-                break;
+            int cmp = list->base->compare(item, (char *) list->array + (mid * element_size));
+            if (cmp == 0)
+                return mid;
 
-            lo = mid+1;
+            if (cmp < 0) {
+                if (mid == 0)
+                    break;
+
+                hi = mid-1;
+            } else {
+                if (mid == highest)
+                    break;
+
+                lo = mid+1;
+            }
+        }
+    } else {
+        void **array = (void **) list->array;
+
+        while (lo <= hi) {
+            const size_t mid = lo + ((hi - lo) / 2);
+
+            int cmp = list->base->compare(item, array[mid]);
+            if (cmp == 0)
+                return mid;
+
+            if (cmp < 0) { /* Less than the compared element */
+                if (mid == 0)
+                    break;
+
+                hi = mid-1;
+            } else { /* Greater than the compared element */
+                if (mid == highest)
+                    break;
+
+                lo = mid+1;
+            }
         }
     }
 
@@ -543,7 +754,7 @@ size_t genericlist_find(GenericList list, const void *item, size_t begin_index) 
         return SIZE_MAX;
 
     for (size_t i = begin_index; i < genericlist_size(list); ++i) {
-        if (list->base->compare(item, genericlist_array(list)[i]) == 0)
+        if (list->base->compare(item, genericlist_value_at(list, i)) == 0)
             return i;
     }
 
@@ -558,7 +769,7 @@ size_t genericlist_rfind(GenericList list, const void *item, size_t begin_index)
         begin_index = genericlist_size(list)-1;
 
     for (size_t i = begin_index; i != SIZE_MAX; --i) {
-        if (list->base->compare(item, genericlist_array(list)[i]) == 0)
+        if (list->base->compare(item, genericlist_value_at(list, i)) == 0)
             return i;
     }
 
@@ -574,7 +785,7 @@ int genericlist_compare(GenericList list, GenericList other) {
 
     if (list->base->compare != NULL) {
         for (size_t i = 0; i < max; ++i) {
-            int cmp = list->base->compare(genericlist_array(list)[i], genericlist_array(other)[i]);
+            int cmp = list->base->compare(genericlist_value_at(list, i), genericlist_value_at(other, i));
 
             if (cmp)
                 return cmp;
@@ -590,7 +801,22 @@ int genericlist_compare(GenericList list, GenericList other) {
 }
 
 /* descending must be -1 (descending) or 1 (ascending) */
-static void genericlist_insertion_sort(void **base, size_t num, int descending, Compare compar) {
+static void genericlist_pod_insertion_sort(void *base, size_t num, size_t element_size, int descending, Compare compar) {
+    for (size_t i = 1; i < num; ++i) {
+        for (size_t j = i; j > 0; --j) {
+            char * left = (char *) base + (j  )*element_size;
+            char *right = (char *) base + (j-1)*element_size;
+
+            if (compar(left, right) * descending >= 0)
+                break;
+
+            memswap(left, right, element_size);
+        }
+    }
+}
+
+/* descending must be -1 (descending) or 1 (ascending) */
+static void genericlist_ptr_insertion_sort(void **base, size_t num, int descending, Compare compar) {
     for (size_t i = 1; i < num; ++i) {
         for (size_t j = i; j > 0; --j) {
             if (compar(base[j], base[j-1]) * descending >= 0)
@@ -603,14 +829,91 @@ static void genericlist_insertion_sort(void **base, size_t num, int descending, 
     }
 }
 
-static void **genericlist_heap_parent(void **base, void **start) {
+static void *genericlist_pod_heap_parent(void *base, void *start, size_t element_size) {
+    size_t location = ((char *) start - (char *) base) / element_size;
+    if (start == base)
+        return NULL;
+
+    return (char *) base + ((location - 1) / 2) * element_size;
+}
+
+static void *genericlist_pod_heap_left_child(void *base, void *start, size_t num, size_t element_size) {
+    size_t location = ((char *) start - (char *) base) / element_size;
+    if (location * 2 + 1 >= num)
+        return NULL;
+
+    return (char *) base + (location * 2 + 1) * element_size;
+}
+
+static void *genericlist_pod_heap_right_child(void *base, void *start, size_t num, size_t element_size) {
+    size_t location = ((char *) start - (char *) base) / element_size;
+    if (location * 2 + 2 >= num)
+        return NULL;
+
+    return (char *) base + (location * 2 + 2) * element_size;
+}
+
+static void genericlist_pod_heapify_siftdown(void *base, void *start, size_t num, size_t element_size, int descending, Compare compar) {
+    void *root = start;
+
+    for (void *left = genericlist_pod_heap_left_child(base, root, num, element_size);
+         left;
+         left = genericlist_pod_heap_left_child(base, root, num, element_size)) {
+        void *swap = root;
+        void *right = genericlist_pod_heap_right_child(base, root, num, element_size);
+
+        if (compar(swap, left) * descending < 0)
+            swap = left;
+
+        if (right && compar(swap, right) * descending < 0)
+            swap = right;
+
+        if (swap == root)
+            return;
+
+        memswap(swap, root, element_size);
+
+        root = swap;
+    }
+}
+
+static void genericlist_pod_heapify_helper(void **base, size_t num, size_t element_size, int descending, Compare compar) {
+    if (num <= 1)
+        return;
+
+    void **start = genericlist_pod_heap_parent(base, base + num - 1, element_size);
+
+    while (start) {
+        genericlist_pod_heapify_siftdown(base, start, num, element_size, descending, compar);
+
+        if (start == base)
+            break;
+
+        --start;
+    }
+}
+
+static void genericlist_pod_heap_sort(void *base, size_t num, size_t element_size, int descending, Compare compar) {
+    genericlist_pod_heapify_helper(base, num, element_size, descending, compar);
+
+    size_t end = num - 1;
+    while (end > 0) {
+        memswap((char *) base,
+                (char *) base + end * element_size,
+                element_size);
+
+        genericlist_pod_heapify_siftdown(base, base, --end, element_size, descending, compar);
+    }
+}
+
+static void **genericlist_ptr_heap_parent(void **base, void **start) {
     if (start == base)
         return NULL;
 
     return base + (start - base - 1) / 2;
 }
 
-static void **genericlist_heap_left_child(void **base, void **start, size_t num) {
+static void **genericlist_ptr_heap_left_child(void **base, void **start, size_t num) {
     size_t location = start - base;
     if (location * 2 + 1 >= num)
         return NULL;
@@ -618,7 +921,7 @@ static void **genericlist_heap_left_child(void **base, void **start, size_t num)
     return base + location * 2 + 1;
 }
 
-static void **genericlist_heap_right_child(void **base, void **start, size_t num) {
+static void **genericlist_ptr_heap_right_child(void **base, void **start, size_t num) {
     size_t location = start - base;
     if (location * 2 + 2 >= num)
         return NULL;
@@ -626,12 +929,12 @@ static void **genericlist_heap_right_child(void **base, void **start, size_t num
     return base + location * 2 + 2;
 }
 
-static void genericlist_heapify_siftdown(void **base, void **start, size_t num, int descending, Compare compar) {
+static void genericlist_ptr_heapify_siftdown(void **base, void **start, size_t num, int descending, Compare compar) {
     void **root = start;
 
-    for (void **left = genericlist_heap_left_child(base, root, num); left; left = genericlist_heap_left_child(base, root, num)) {
+    for (void **left = genericlist_ptr_heap_left_child(base, root, num); left; left = genericlist_ptr_heap_left_child(base, root, num)) {
         void **swap = root;
-        void **right = genericlist_heap_right_child(base, root, num);
+        void **right = genericlist_ptr_heap_right_child(base, root, num);
 
         if (compar(*swap, *left) * descending < 0)
             swap = left;
@@ -650,14 +953,14 @@ static void genericlist_heapify_siftdown(void **base, void **start, size_t num, 
     }
 }
 
-static void genericlist_heapify_helper(void **base, size_t num, int descending, Compare compar) {
+static void genericlist_ptr_heapify_helper(void **base, size_t num, int descending, Compare compar) {
     if (num <= 1)
         return;
 
-    void **start = genericlist_heap_parent(base, base + num - 1);
+    void **start = genericlist_ptr_heap_parent(base, base + num - 1);
 
-    while (1) {
-        genericlist_heapify_siftdown(base, start, num, descending, compar);
+    while (start) {
+        genericlist_ptr_heapify_siftdown(base, start, num, descending, compar);
 
         if (start == base)
             break;
@@ -666,8 +969,8 @@ static void genericlist_heapify_helper(void **base, size_t num, int descending, 
     }
 }
 
-static void genericlist_heap_sort_helper(void **base, size_t num, int descending, Compare compar) {
-    genericlist_heapify_helper(base, num, descending, compar);
+static void genericlist_ptr_heap_sort(void **base, size_t num, int descending, Compare compar) {
+    genericlist_ptr_heapify_helper(base, num, descending, compar);
 
     size_t end = num - 1;
     while (end > 0) {
@@ -675,12 +978,43 @@ static void genericlist_heap_sort_helper(void **base, size_t num, int descending
         base[end] = base[0];
         base[0] = temp;
 
-        genericlist_heapify_siftdown(base, base, --end, descending, compar);
+        genericlist_ptr_heapify_siftdown(base, base, --end, descending, compar);
     }
 }
 
 /* descending must be -1 (descending) or 1 (ascending) */
-static void genericlist_merge_helper(void **result, void **base, size_t begin, size_t pivot, size_t end, int descending, Compare compar) {
+static void genericlist_pod_merge_helper(void *result, void *base, size_t begin, size_t pivot, size_t end, size_t element_size, int descending, Compare compar) {
+    size_t left = begin, right = pivot;
+
+    for (size_t i = begin; i < end; ++i) {
+        char * left_element = (char *) base +  left * element_size;
+        char *right_element = (char *) base + right * element_size;
+
+        if (left < pivot && (right >= end || compar(left_element, right_element) * descending <= 0)) {
+            memcpy((char *) result + i * element_size, left_element, element_size);
+            ++left;
+        } else {
+            memcpy((char *) result + i * element_size, right_element, element_size);
+            ++right;
+        }
+    }
+}
+
+static void genericlist_pod_merge_sort(void *result, void *base, size_t begin, size_t end, size_t element_size, int descending, Compare compar) {
+    if (end - begin <= MERGE_SORT_INSERTION_SORT_CUTOFF) {
+        genericlist_pod_insertion_sort((char *) base + (begin * element_size), end - begin, element_size, descending, compar);
+        return;
+    }
+
+    const size_t pivot = begin + (end - begin) / 2;
+
+    genericlist_pod_merge_sort(base, result, begin, pivot, element_size, descending, compar);
+    genericlist_pod_merge_sort(base, result, pivot, end, element_size, descending, compar);
+    genericlist_pod_merge_helper(base, result, begin, pivot, end, element_size, descending, compar);
+}
+
+/* descending must be -1 (descending) or 1 (ascending) */
+static void genericlist_ptr_merge_helper(void **result, void **base, size_t begin, size_t pivot, size_t end, int descending, Compare compar) {
     size_t left = begin, right = pivot;
 
     for (size_t i = begin; i < end; ++i) {
@@ -691,17 +1025,17 @@ static void genericlist_merge_helper(void **result, void **base, size_t begin, s
     }
 }
 
-static void genericlist_merge_sort_helper(void **result, void **base, size_t begin, size_t end, int descending, Compare compar) {
-    if (end - begin <= 8) {
-        genericlist_insertion_sort(base + begin, end - begin, descending, compar);
+static void genericlist_ptr_merge_sort(void **result, void **base, size_t begin, size_t end, int descending, Compare compar) {
+    if (end - begin <= MERGE_SORT_INSERTION_SORT_CUTOFF) {
+        genericlist_ptr_insertion_sort(base + begin, end - begin, descending, compar);
         return;
     }
 
     const size_t pivot = begin + (end - begin) / 2;
 
-    genericlist_merge_sort_helper(base, result, begin, pivot, descending, compar);
-    genericlist_merge_sort_helper(base, result, pivot, end, descending, compar);
-    genericlist_merge_helper(base, result, begin, pivot, end, descending, compar);
+    genericlist_ptr_merge_sort(base, result, begin, pivot, descending, compar);
+    genericlist_ptr_merge_sort(base, result, pivot, end, descending, compar);
+    genericlist_ptr_merge_helper(base, result, begin, pivot, end, descending, compar);
 }
 
 GenericList genericlist_sorted(GenericList list, int descending) {
@@ -728,7 +1062,12 @@ int genericlist_sort(GenericList list, int descending) {
     if (list->base->compare == NULL)
         return CC_ENOTSUP;
 
-    genericlist_heap_sort_helper(list->array, genericlist_size(list), descending? -1: 1, list->base->compare);
+    if (list->base->size && list->base->size <= sizeof(void*))
+        /* Could (technically) also use builtin qsort here, but it would require possibly worse than O(n log n) complexity and wouldn't allow compare reversal */
+        genericlist_pod_heap_sort(list->array, genericlist_size(list), list->base->size, descending? -1: 1, list->base->compare);
+    else
+        genericlist_ptr_heap_sort(list->array, genericlist_size(list), descending? -1: 1, list->base->compare);
+
     return 0;
 }
 
@@ -736,12 +1075,16 @@ int genericlist_stable_sort(GenericList list, int descending) {
     if (list->base->compare == NULL)
         return CC_ENOTSUP;
 
-    void **temp = MALLOC(genericlist_size(list) * sizeof(*temp));
+    const size_t element_size = genericlist_stored_element_size(list->base);
+    void **temp = genericlist_size(list)? MALLOC(genericlist_size(list) * element_size): NULL;
     if (temp == NULL)
         return CC_ENOMEM;
 
-    memcpy(temp, list->array, genericlist_size(list) * sizeof(*temp));
-    genericlist_merge_sort_helper(temp, list->array, 0, genericlist_size(list), descending? -1: 1, list->base->compare);
+    memcpy(temp, list->array, genericlist_size(list) * element_size);
+    if (list->base->size && list->base->size <= sizeof(void*))
+        genericlist_pod_merge_sort(temp, list->array, 0, genericlist_size(list), element_size, descending? -1: 1, list->base->compare);
+    else
+        genericlist_ptr_merge_sort(temp, list->array, 0, genericlist_size(list), descending? -1: 1, list->base->compare);
 
     FREE(temp);
 
@@ -760,16 +1103,45 @@ Iterator genericlist_begin(GenericList list) {
 }
 
 Iterator genericlist_next(GenericList list, Iterator it) {
-    if (it == NULL || genericlist_size(list) == 0 || it == list->array + genericlist_size(list) - 1)
+    if (it == NULL || genericlist_size(list) == 0)
         return NULL;
 
-    return ((void **) it) + 1;
+    if (list->base->size && list->base->size <= sizeof(void*)) {
+        const size_t element_size = list->base->size;
+
+        if ((char *) it == (char *) list->array + ((list->array_size-1) * element_size))
+            return NULL;
+
+        return (char *) it + element_size;
+    } else {
+        void **array = list->array;
+
+        if (it == array[list->array_size-1])
+            return NULL;
+
+        return (void **) it + 1;
+    }
 }
 
 void *genericlist_value_of(GenericList list, Iterator it) {
     UNUSED(list)
 
-    return *((void **) it);
+    if (list->base->size && list->base->size <= sizeof(void*))
+        return it;
+    else
+        return *((void **) it);
+}
+
+void *genericlist_value_at(GenericList list, size_t index) {
+    if (list->base->size && list->base->size <= sizeof(void*)) {
+        const size_t element_size = list->base->size;
+
+        return (char *) list->array + (index * element_size);
+    } else {
+        void **array = (void **) list->array;
+
+        return array[index];
+    }
 }
 
 size_t genericlist_size(GenericList list) {
@@ -852,20 +1224,18 @@ int genericlist_set_serializer_fn(GenericList list, Serializer serializer) {
 }
 
 void genericlist_clear(GenericList list) {
-    if (list->base->deleter) {
-        for (size_t i = 0; i < genericlist_size(list); ++i)
-            list->base->deleter(list->array[i]);
-    }
-
-    list->array_size = 0;
-    list->array[0] = NULL;
+    genericlist_erase(list, 0, list->array_size);
 }
 
 void genericlist_destroy(GenericList list) {
     if (list) {
-        if (list->base->deleter) {
+        Deleter deleter = list->base->size? list->base->size <= sizeof(void*)? NULL: FREE: list->base->deleter;
+
+        if (deleter) {
+            void **array = (void **) list->array;
+
             for (size_t i = 0; i < genericlist_size(list); ++i)
-                list->base->deleter(list->array[i]);
+                deleter(array[i]);
         }
 
         container_base_destroy_if_dynamic(list->base);

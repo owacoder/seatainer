@@ -122,7 +122,7 @@ Variant variant_create_string_move(char *value) {
 }
 
 Variant variant_create_string(const char *value) {
-    char *duplicate = strdup(value);
+    char *duplicate = strdup_alloc(value);
     if (duplicate == NULL)
         return NULL;
 
@@ -411,7 +411,7 @@ int variant_set_string_move(Variant var, char *value) {
 }
 
 int variant_set_string(Variant var, const char *value) {
-    char *duplicate = strdup(value);
+    char *duplicate = strdup_alloc(value);
     if (duplicate == NULL)
         return CC_ENOMEM;
 
@@ -844,8 +844,8 @@ const char *variant_to_string(Variant var, int *error) {
     char *string = NULL;
     switch (variant_get_type(var)) {
         default:
-        case VariantNull: string = strdup(""); break;
-        case VariantBoolean: string = strdup(var->d.atom.d.boolean? "true": "false"); break;
+        case VariantNull: string = strdup_alloc(""); break;
+        case VariantBoolean: string = strdup_alloc(var->d.atom.d.boolean? "true": "false"); break;
         case VariantInteger: {
             /* Silence some warnings with using the wrong (standard!) format */
 #if WINDOWS_OS && (MSVC_COMPILER | CLANG_COMPILER | GCC_COMPILER)
