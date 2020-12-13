@@ -276,8 +276,10 @@ int main(int argc, char **argv, const char **envp)
     GenericList gl = genericlist_create(container_base_int_recipe());
     io_register_type("intlist", genericlist_build_recipe(gl));
 
-    for (int i = 0; i < 400; ++i)
+    for (int i = 0; i < 40; ++i)
         genericlist_append(gl, REFERENCE(int, rand()));
+
+    genericlist_insert_list(gl, gl, 0);
 
     genericlist_sort(gl, 1);
 

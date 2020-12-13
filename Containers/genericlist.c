@@ -881,7 +881,7 @@ static void genericlist_pod_heapify_helper(void **base, size_t num, size_t eleme
     if (num <= 1)
         return;
 
-    void **start = genericlist_pod_heap_parent(base, base + num - 1, element_size);
+    void *start = genericlist_pod_heap_parent(base, base + num - 1, element_size);
 
     while (start) {
         genericlist_pod_heapify_siftdown(base, start, num, element_size, descending, compar);
@@ -889,7 +889,7 @@ static void genericlist_pod_heapify_helper(void **base, size_t num, size_t eleme
         if (start == base)
             break;
 
-        --start;
+        start = (char *) start - element_size;
     }
 }
 
