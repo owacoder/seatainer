@@ -707,7 +707,9 @@ size_t genericlist_bsearch(GenericList list, const void *item) {
             const size_t mid = lo + ((hi - lo) / 2);
 
             int cmp = list->base->compare(item, (char *) list->array + (mid * element_size));
-            if (cmp == 0)
+            if (cmp == CompareUnordered)
+                return SIZE_MAX;
+            else if (cmp == 0)
                 return mid;
 
             if (cmp < 0) {
@@ -729,7 +731,9 @@ size_t genericlist_bsearch(GenericList list, const void *item) {
             const size_t mid = lo + ((hi - lo) / 2);
 
             int cmp = list->base->compare(item, array[mid]);
-            if (cmp == 0)
+            if (cmp == CompareUnordered)
+                return SIZE_MAX;
+            else if (cmp == 0)
                 return mid;
 
             if (cmp < 0) { /* Less than the compared element */

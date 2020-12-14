@@ -113,11 +113,10 @@ struct SerializerIdentity {
 typedef int (*Serializer)(void *output, const void *data, const struct CommonContainerBaseStruct *base, struct SerializerIdentity *type);
 
 typedef enum {
-    CompareError = -2,
     CompareLess = -1,
     CompareEqual = 0,
     CompareGreater = 1,
-    CompareUnordered = 2
+    CompareUnordered = INT_MAX
 } CompareResult;
 
 /** Compares two items

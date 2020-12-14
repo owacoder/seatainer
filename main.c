@@ -273,20 +273,15 @@ int main(int argc, char **argv, const char **envp)
 {
     srand(time(NULL));
 
-    GenericList gl = genericlist_create(container_base_int_recipe());
-    io_register_type("intlist", genericlist_build_recipe(gl));
+    GenericLinkedList gl = genericlinkedlist_create(container_base_int_recipe());
+    io_register_type("intlist", genericlinkedlist_build_recipe(gl));
 
     for (int i = 0; i < 40; ++i)
-        genericlist_append(gl, REFERENCE(int, rand()));
+        genericlinkedlist_append(gl, REFERENCE(int, rand()));
 
-    genericlist_insert_list(gl, gl, 0);
+    // genericlinkedlist_insert_list(gl, gl, 0);
 
-    genericlist_sort(gl, 1);
-
-    int *gl_data = genericlist_data(gl);
-    for (size_t i = 0; i < genericlist_size(gl); ++i)
-        printf("%i,", gl_data[i]);
-    puts("");
+    genericlinkedlist_stable_sort(gl, 1);
 
     io_printf(io_stdout, "%{intlist}\n", gl);
 

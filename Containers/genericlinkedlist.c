@@ -7,8 +7,8 @@
 #include "genericmap.h"
 
 struct GenericLinkedListNode {
-    void *data;
     struct GenericLinkedListNode *next;
+    unsigned char data[];
 };
 
 struct GenericLinkedListStruct {
@@ -138,18 +138,7 @@ int genericlinkedlist_append_list(GenericLinkedList list, GenericLinkedList othe
 }
 
 int genericlinkedlist_append(GenericLinkedList list, const void *item) {
-    if (list->base->copier == NULL)
-        return CC_ENOTSUP;
-
-    void *duplicate = list->base->copier(item);
-    if (duplicate == NULL && item != NULL)
-        return CC_ENOMEM;
-
-    int err = genericlinkedlist_append_move(list, duplicate);
-    if (err && list->base->deleter)
-        list->base->deleter(duplicate);
-
-    return 0;
+    return genericlinkedlist_insert(list, item, list->tail);
 }
 
 int genericlinkedlist_append_move(GenericLinkedList list, void *item) {
@@ -161,18 +150,7 @@ int genericlinkedlist_prepend_list(GenericLinkedList list, GenericLinkedList oth
 }
 
 int genericlinkedlist_prepend(GenericLinkedList list, const void *item) {
-    if (list->base->copier == NULL)
-        return CC_ENOTSUP;
-
-    void *duplicate = list->base->copier(item);
-    if (duplicate == NULL && item != NULL)
-        return CC_ENOMEM;
-
-    int err = genericlinkedlist_prepend_move(list, duplicate);
-    if (err && list->base->deleter)
-        list->base->deleter(duplicate);
-
-    return 0;
+    return genericlinkedlist_insert(list, item, NULL);
 }
 
 int genericlinkedlist_prepend_move(GenericLinkedList list, void *item) {
@@ -184,70 +162,116 @@ int genericlinkedlist_insert_list(GenericLinkedList list, GenericLinkedList othe
 }
 
 int genericlinkedlist_insert(GenericLinkedList list, const void *item, Iterator after_it) {
-    if (list->base->copier == NULL)
-        return CC_ENOTSUP;
+    if (list->base->size) { /* POD type */
+        struct GenericLinkedListNode *new_node = MALLOC(sizeof(*new_node) + list->base->size), *prev_node = after_it;
+        if (new_node == NULL)
+            return CC_ENOMEM;
 
-    void *duplicate = list->base->copier(item);
-    if (duplicate == NULL && item != NULL)
-        return CC_ENOMEM;
+        memcpy(new_node->data, item, list->base->size);
 
-    int err = genericlinkedlist_insert_move(list, duplicate, after_it);
-    if (err && list->base->deleter)
-        list->base->deleter(duplicate);
+        if (prev_node) { /* Inserting after a node */
+            new_node->next = prev_node->next;
+            prev_node->next = new_node;
+
+            if (prev_node == list->tail) /* May have to update the tail if inserting after it */
+                list->tail = new_node;
+        } else { /* Insert at start of list */
+            if (list->head) /* If there is an element, link to it */
+                new_node->next = list->head->next;
+            else /* If list is empty, tail should be set too */
+                list->tail = new_node;
+
+            list->head = new_node;
+        }
+
+        ++list->size;
+    } else { /* Non-POD type */
+        if (list->base->copier == NULL)
+            return CC_ENOTSUP;
+
+        void *duplicate = list->base->copier(item);
+        if (duplicate == NULL && item != NULL)
+            return CC_ENOMEM;
+
+        int err = genericlinkedlist_insert_move(list, duplicate, after_it);
+        if (err && list->base->deleter)
+            list->base->deleter(duplicate);
+    }
 
     return 0;
 }
 
 int genericlinkedlist_insert_move(GenericLinkedList list, void *item, Iterator after_it) {
-    struct GenericLinkedListNode *new_node = CALLOC(1, sizeof(*new_node)), *prev_node = after_it;
-    if (new_node == NULL)
-        return CC_ENOMEM;
+    if (list->base->size) { /* POD type */
+        int err = genericlinkedlist_insert(list, item, after_it);
+        if (err)
+            return err;
 
-    new_node->data = item;
+        FREE(item);
+    } else { /* Non-POD type */
+        struct GenericLinkedListNode *new_node = MALLOC(sizeof(*new_node)), *prev_node = after_it;
+        if (new_node == NULL)
+            return CC_ENOMEM;
 
-    if (prev_node) { /* Inserting after a node */
-        new_node->next = prev_node->next;
-        prev_node->next = new_node;
+        *((void **) new_node->data) = item;
 
-        if (prev_node == list->tail) /* May have to update the tail if inserting after it */
-            list->tail = new_node;
-    } else { /* Insert at start of list */
-        if (list->head) /* If there is an element, link to it */
-            new_node->next = list->head->next;
-        else /* If list is empty, tail should be set too */
-            list->tail = new_node;
+        if (prev_node) { /* Inserting after a node */
+            new_node->next = prev_node->next;
+            prev_node->next = new_node;
 
-        list->head = new_node;
+            if (prev_node == list->tail) /* May have to update the tail if inserting after it */
+                list->tail = new_node;
+        } else { /* Insert at start of list */
+            if (list->head) /* If there is an element, link to it */
+                new_node->next = list->head->next;
+            else /* If list is empty, tail should be set too */
+                list->tail = new_node;
+
+            list->head = new_node;
+        }
+
+        ++list->size;
     }
-
-    ++list->size;
 
     return 0;
 }
 
 int genericlinkedlist_replace_at(GenericLinkedList list, Iterator it, const void *item) {
-    if (list->base->copier == NULL)
-        return CC_ENOTSUP;
+    if (list->base->size) { /* POD type */
+        struct GenericLinkedListNode *node = it;
 
-    void *duplicate = list->base->copier(item);
-    if (duplicate == NULL && item != NULL)
-        return CC_ENOMEM;
+        memmove(node->data, item, list->base->size);
+    } else { /* Non-POD type */
+        if (list->base->copier == NULL)
+            return CC_ENOTSUP;
 
-    int err = genericlinkedlist_replace_move_at(list, it, duplicate);
-    if (err && list->base->deleter)
-        list->base->deleter(duplicate);
+        void *duplicate = list->base->copier(item);
+        if (duplicate == NULL && item != NULL)
+            return CC_ENOMEM;
+
+        int err = genericlinkedlist_replace_move_at(list, it, duplicate);
+        if (err && list->base->deleter)
+            list->base->deleter(duplicate);
+    }
 
     return 0;
 }
 
 int genericlinkedlist_replace_move_at(GenericLinkedList list, Iterator it, void *item) {
-    UNUSED(list);
+    if (list->base->size) { /* POD type */
+        int err = genericlinkedlist_replace_at(list, it, item);
+        if (err)
+            return err;
 
-    struct GenericLinkedListNode *node = it;
+        FREE(item);
+    } else { /* Non-POD type */
+        struct GenericLinkedListNode *node = it;
 
-    if (list->base->deleter)
-        list->base->deleter(node->data);
-    node->data = item;
+        if (list->base->deleter)
+            list->base->deleter(node->data);
+
+        *((void **) node->data) = item;
+    }
 
     return 0;
 }
@@ -278,7 +302,7 @@ size_t genericlinkedlist_remove_after(GenericLinkedList list, Iterator it) {
         prev->next = node->next;
     }
 
-    if (list->base->deleter)
+    if (!list->base->size && list->base->deleter)
         list->base->deleter(node->data);
 
     FREE(node);
@@ -343,10 +367,11 @@ int genericlinkedlist_compare(GenericLinkedList list, GenericLinkedList other) {
     const size_t max = MIN(genericlinkedlist_size(list), genericlinkedlist_size(other));
 
     if (list->base->compare != NULL) {
-        struct GenericLinkedListNode *left = list->head, *right = other->head;
+        Iterator  left = genericlinkedlist_begin(list);
+        Iterator right = genericlinkedlist_begin(other);
 
-        for (; left && right; left = left->next, right = right->next) {
-            int cmp = list->base->compare(left->data, right->data);
+        for (; left && right; left = genericlinkedlist_next(list, left), right = genericlinkedlist_next(other, right)) {
+            int cmp = list->base->compare(genericlinkedlist_value_of(list, left), genericlinkedlist_value_of(other, right));
 
             if (cmp)
                 return cmp;
@@ -380,15 +405,22 @@ int genericlinkedlist_sort(GenericLinkedList list, int descending) {
 }
 
 /* Both left and right lists are guaranteed to have at least one element */
-static struct GenericLinkedListNode *genericlinkedlist_merge_sort_helper(struct GenericLinkedListNode *left,
+static struct GenericLinkedListNode *genericlinkedlist_merge_sort_helper(GenericLinkedList list,
+                                                                         struct GenericLinkedListNode *left,
                                                                          struct GenericLinkedListNode *right,
                                                                          Compare compare, int descending,
-                                                                         struct GenericLinkedListNode **tailptr) {
+                                                                         struct GenericLinkedListNode **tailptr,
+                                                                         int *err) {
     struct GenericLinkedListNode *head = NULL, *tail = NULL;
 
     while (left && right) {
         struct GenericLinkedListNode *temp = NULL;
-        int cmp = compare(left->data, right->data) * descending;
+        int cmp = compare(genericlinkedlist_value_of(list, left),
+                          genericlinkedlist_value_of(list, right));
+        if (cmp == CompareUnordered && err)
+            *err = CC_ENOTSUP;
+
+        cmp *= descending;
 
         if (cmp <= 0) {
             temp = left;
@@ -423,14 +455,22 @@ static struct GenericLinkedListNode *genericlinkedlist_merge_sort_helper(struct 
     return head;
 }
 
-static struct GenericLinkedListNode *genericlinkedlist_merge_sort(struct GenericLinkedListNode *list, size_t length, Compare compare, int descending, struct GenericLinkedListNode **tailptr) {
-    struct GenericLinkedListNode *right = list, *last = list;
+static struct GenericLinkedListNode *genericlinkedlist_merge_sort(GenericLinkedList list,
+                                                                  struct GenericLinkedListNode *left,
+                                                                  size_t length,
+                                                                  Compare compare,
+                                                                  int descending,
+                                                                  struct GenericLinkedListNode **tailptr, int *err) {
+    struct GenericLinkedListNode *right = left, *last = left;
 
     if (length <= 1) {
         if (tailptr)
-            *tailptr = list;
+            *tailptr = left;
 
-        return list;
+        if (left)
+            left->next = NULL;
+
+        return left;
     }
 
     size_t half = length / 2;
@@ -440,19 +480,20 @@ static struct GenericLinkedListNode *genericlinkedlist_merge_sort(struct Generic
     }
 
     last->next = NULL; /* Split left list off right list for merge function */
-    list = genericlinkedlist_merge_sort(list, half, compare, descending, NULL);
-    right = genericlinkedlist_merge_sort(right, length - half, compare, descending, NULL);
+    left = genericlinkedlist_merge_sort(list, left, half, compare, descending, NULL, err);
+    right = genericlinkedlist_merge_sort(list, right, length - half, compare, descending, NULL, err);
 
-    return genericlinkedlist_merge_sort_helper(list, right, compare, descending, tailptr);
+    return genericlinkedlist_merge_sort_helper(list, left, right, compare, descending, tailptr, err);
 }
 
 int genericlinkedlist_stable_sort(GenericLinkedList list, int descending) {
     if (list->base->compare == NULL)
         return CC_ENOTSUP;
 
-    list->head = genericlinkedlist_merge_sort(list->head, list->size, list->base->compare, descending? -1: 1, &list->tail);
+    int result = 0;
+    list->head = genericlinkedlist_merge_sort(list, list->head, list->size, list->base->compare, descending? -1: 1, &list->tail, &result);
 
-    return 0;
+    return result;
 }
 
 Iterator genericlinkedlist_begin(GenericLinkedList list) {
@@ -466,9 +507,12 @@ Iterator genericlinkedlist_next(GenericLinkedList list, Iterator it) {
 }
 
 void *genericlinkedlist_value_of(GenericLinkedList list, Iterator it) {
-    UNUSED(list)
+    struct GenericLinkedListNode *node = it;
 
-    return ((struct GenericLinkedListNode *) it)->data;
+    if (list->base->size)
+        return node->data;
+    else
+        return *((void **) node->data);
 }
 
 size_t genericlinkedlist_size(GenericLinkedList list) {
@@ -481,7 +525,7 @@ void genericlinkedlist_clear(GenericLinkedList list) {
         temp = node;
         node = node->next;
 
-        if (list->base->deleter)
+        if (!list->base->size && list->base->deleter)
             list->base->deleter(temp->data);
 
         FREE(temp);
@@ -498,7 +542,7 @@ void genericlinkedlist_destroy(GenericLinkedList list) {
             temp = node;
             node = node->next;
 
-            if (list->base->deleter)
+            if (!list->base->size && list->base->deleter)
                 list->base->deleter(temp->data);
 
             FREE(temp);

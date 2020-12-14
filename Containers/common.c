@@ -178,10 +178,8 @@ void container_base_destroy_if_dynamic(CommonContainerBase *base) {
 int generic_types_compatible_compare(const CommonContainerBase *lhs, const CommonContainerBase *rhs) {
     if (lhs == NULL && rhs == NULL)
         return 0;
-    else if (lhs == NULL)
-        return -1;
-    else if (rhs == NULL)
-        return 1;
+    else if (lhs == NULL || rhs == NULL)
+        return CompareUnordered;
 
     /* If copiers and deleters are the same, it's the same type */
     if (lhs->copier == rhs->copier && lhs->deleter == rhs->deleter)
@@ -189,26 +187,9 @@ int generic_types_compatible_compare(const CommonContainerBase *lhs, const Commo
     /* If no copier, but compare and deleters are the same, it's the same type */
     else if (lhs->copier == NULL && rhs->copier == NULL && lhs->compare == rhs->compare && lhs->deleter == rhs->deleter)
         ;
-    /* Otherwise, the types are different */
-    else if (lhs->copier || rhs->copier) {
-        /* NOTE: this only works on platforms where it's safe to cast function pointers to uintptr_t (which is just about any modern system), but it may fail for other systems */
-        uintptr_t ilhs = (uintptr_t) lhs->copier;
-        uintptr_t irhs = (uintptr_t) rhs->copier;
-
-        return (ilhs > irhs) - (ilhs < irhs);
-    } else if (lhs->compare || rhs->compare) {
-        /* NOTE: this only works on platforms where it's safe to cast function pointers to uintptr_t (which is just about any modern system), but it may fail for other systems */
-        uintptr_t ilhs = (uintptr_t) lhs;
-        uintptr_t irhs = (uintptr_t) rhs;
-
-        return (ilhs > irhs) - (ilhs < irhs);
-    } else {
-        /* NOTE: this only works on platforms where it's safe to cast function pointers to uintptr_t (which is just about any modern system), but it may fail for other systems */
-        uintptr_t ilhs = (uintptr_t) lhs->deleter;
-        uintptr_t irhs = (uintptr_t) rhs->deleter;
-
-        return (ilhs > irhs) - (ilhs < irhs);
-    }
+    /* Otherwise, the types are different, and unordered */
+    else
+        return CompareUnordered;
 
     int cmp = generic_types_compatible_compare(lhs->key_child, rhs->key_child);
     if (cmp)
