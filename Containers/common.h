@@ -63,8 +63,12 @@ typedef void *(*Parser)(void *io);
 
 /** @brief Structure containing the identity of a Serializer function. See `Serializer` for details. */
 struct SerializerIdentity {
-    const char *type;
-    int is_utf8;
+    const char *fmt; /* IN, specifies extra user data containing serializer-specific formatting information. */
+    size_t fmt_length; /* IN, specifies length of extra data containing serializer-specific formatting information. */
+
+    const char *type; /* OUT, specifies type of serializer if called with no output */
+    int is_utf8; /* OUT, specifies whether type is UTF-8 or not */
+    size_t written; /* OUT, specifies how many characters were written with the current input */
 };
 
 /** @brief Declares serializer inside of a serializer function.
@@ -82,32 +86,43 @@ struct SerializerIdentity {
  * @param serializer_is_utf8 Whether the serializer is UTF-8 output (1) or not (0).
  */
 #define SERIALIZER_DECLARE(serializer_type, fname, serializer_is_utf8) \
-    if (output == NULL) { /* Just looking for the serializer type? */ \
+    if (type == NULL) { /* Not passing a SerializerIdentity struct is an error */ \
+        return CC_EINVAL; \
+    } else if (output == NULL) { /* Just looking for the serializer type? */ \
         if (type) { \
             type->type = (serializer_type); \
             type->is_utf8 = (serializer_is_utf8); \
         } \
         return 0; \
-    } else if (!base) \
+    } else if (!base) { \
         return CC_EINVAL; \
-    else if (base->serialize && base->serialize != (Serializer) fname) { /* Serialize using value serializer if same format */ \
+    } else if (base->serialize && base->serialize != (Serializer) fname) { /* Serialize using value serializer if same format */ \
         int err = 0; \
-        struct SerializerIdentity identity; \
-        if ((err = base->serialize(NULL, NULL, NULL, &identity)) != 0) \
+        struct SerializerIdentity identity_ = *type; \
+        if ((err = base->serialize(NULL, NULL, NULL, &identity_)) != 0) \
             return err; \
-        if (!strcmp((serializer_type), identity.type)) \
-            return base->serialize(output, data, base, NULL); \
-    }
+        if (!strcmp((serializer_type), identity_.type)) \
+            return base->serialize(output, data, base, type); \
+    } \
+    type->written = 0;
 
 
 /** Serializes a container or datatype to an IO device
  *
- * The special case with @p output == NULL passed to this function is treated as a request for the serializing function to identify itself.
+ * WARNING: The special case with @p output == NULL passed to this function is treated as a request for the serializing function to identify itself.
+ * The serializer function must identify itself with the `type` and `is_utf8` fields of @p type if @p output == NULL. These fields do not need to be set if @p output != NULL.
+ * Any implementations of this function *MUST* comply with this convention, and using the `SERIALIZER_DECLARE` macro will do this automatically.
+ *
+ * WARNING: In *ALL* cases, if the function returns 0, `type->written` *MUST* be set properly with the number of bytes this function wrote to the serializer.
  * Any implementations of this function *MUST* comply with this convention.
  *
- * @param output The IO device to read from and set errors to. If this parameter is NULL, it is treated as a request for the serializing function to identify itself.
- * @param data The custom container or datatype to serialize
- * @param type A pointer to a `struct SerializerIdentity` that receives the type of this serializer (e.g. {type: 'JSON', is_utf8: 1}) if @p type is not NULL. If an error occurs, the value placed in @p type is undefined.
+ * Extra parameters to the serializer function can be passed in as a string with the `fmt` and `fmt_len` fields of the `type` parameter.
+ * String passed as an argument in this manner should not be assumed to be NUL-terminated.
+ *
+ * @param output The IO device to read from and set errors to. If this parameter is NULL, it is treated as a request for the serializing function to identify itself, and all other parameters except for @p type can be NULL.
+ * @param data The custom container or datatype to serialize.
+ * @param base The type of the custom container or datatype to serialize.
+ * @param type A pointer to a `struct SerializerIdentity` that contains extra information regarding the input and output of the serializer. Required to always be non-NULL. If an error occurs, the output values placed in @p type are undefined.
  * @return An error that occurred while serializing or identifying the serializer, or 0 on success.
  */
 typedef int (*Serializer)(void *output, const void *data, const struct CommonContainerBaseStruct *base, struct SerializerIdentity *type);

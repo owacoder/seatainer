@@ -11,6 +11,8 @@
 #include "../containers.h"
 #include "../container_io.h"
 
+#include <time.h>
+
 static const CommonContainerBase container_base_empty_recipe_ = {
     .copier = NULL,
     .compare = NULL,
@@ -379,6 +381,35 @@ const CommonContainerBase *container_base_ulong_long_recipe(void) {
     return &container_base_ulong_long_recipe_;
 }
 
+size_t *container_base_copy_size_t(const size_t *v) {
+    return generic_pod_copy_alloc(v, sizeof(*v));
+}
+
+int container_base_compare_size_t(const size_t *a, const size_t *b) {
+    return (*a > *b) - (*a < *b);
+}
+
+static const CommonContainerBase container_base_size_t_recipe_ = {
+    .copier = (Copier) container_base_copy_size_t,
+    .compare = (Compare) container_base_compare_size_t,
+    .deleter = (Deleter) FREE,
+    .parse = NULL,
+    .serialize = (Serializer) io_serialize_size_t,
+    .collection_size = NULL,
+    .collection_begin = NULL,
+    .collection_next = NULL,
+    .collection_get_key = NULL,
+    .collection_get_value = NULL,
+    .dynamic = 0,
+    .size = sizeof(size_t),
+    .key_child = NULL,
+    .value_child = NULL
+};
+
+const CommonContainerBase *container_base_size_t_recipe(void) {
+    return &container_base_size_t_recipe_;
+}
+
 float *container_base_copy_float(const float *v) {
     return generic_pod_copy_alloc(v, sizeof(*v));
 }
@@ -464,6 +495,82 @@ static const CommonContainerBase container_base_long_double_recipe_ = {
 
 const CommonContainerBase *container_base_long_double_recipe(void) {
     return &container_base_long_double_recipe_;
+}
+
+clock_t *container_base_copy_clock_t(const clock_t *v) {
+    return generic_pod_copy_alloc(v, sizeof(*v));
+}
+
+int container_base_compare_clock_t(const clock_t *a, const clock_t *b) {
+    return (*a > *b) - (*a < *b);
+}
+
+static const CommonContainerBase container_base_clock_t_recipe_ = {
+    .copier = (Copier) container_base_copy_clock_t,
+    .compare = (Compare) container_base_compare_clock_t,
+    .deleter = (Deleter) FREE,
+    .parse = NULL,
+    .serialize = (Serializer) io_serialize_clock_t,
+    .collection_size = NULL,
+    .collection_begin = NULL,
+    .collection_next = NULL,
+    .collection_get_key = NULL,
+    .collection_get_value = NULL,
+    .dynamic = 0,
+    .size = sizeof(clock_t),
+    .key_child = NULL,
+    .value_child = NULL
+};
+
+const CommonContainerBase *container_base_clock_t_recipe(void) {
+    return &container_base_clock_t_recipe_;
+}
+
+struct tm *container_base_copy_tm(const struct tm *v) {
+    return generic_pod_copy_alloc(v, sizeof(*v));
+}
+
+int container_base_compare_tm(const struct tm *a, const struct tm *b) {
+    if (a->tm_year != b->tm_year)
+        return (a->tm_year > b->tm_year) - (a->tm_year < b->tm_year);
+
+    if (a->tm_mon != b->tm_mon)
+        return (a->tm_mon > b->tm_mon) - (a->tm_mon < b->tm_mon);
+
+    if (a->tm_mday != b->tm_mday)
+        return (a->tm_mday > b->tm_mday) - (a->tm_mday < b->tm_mday);
+
+    if (a->tm_hour != b->tm_hour)
+        return (a->tm_hour > b->tm_hour) - (a->tm_hour < b->tm_hour);
+
+    if (a->tm_min != b->tm_min)
+        return (a->tm_min > b->tm_min) - (a->tm_min < b->tm_min);
+
+    if (a->tm_sec != b->tm_sec)
+        return (a->tm_sec > b->tm_sec) - (a->tm_sec < b->tm_sec);
+
+    return 0;
+}
+
+static const CommonContainerBase container_base_tm_recipe_ = {
+    .copier = (Copier) container_base_copy_tm,
+    .compare = (Compare) container_base_compare_tm,
+    .deleter = (Deleter) FREE,
+    .parse = NULL,
+    .serialize = (Serializer) io_serialize_tm,
+    .collection_size = NULL,
+    .collection_begin = NULL,
+    .collection_next = NULL,
+    .collection_get_key = NULL,
+    .collection_get_value = NULL,
+    .dynamic = 0,
+    .size = sizeof(struct tm),
+    .key_child = NULL,
+    .value_child = NULL
+};
+
+const CommonContainerBase *container_base_tm_recipe(void) {
+    return &container_base_tm_recipe_;
 }
 
 static const CommonContainerBase container_base_cstring_recipe_ = {

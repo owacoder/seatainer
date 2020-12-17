@@ -22,12 +22,16 @@ const CommonContainerBase *container_base_ushort_recipe(void);
 const CommonContainerBase *container_base_uint_recipe(void);
 const CommonContainerBase *container_base_ulong_recipe(void);
 const CommonContainerBase *container_base_ulong_long_recipe(void);
+const CommonContainerBase *container_base_size_t_recipe(void);
 const CommonContainerBase *container_base_float_recipe(void);
 const CommonContainerBase *container_base_double_recipe(void);
 const CommonContainerBase *container_base_long_double_recipe(void);
 const CommonContainerBase *container_base_cstring_recipe(void);
 const CommonContainerBase *container_base_binary_recipe(void);
 const CommonContainerBase *container_base_variant_recipe(void);
+
+const CommonContainerBase *container_base_clock_t_recipe(void);
+const CommonContainerBase *container_base_tm_recipe(void);
 
 const CommonContainerBase *container_base_genericlist_recipe();
 const CommonContainerBase *container_base_genericmap_recipe();

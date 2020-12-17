@@ -58,6 +58,7 @@ int io_serialize_long(IO output, const void *data, const CommonContainerBase *ba
 int io_serialize_ulong(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_long_long(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_ulong_long(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_size_t(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_float(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_double(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_long_double(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
@@ -65,6 +66,9 @@ int io_serialize_cstring(IO output, const void *data, const CommonContainerBase 
 int io_serialize_binary(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_variant(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_container(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+
+int io_serialize_clock_t(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_tm(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 
 /** Get the default "UTF-8" serializer given a type */
 Serializer io_default_serializer_for_type(const CommonContainerBase *base);

@@ -273,17 +273,28 @@ int main(int argc, char **argv, const char **envp)
 {
     srand(time(NULL));
 
-    GenericLinkedList gl = genericlinkedlist_create(container_base_int_recipe());
-    io_register_type("intlist", genericlinkedlist_build_recipe(gl));
+    clock_t clk = clock();
 
-    for (int i = 0; i < 40; ++i)
-        genericlinkedlist_append(gl, REFERENCE(int, rand()));
+    io_register_type("clock", (CommonContainerBase *) container_base_clock_t_recipe());
+    io_register_type("tm", (CommonContainerBase *) container_base_tm_recipe());
 
-    // genericlinkedlist_insert_list(gl, gl, 0);
+    GenericList gl = genericlist_create_reserve(1, container_base_int_recipe());
+    io_register_type("intlist", genericlist_build_recipe(gl));
 
-    genericlinkedlist_stable_sort(gl, 1);
+    for (int i = 0; i < 1000000; ++i)
+        genericlist_append(gl, REFERENCE(int, rand()));
 
-    io_printf(io_stdout, "%{intlist}\n", gl);
+    // genericlist_insert_list(gl, gl, 0);
+
+    //genericlist_stable_sort(gl, 1);
+
+    time_t raw_time = time(NULL);
+    io_setvbuf(io_stdout, NULL, _IOFBF, 0xfffff);
+    //fscanf(stdin, "g");
+    io_printf(io_stdout, "%{intlist}|\nThe print took %{clock} seconds\n%{tm}\n%6s|\n%#I64x\n", gl, &clk, localtime(&raw_time), "abcdefghi", (uint64_t) 0xdeadbeefdeadbeef);
+    io_ftime(io_stdout, "%FT%T%z\n", localtime(&raw_time));
+
+    genericlist_destroy(gl);
 
     return 0;
 
@@ -415,14 +426,14 @@ int main(int argc, char **argv, const char **envp)
         v = -776;
         genericmap_insert(imap, "Key 2", &v);
 
-        printf("\nSerialize error: %s\n", error_description(json_serialize(io_open_file(stdout), imap, genericmap_build_recipe(imap), NULL)));
+        printf("\nSerialize error: %s\n", error_description(io_serialize_json(io_open_file(stdout), imap, genericmap_build_recipe(imap), NULL)));
 
         StringMap map = stringmap_create();
 
         stringmap_insert(map, "Key 1", "\nValue 1 - A test");
         stringmap_insert(map, "Key 2", "Value 2 - Another test");
 
-        printf("\nSerialize error: %s\n", error_description(json_serialize(io_open_file(stdout), map, stringmap_build_recipe(map), NULL)));
+        printf("\nSerialize error: %s\n", error_description(io_serialize_json(io_open_file(stdout), map, stringmap_build_recipe(map), NULL)));
 
         GenericList list = genericlist_create(container_base_cstring_recipe());
 
@@ -435,7 +446,7 @@ int main(int argc, char **argv, const char **envp)
             printf("item: %s\n", ((const char *) genericlist_value_of(list, it)));
         }
 
-        printf("\nSerialize error: %s\n", error_description(json_serialize(io_open_file(stdout), list, genericlist_build_recipe(list), NULL)));
+        printf("\nSerialize error: %s\n", error_description(io_serialize_json(io_open_file(stdout), list, genericlist_build_recipe(list), NULL)));
 
         genericlist_destroy(list);
 

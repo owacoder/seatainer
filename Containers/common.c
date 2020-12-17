@@ -168,8 +168,8 @@ CommonContainerBase *container_base_build_key_value_container(const CommonContai
 
 void container_base_destroy_if_dynamic(CommonContainerBase *base) {
     if (base && base->dynamic) {
-        container_base_destroy_if_dynamic(base->value_child);
         container_base_destroy_if_dynamic(base->key_child);
+        container_base_destroy_if_dynamic(base->value_child);
 
         FREE(base);
     }

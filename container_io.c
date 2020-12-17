@@ -11,6 +11,8 @@
 #include <float.h>
 #include <math.h>
 
+#include <time.h>
+
 /* Serializer basics:
  *
  * Value serializers are used where specified, if they're the same type as the format
@@ -29,7 +31,12 @@ int io_serialize_boolean(IO output, const void *data, const CommonContainerBase 
     if (generic_types_compatible_compare(base, container_base_boolean_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_puts(*((const _Bool *) data)? "true": "false", output)? io_error(output): 0;
+    const char *str = *((const _Bool *) data)? "true": "false";
+    const size_t len = strlen(str);
+
+    type->written = len;
+
+    return io_write(str, 1, len, output) != len? io_error(output): 0;
 }
 
 int io_serialize_char(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -38,7 +45,12 @@ int io_serialize_char(IO output, const void *data, const CommonContainerBase *ba
     if (generic_types_compatible_compare(base, container_base_char_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_printf(output, "'%.1s'", data) < 0? io_error(output): 0;
+    int result = io_printf(output, "'%.1s'", data) < 0;
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
 }
 
 int io_serialize_short(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -47,7 +59,12 @@ int io_serialize_short(IO output, const void *data, const CommonContainerBase *b
     if (generic_types_compatible_compare(base, container_base_short_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_printf(output, "%hd", *((const short *) data)) < 0? io_error(output): 0;
+    int result = io_printf(output, "%hd", *((const short *) data));
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
 }
 
 int io_serialize_ushort(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -56,7 +73,12 @@ int io_serialize_ushort(IO output, const void *data, const CommonContainerBase *
     if (generic_types_compatible_compare(base, container_base_ushort_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_printf(output, "%hu", *((const unsigned short *) data)) < 0? io_error(output): 0;
+    int result = io_printf(output, "%hu", *((const unsigned short *) data));
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
 }
 
 int io_serialize_int(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -65,7 +87,12 @@ int io_serialize_int(IO output, const void *data, const CommonContainerBase *bas
     if (generic_types_compatible_compare(base, container_base_int_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_printf(output, "%d", *((const int *) data)) < 0? io_error(output): 0;
+    int result = io_printf(output, "%d", *((const int *) data));
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
 }
 
 int io_serialize_uint(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -74,7 +101,12 @@ int io_serialize_uint(IO output, const void *data, const CommonContainerBase *ba
     if (generic_types_compatible_compare(base, container_base_uint_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_printf(output, "%u", *((const unsigned int *) data)) < 0? io_error(output): 0;
+    int result = io_printf(output, "%u", *((const unsigned int *) data));
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
 }
 
 int io_serialize_long(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -83,7 +115,12 @@ int io_serialize_long(IO output, const void *data, const CommonContainerBase *ba
     if (generic_types_compatible_compare(base, container_base_long_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_printf(output, "%ld", *((const long *) data)) < 0? io_error(output): 0;
+    int result = io_printf(output, "%ld", *((const long *) data));
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
 }
 
 int io_serialize_ulong(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -92,7 +129,12 @@ int io_serialize_ulong(IO output, const void *data, const CommonContainerBase *b
     if (generic_types_compatible_compare(base, container_base_ulong_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_printf(output, "%lu", *((const unsigned long *) data)) < 0? io_error(output): 0;
+    int result = io_printf(output, "%lu", *((const unsigned long *) data));
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
 }
 
 int io_serialize_long_long(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -101,7 +143,12 @@ int io_serialize_long_long(IO output, const void *data, const CommonContainerBas
     if (generic_types_compatible_compare(base, container_base_long_long_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_printf(output, "%lld", *((const long long *) data)) < 0? io_error(output): 0;
+    int result = io_printf(output, "%lld", *((const long long *) data));
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
 }
 
 int io_serialize_ulong_long(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -110,7 +157,26 @@ int io_serialize_ulong_long(IO output, const void *data, const CommonContainerBa
     if (generic_types_compatible_compare(base, container_base_ulong_long_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_printf(output, "%llu", *((const unsigned long long *) data)) < 0? io_error(output): 0;
+    int result = io_printf(output, "%llu", *((const unsigned long long *) data));
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
+}
+
+int io_serialize_size_t(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_size_t, 1);
+
+    if (generic_types_compatible_compare(base, container_base_size_t_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    int result = io_printf(output, "%zu", *((const size_t *) data));
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
 }
 
 int io_serialize_float(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -119,7 +185,12 @@ int io_serialize_float(IO output, const void *data, const CommonContainerBase *b
     if (generic_types_compatible_compare(base, container_base_float_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_printf(output, "%.*g", FLT_DIG-1, *((const float *) data)) < 0? io_error(output): 0;
+    int result = io_printf(output, "%.*g", FLT_DIG-1, *((const float *) data));
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
 }
 
 int io_serialize_double(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -128,7 +199,12 @@ int io_serialize_double(IO output, const void *data, const CommonContainerBase *
     if (generic_types_compatible_compare(base, container_base_double_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_printf(output, "%.*g", DBL_DIG-1, *((const double *) data)) < 0? io_error(output): 0;
+    int result = io_printf(output, "%.*g", DBL_DIG-1, *((const double *) data));
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
 }
 
 int io_serialize_long_double(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -137,7 +213,52 @@ int io_serialize_long_double(IO output, const void *data, const CommonContainerB
     if (generic_types_compatible_compare(base, container_base_long_double_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_printf(output, "%.*Lg", LDBL_DIG-1, *((const long double *) data)) < 0? io_error(output): 0;
+    int result = io_printf(output, "%.*Lg", LDBL_DIG-1, *((const long double *) data));
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
+}
+
+int io_serialize_clock_t(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_clock_t, 1);
+
+    if (generic_types_compatible_compare(base, container_base_clock_t_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    int result = io_printf(output, "%.*g", DBL_DIG-1, (clock() - *((const clock_t *) data)) / (double) CLOCKS_PER_SEC);
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
+}
+
+int io_serialize_tm(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_tm, 1);
+
+    if (generic_types_compatible_compare(base, container_base_tm_recipe()) != 0)
+        return CC_ENOTSUP;
+
+    const struct tm *t = data;
+    const char wday[][4] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    const char mname[][4] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                             "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+    int result = io_printf(output, "%.3s %.3s%3d %.2d:%.2d:%.2d %d",
+                             wday[t->tm_wday],
+                             mname[t->tm_mon],
+                             t->tm_mday,
+                             t->tm_hour,
+                             t->tm_min,
+                             t->tm_sec,
+                             t->tm_year + 1900);
+    if (result < 0)
+        return io_error(output);
+
+    type->written = result;
+    return 0;
 }
 
 int io_serialize_cstring(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -146,7 +267,12 @@ int io_serialize_cstring(IO output, const void *data, const CommonContainerBase 
     if (generic_types_compatible_compare(base, container_base_cstring_recipe()) != 0)
         return CC_ENOTSUP;
 
-    return io_puts(data, output)? io_error(output): 0;
+    size_t len = strlen(data);
+    if (io_write(data, 1, len, output) != len)
+        return io_error(output);
+
+    type->written = len;
+    return 0;
 }
 
 int io_serialize_binary(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
@@ -161,10 +287,16 @@ int io_serialize_binary(IO output, const void *data, const CommonContainerBase *
         unsigned char chr = binary->data[i];
 
         if (chr > 0x80 || chr < 0x20) {
-            if (io_printf(output, "\\x%.2hhx", chr) < 0)
+            int result = io_printf(output, "\\x%.2hhx", chr);
+            if (result < 0)
                 return io_error(output);
-        } else if (io_putc(chr, output) == EOF)
+
+            type->written += result;
+        } else if (io_putc(chr, output) == EOF) {
             return io_error(output);
+        } else {
+            ++type->written;
+        }
     }
 
     return 0;
@@ -184,7 +316,15 @@ int io_serialize_variant(IO output, const void *data, const CommonContainerBase 
                 data = variant_get_custom(v);
                 base = variant_get_custom_container_base(v);
                 continue;
-            case VariantNull: return io_puts("<null>", output)? io_error(output): 0;
+            case VariantNull: {
+                const char *str = "<null>";
+                const size_t len = strlen(str);
+                if (io_write(str, 1, len, output) != len)
+                    return io_error(output);
+
+                type->written = len;
+                return 0;
+            }
             case VariantBoolean: {
                 _Bool bool = variant_get_boolean(v);
                 return io_serialize_boolean(output, &bool, container_base_boolean_recipe(), NULL);
@@ -217,6 +357,7 @@ int io_serialize_variant(IO output, const void *data, const CommonContainerBase 
 
 int io_serialize_container(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
     SERIALIZER_DECLARE("UTF-8", io_serialize_container, 1);
+    struct SerializerIdentity subtype = *type;
 
     if (base->collection_begin == NULL ||
             base->collection_next == NULL ||
@@ -237,41 +378,81 @@ int io_serialize_container(IO output, const void *data, const CommonContainerBas
 
         if (io_putc('{', output) == EOF)
             return io_error(output);
+        else
+            ++type->written;
 
         Iterator start = base->collection_begin(data);
         for (Iterator it = start; it; it = base->collection_next(data, it)) {
-            if (it != start && io_puts(", ", output) == EOF)
-                return io_error(output);
+            /* Write pair separator if necessary */
+            if (it != start) {
+                const char *sep = ", ";
+                const size_t len = strlen(sep);
+                if (io_write(sep, 1, len, output) != len)
+                    return io_error(output);
+                else
+                    type->written += len;
+            }
 
-            int err = key_serialize(output, base->collection_get_key(data, it), base->key_child, NULL);
-            if (err)
-                return err;
+            /* Write key */
+            {
+                int err = key_serialize(output, base->collection_get_key(data, it), base->key_child, &subtype);
+                if (err)
+                    return err;
+                else
+                    type->written += subtype.written;
+            }
 
-            if (io_puts(": ", output) == EOF)
-                return io_error(output);
+            /* Write separator */
+            {
+                const char *key_sep = ", ";
+                const size_t len = strlen(key_sep);
+                if (io_write(key_sep, 1, len, output) != len)
+                    return io_error(output);
+                else
+                    type->written += len;
+            }
 
-            err = value_serialize(output, base->collection_get_value(data, it), base->value_child, NULL);
-            if (err)
-                return err;
+            /* Write value */
+            {
+                int err = value_serialize(output, base->collection_get_value(data, it), base->value_child, &subtype);
+                if (err)
+                    return err;
+                else
+                    type->written += subtype.written;
+            }
         }
 
         if (io_putc('}', output) == EOF)
             return io_error(output);
+        else
+            ++type->written;
     } else {
         if (value_serialize == NULL)
             return CC_ENOTSUP;
 
         if (io_putc('[', output) == EOF)
             return io_error(output);
+        else
+            ++type->written;
 
         Iterator start = base->collection_begin(data);
         for (Iterator it = start; it; it = base->collection_next(data, it)) {
-            if (it != start && io_puts(", ", output) == EOF)
-                return io_error(output);
+            if (it != start) {
+                const char *sep = ", ";
+                const size_t len = strlen(sep);
+                if (io_write(sep, 1, len, output) != len)
+                    return io_error(output);
+                else
+                    type->written += len;
+            }
 
-            int err = value_serialize(output, base->collection_get_value(data, it), base->value_child, NULL);
-            if (err)
-                return err;
+            {
+                int err = value_serialize(output, base->collection_get_value(data, it), base->value_child, &subtype);
+                if (err)
+                    return err;
+                else
+                    type->written += subtype.written;
+            }
         }
 
         if (io_putc(']', output) == EOF)
@@ -383,6 +564,7 @@ static int serialize_json_string_internal(IO output, const Binary b) {
     return 0;
 }
 
+/* TODO: not compliant with new type->written mandate */
 int io_serialize_json(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
     while (1) {
         SERIALIZER_DECLARE("JSON", io_serialize_json, 1);
@@ -396,16 +578,16 @@ int io_serialize_json(IO output, const void *data, const CommonContainerBase *ba
             } else {
                 /* Variant is native, just serialize it */
                 switch (variant_get_type((Variant) data)) {
-                    case VariantNull: io_puts("null", output); return io_error(output);
-                    case VariantBoolean: io_puts(variant_get_boolean((Variant) data)? "true": "false", output); return io_error(output);
-                    case VariantInteger: io_printf(output, "%lld", variant_get_int64((Variant) data)); return io_error(output);
-                    case VariantUnsignedInteger: io_printf(output, "%llu", variant_get_uint64((Variant) data)); return io_error(output);
+                    case VariantNull: io_puts("null", output); type->written = 4; return io_error(output);
+                    case VariantBoolean: io_puts(variant_get_boolean((Variant) data)? "true": "false", output); type->written = 4 + !variant_get_boolean((Variant) data); return io_error(output);
+                    case VariantInteger: type->written = abs(io_printf(output, "%lld", variant_get_int64((Variant) data))); return io_error(output);
+                    case VariantUnsignedInteger: type->written = abs(io_printf(output, "%llu", variant_get_uint64((Variant) data))); return io_error(output);
                     case VariantFloat: {
                         double flt = variant_get_float((Variant) data);
                         if (fabs(flt) == (double) INFINITY || isnan(flt))
                             return CC_ENOTSUP;
 
-                        io_printf(output, "%.*g", DBL_DIG-1, flt);
+                        type->written = abs(io_printf(output, "%.*g", DBL_DIG-1, flt));
 
                         return io_error(output);
                     }

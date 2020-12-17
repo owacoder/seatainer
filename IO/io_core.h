@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <time.h> /* For io_ftime */
 
 #include "../platforms.h"
 
@@ -666,6 +667,17 @@ int io_vprintf(IO io, const char *fmt, va_list args);
  */
 int io_printf(IO io, const char *fmt, ...);
 
+/** @brief Formats a tm struct and writes it to an IO device using a specific format string.
+ *
+ * This function supports all of the same print specifiers that the C standard library function `strftime` supports in C99.
+ *
+ * @param io The IO device to write to.
+ * @param fmt The format string specifying what to print.
+ * @param timeptr A pointer to a tm struct that contains the date and/or time to print.
+ * @return Returns 0 on success, or an error that occured on failure.
+ */
+int io_ftime(IO io, const char *fmt, const struct tm *timeptr);
+
 /** @brief Writes a character to an IO device.
  *
  * If the stream is opened as a text stream, any newline (10) characters written to the stream will be converted to the native
@@ -697,12 +709,12 @@ int io_putc_n(int ch, size_t count, IO io);
  * @param value The value to write to @p io.
  * @return 1 on success, 0 if an error occurred.
  */
-size_t io_put_uint16_le(IO io, uint16_t value);
-size_t io_put_uint16_be(IO io, uint16_t value);
-size_t io_put_uint32_le(IO io, uint32_t value);
-size_t io_put_uint32_be(IO io, uint32_t value);
-size_t io_put_uint64_le(IO io, uint64_t value);
-size_t io_put_uint64_be(IO io, uint64_t value);
+size_t io_put_uint16_le(IO io, unsigned short value);
+size_t io_put_uint16_be(IO io, unsigned short value);
+size_t io_put_uint32_le(IO io, unsigned long value);
+size_t io_put_uint32_be(IO io, unsigned long value);
+size_t io_put_uint64_le(IO io, unsigned long long value);
+size_t io_put_uint64_be(IO io, unsigned long long value);
 
 /** @brief Writes a string to an IO device.
  *

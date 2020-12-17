@@ -762,7 +762,7 @@ int avltree_compare(AVLTree *left, AVLTree *right) {
     AVLNode *rhs = avltree_min_node(right);
 
     while (lhs && rhs) {
-        cmp = left->key_base->compare(&lhs->key, &rhs->key);
+        cmp = left->key_base->compare(lhs->key, rhs->key);
         if (cmp)
             return cmp;
 

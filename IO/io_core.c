@@ -106,6 +106,7 @@ IO io_get_stdin(void) {
 #else
         IO new_io = io_open_file(stdin);
 #endif
+
         if (atomicp_cmpxchg(&io_stdin_, new_io, NULL) != NULL)
             io_close(new_io);
     }
@@ -129,6 +130,8 @@ IO io_get_stdout(void) {
 #else
         IO new_io = io_open_file(stdout);
 #endif
+        io_setvbuf(new_io, NULL, _IOFBF, 0xffff);
+
         if (atomicp_cmpxchg(&io_stdout_, new_io, NULL) != NULL)
             io_close(new_io);
     }
@@ -767,12 +770,13 @@ int io_close(IO io) {
 
     io_lock(io);
 
+    int flush_err = io_flush(io)? io_error(io): 0;
     int result = io_close_without_destroying(io);
 
     io_unlock(io);
     io_destroy(io);
 
-    return result;
+    return flush_err? flush_err: result;
 }
 
 int io_vclose(int count, ...) {
@@ -1027,7 +1031,7 @@ int io_flush(IO io) {
         case IO_NativeFile:
         case IO_OwnNativeFile:
             if (io->flags & IO_FLAG_HAS_JUST_WRITTEN) {
-                if ((io->flags & IO_FLAG_OWNS_BUFFER) || io->data.native_file.buffer_bytes == 0)
+                if (io->data.native_file.buffer_bytes == 0)
                     return 0;
 
 #if LINUX_OS
@@ -1610,6 +1614,7 @@ IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdat
 #define PRINTF_LEN_Z 6
 #define PRINTF_LEN_T 7
 #define PRINTF_LEN_BIG_L 8
+#define PRINTF_LEN_I 9
 
 static unsigned io_stou(const char *str, const char **update) {
     unsigned ret = 0;
@@ -1634,7 +1639,7 @@ static unsigned io_stou(const char *str, const char **update) {
 
 struct io_printf_state {
     unsigned char *buffer;
-    unsigned char internalBuffer[4 * sizeof(long long)];
+    unsigned char internal_buffer[4 * sizeof(long long)];
     size_t bufferLength;
     unsigned flags;
 };
@@ -1645,7 +1650,7 @@ typedef struct {
 
 #define PRINTF_D(type, value, flags, prec, len, state)              \
     do {                                                            \
-        unsigned char *eptr = (state)->internalBuffer + sizeof((state)->internalBuffer) - 1; \
+        unsigned char *eptr = (state)->internal_buffer + sizeof((state)->internal_buffer) - 1; \
         unsigned char *ptr = eptr;                                  \
         type oldval = (value), mval = oldval;                       \
         int neg = val < 0;                                          \
@@ -1671,7 +1676,7 @@ typedef struct {
 #define PRINTF_U(type, fmt, value, flags, prec, len, state)         \
     do {                                                            \
         const char *alpha = (fmt) == 'X'? "0123456789ABCDEF": "0123456789abcdef"; \
-        unsigned char *eptr = (state)->internalBuffer + sizeof((state)->internalBuffer) - 1; \
+        unsigned char *eptr = (state)->internal_buffer + sizeof((state)->internal_buffer) - 1; \
         unsigned char *ptr = eptr;                                  \
         type oldval = (value), mval = oldval, base = 10;            \
                                                                     \
@@ -1976,9 +1981,9 @@ static void io_printf_f_long(long double value, unsigned char fmt_char, unsigned
     fmt[pos] = 0;
 
     /* Then print */
-    int length = snprintf((char *) state->internalBuffer, sizeof(state->internalBuffer), fmt, precision, value);
-    if (length < (int) sizeof(state->internalBuffer)) {
-        state->buffer = state->internalBuffer;
+    int length = snprintf((char *) state->internal_buffer, sizeof(state->internal_buffer), fmt, precision, value);
+    if (length < (int) sizeof(state->internal_buffer)) {
+        state->buffer = state->internal_buffer;
     } else {
         unsigned char *data = MALLOC(length + 1);
         if (data == NULL) {
@@ -2015,9 +2020,9 @@ static void io_printf_f(double value, unsigned char fmt_char, unsigned flags, un
     fmt[pos] = 0;
 
     /* Then print */
-    int length = snprintf((char *) state->internalBuffer, sizeof(state->internalBuffer), fmt, precision, value);
-    if (length < (int) sizeof(state->internalBuffer)) {
-        state->buffer = state->internalBuffer;
+    int length = snprintf((char *) state->internal_buffer, sizeof(state->internal_buffer), fmt, precision, value);
+    if (length < (int) sizeof(state->internal_buffer)) {
+        state->buffer = state->internal_buffer;
     } else {
         unsigned char *data = MALLOC(length + 1);
         if (data == NULL)
@@ -2076,7 +2081,13 @@ static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, u
             break;
         }
         case PRINTF_LEN_Z:
+        {
+            size_t val = va_arg(args->args, size_t);
+            PRINTF_U(size_t, 'u', val, flags, prec, len, state);
+            break;
+        }
         case PRINTF_LEN_T:
+        case PRINTF_LEN_I:
         {
             ptrdiff_t val = va_arg(args->args, ptrdiff_t);
             PRINTF_D(ptrdiff_t, val, flags, prec, len, state);
@@ -2126,10 +2137,16 @@ static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsig
             break;
         }
         case PRINTF_LEN_Z:
-        case PRINTF_LEN_T:
+        case PRINTF_LEN_I:
         {
             size_t val = va_arg(args->args, size_t);
             PRINTF_U(size_t, fmt, val, flags, prec, len, state);
+            break;
+        }
+        case PRINTF_LEN_T:
+        {
+            uintmax_t val = va_arg(args->args, ptrdiff_t);
+            PRINTF_U(uintmax_t, fmt, val, flags, prec, len, state);
             break;
         }
     }
@@ -2139,14 +2156,14 @@ static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsig
 
 /* fmt must be one of "diuox", returns UINT_MAX on failure, number of characters read on success */
 static unsigned io_scanf_int_no_arg(char fmt, IO io, unsigned width) {
-    int dummy;
+    unsigned int dummy;
     UNUSED(dummy)
     switch (fmt) {
-        case 'd': SCANF_D(int, dummy, width, PRINTF_LEN_NONE, io); break;
-        case 'i': SCANF_I(int, dummy, width, PRINTF_LEN_NONE, io); break;
-        case 'o': SCANF_O(int, dummy, width, PRINTF_LEN_NONE, io); break;
-        case 'u': SCANF_U(int, dummy, width, PRINTF_LEN_NONE, io); break;
-        case 'x': case 'X': SCANF_X(int, dummy, width, PRINTF_LEN_NONE, io); break;
+        case 'd': SCANF_D(unsigned int, dummy, width, PRINTF_LEN_NONE, io); break;
+        case 'i': SCANF_I(unsigned int, dummy, width, PRINTF_LEN_NONE, io); break;
+        case 'o': SCANF_O(unsigned int, dummy, width, PRINTF_LEN_NONE, io); break;
+        case 'u': SCANF_U(unsigned int, dummy, width, PRINTF_LEN_NONE, io); break;
+        case 'x': case 'X': SCANF_X(unsigned int, dummy, width, PRINTF_LEN_NONE, io); break;
         default: return UINT_MAX;
     }
 }
@@ -2249,6 +2266,18 @@ static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_l
                 case 'o': SCANF_O(ptrdiff_t, *val, width, len, io); break;
                 case 'u': SCANF_U(ptrdiff_t, *val, width, len, io); break;
                 case 'x': case 'X': SCANF_X(ptrdiff_t, *val, width, len, io); break;
+                default: return UINT_MAX;
+            }
+            break;
+        }
+        case PRINTF_LEN_I:
+        {
+            switch (fmt) {
+                case 'd': {ptrdiff_t *val = va_arg(args->args, ptrdiff_t *); SCANF_D(ptrdiff_t, *val, width, len, io); break;}
+                case 'i': {ptrdiff_t *val = va_arg(args->args, ptrdiff_t *); SCANF_I(ptrdiff_t, *val, width, len, io); break;}
+                case 'o': {size_t *val = va_arg(args->args, size_t *); SCANF_O(size_t, *val, width, len, io); break;}
+                case 'u': {size_t *val = va_arg(args->args, size_t *); SCANF_U(size_t, *val, width, len, io); break;}
+                case 'x': case 'X': {size_t *val = va_arg(args->args, size_t *); SCANF_X(size_t, *val, width, len, io); break;}
                 default: return UINT_MAX;
             }
             break;
@@ -2721,21 +2750,21 @@ int io_puts(const char *str, IO io) {
     return io_write(str, 1, len, io) == len? 0: EOF;
 }
 
-size_t io_put_uint16_le(IO io, uint16_t value) {
+size_t io_put_uint16_le(IO io, unsigned short value) {
     char buf[2];
-    buf[0] = value & 0xff;
-    buf[1] = value >> 8;
+    buf[0] = (value     ) & 0xff;
+    buf[1] = (value >> 8) & 0xff;
     return io_write(buf, 2, 1, io);
 }
 
-size_t io_put_uint16_be(IO io, uint16_t value) {
+size_t io_put_uint16_be(IO io, unsigned short value) {
     char buf[2];
-    buf[0] = value >> 8;
-    buf[1] = value & 0xff;
+    buf[0] = (value >> 8) & 0xff;
+    buf[1] = (value     ) & 0xff;
     return io_write(buf, 2, 1, io);
 }
 
-size_t io_put_uint32_le(IO io, uint32_t value) {
+size_t io_put_uint32_le(IO io, unsigned long value) {
     char buf[4];
     buf[0] = (value      ) & 0xff;
     buf[1] = (value >>  8) & 0xff;
@@ -2744,7 +2773,7 @@ size_t io_put_uint32_le(IO io, uint32_t value) {
     return io_write(buf, 4, 1, io);
 }
 
-size_t io_put_uint32_be(IO io, uint32_t value) {
+size_t io_put_uint32_be(IO io, unsigned long value) {
     char buf[4];
     buf[0] = (value >> 24) & 0xff;
     buf[1] = (value >> 16) & 0xff;
@@ -2753,7 +2782,7 @@ size_t io_put_uint32_be(IO io, uint32_t value) {
     return io_write(buf, 4, 1, io);
 }
 
-size_t io_put_uint64_le(IO io, uint64_t value) {
+size_t io_put_uint64_le(IO io, unsigned long long value) {
     char buf[8];
     buf[0] = (value      ) & 0xff;
     buf[1] = (value >>  8) & 0xff;
@@ -2766,7 +2795,7 @@ size_t io_put_uint64_le(IO io, uint64_t value) {
     return io_write(buf, 8, 1, io);
 }
 
-size_t io_put_uint64_be(IO io, uint64_t value) {
+size_t io_put_uint64_be(IO io, unsigned long long value) {
     char buf[8];
     buf[0] = (value >> 56) & 0xff;
     buf[1] = (value >> 48) & 0xff;
@@ -2790,7 +2819,7 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
     struct io_printf_state state;
     va_list_wrapper args_copy;
 
-    state.buffer = state.internalBuffer;
+    state.buffer = state.internal_buffer;
     state.bufferLength = 0;
     state.flags = 0;
 
@@ -2904,6 +2933,41 @@ done_with_flags:
                     else
                         fmt_len = PRINTF_LEN_L;
                     break;
+                case 'I':
+                    if (fmt[1] == '3' && fmt[2] == '2') {
+                        fmt += 2;
+                        /* Set type */
+                        if (sizeof(unsigned int) * CHAR_BIT == 32)
+                            fmt_len = PRINTF_LEN_NONE;
+                        else if (sizeof(unsigned long) * CHAR_BIT == 32)
+                            fmt_len = PRINTF_LEN_L;
+                        else
+                            CLEANUP(-2);
+                    } else if (fmt[1] == '6' && fmt[2] == '4') {
+                        fmt += 2;
+                        /* Set type, if available */
+                        if (sizeof(unsigned int) * CHAR_BIT == 64)
+                            fmt_len = PRINTF_LEN_NONE;
+                        else if (sizeof(unsigned long) * CHAR_BIT == 64)
+                            fmt_len = PRINTF_LEN_L;
+                        else if (sizeof(unsigned long long) * CHAR_BIT == 64)
+                            fmt_len = PRINTF_LEN_LL;
+                        else
+                            CLEANUP(-2);
+                    } else { /* plain I is ptrdiff_t if signed, size_t if unsigned */
+                        fmt_len = PRINTF_LEN_I;
+                    }
+                    break;
+                case 'q':
+                    if (sizeof(unsigned int) * CHAR_BIT == 64)
+                        fmt_len = PRINTF_LEN_NONE;
+                    else if (sizeof(unsigned long) * CHAR_BIT == 64)
+                        fmt_len = PRINTF_LEN_L;
+                    else if (sizeof(unsigned long long) * CHAR_BIT == 64)
+                        fmt_len = PRINTF_LEN_LL;
+                    else
+                        CLEANUP(-2);
+                    break;
                 case 'j': fmt_len = PRINTF_LEN_J; break;
                 case 'z': fmt_len = PRINTF_LEN_Z; break;
                 case 't': fmt_len = PRINTF_LEN_T; break;
@@ -2914,14 +2978,14 @@ done_with_flags:
 
             /* reset state flags to internal buffer */
             state.flags = 0;
-            state.buffer = state.internalBuffer;
+            state.buffer = state.internal_buffer;
 
             /* read format specifier */
             switch (*fmt) {
                 default: CLEANUP(-2); /* incomplete format specifier */
                 case 'c':
                 {
-                    state.internalBuffer[0] = va_arg(args_copy.args, int);
+                    state.internal_buffer[0] = va_arg(args_copy.args, int);
                     state.bufferLength = 1;
                     break;
                 }
@@ -2945,6 +3009,7 @@ done_with_flags:
                         case PRINTF_LEN_L: *(va_arg(args_copy.args, long *)) = (long) written; break;
                         case PRINTF_LEN_LL: *(va_arg(args_copy.args, long long *)) = (long long) written; break;
                         case PRINTF_LEN_J: *(va_arg(args_copy.args, intmax_t *)) = (intmax_t) written; break;
+                        case PRINTF_LEN_I: /* fallthrough */
                         case PRINTF_LEN_Z: *(va_arg(args_copy.args, size_t *)) = written; break;
                         case PRINTF_LEN_T: *(va_arg(args_copy.args, ptrdiff_t *)) = (ptrdiff_t) written; break;
                         default: CLEANUP(-2);
@@ -3045,8 +3110,16 @@ done_with_flags:
                     typename.length = 0;
                     formatname.data = NULL;
                     formatname.length = 0;
+                    size_t nested = 0;
 
-                    while (*fmt && *fmt != '[' && *fmt != '}') {
+                    while (*fmt && (nested || (*fmt != '[' && *fmt != '}'))) {
+                        if (*fmt == '{') ++nested;
+                        else if (*fmt == '}') {
+                            if (!nested)
+                                break;
+                            --nested;
+                        }
+
                         ++typename.length;
                         ++fmt;
                     }
@@ -3054,7 +3127,14 @@ done_with_flags:
                     if (*fmt == '[') {
                         formatname.data = (char *) ++fmt;
 
-                        while (*fmt && *fmt != ']') {
+                        while (*fmt && (nested || *fmt != ']')) {
+                            if (*fmt == '[') ++nested;
+                            else if (*fmt == ']') {
+                                if (!nested)
+                                    break;
+                                --nested;
+                            }
+
                             ++formatname.length;
                             ++fmt;
                         }
@@ -3101,33 +3181,62 @@ done_with_flags:
                     }
 
                     if (!serializer) { /* If serializer not specified, it could be registered name, or if not present, in the type recipe */
-                        if (formatname.data != NULL)
-                            serializer = io_get_registered_format(formatname.data, formatname.length)->serializer;
-                        else if (type->serialize)
+                        if (formatname.data != NULL) {
+                            struct RegisteredFormat *registered_fmt = io_get_registered_format(formatname.data, formatname.length);
+
+                            serializer = registered_fmt? registered_fmt->serializer: NULL;
+                        } else if (type->serialize)
                             serializer = type->serialize;
 
                         if (!serializer)
                             CLEANUP(-1);
                     }
 
-                    IO temp = io_open_dynamic_buffer("wb");
-                    if (temp == NULL)
-                        CLEANUP(-1);
-                    else {
-                        if (serializer(temp, data, type, NULL)) {
+                    struct SerializerIdentity serializer_identity;
+                    serializer_identity.fmt = NULL;
+                    serializer_identity.fmt_length = 0;
+
+                    if ((fmt_flags & PRINTF_FLAG_HAS_WIDTH) ||
+                        (fmt_flags & PRINTF_FLAG_HAS_PRECISION)) {
+                        /* If a width or precision has been specified, space needs to be allocated to hold the
+                         * requested serialized data because it may have to be padded or truncated to fit the field
+                         * specifier. Unfortunately there isn't really a more optimal solution at the moment.
+                         */
+
+                        IO temp = io_open_dynamic_buffer("wb");
+                        if (temp == NULL)
+                            CLEANUP(-1);
+                        else {
+                            if (serializer(temp, data, type, &serializer_identity)) {
+                                io_destroy(temp);
+                                CLEANUP(-1);
+                            }
+
+                            state.flags |= PRINTF_STATE_FREE_BUFFER;
+                            state.buffer = (unsigned char *) io_take_underlying_buffer(temp);
+                            state.bufferLength = io_underlying_buffer_size(temp);
+
+                            if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && fmt_prec < state.bufferLength)
+                                state.bufferLength = fmt_prec;
+
                             io_destroy(temp);
+                        }
+                    } else {
+                        /* If no width or precision has been specified, the custom datatype can be directly serialized
+                         * to the underlying IO device, since no padding or truncation needs to be done. The length of the
+                         * serialized data is mandated to be returned in the serializer_identity struct so it can be added to
+                         * the return value of this function. */
+                        if (serializer(io, data, type, &serializer_identity)) {
                             CLEANUP(-1);
                         }
 
-                        state.flags |= PRINTF_STATE_FREE_BUFFER;
-                        state.buffer = (unsigned char *) io_take_underlying_buffer(temp);
-                        state.bufferLength = io_underlying_buffer_size(temp);
-
-                        if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && fmt_prec < state.bufferLength)
-                            state.bufferLength = fmt_prec;
-
-                        io_destroy(temp);
+                        written += serializer_identity.written;
+                        goto done_with_format;
                     }
+
+                    /* Dynamically allocate buffer and get length of result */
+                    /*
+                     */
 
                     break;
                 }
@@ -3156,17 +3265,20 @@ done_with_flags:
 
             /* calculate number of fill characters for field width for format */
             size_t fillCount = 0;
-            size_t precCount = state.bufferLength;
+            size_t precCount = 0;
 
-            if (((state.flags & PRINTF_STATE_INTEGRAL) ||
-                    (fmt_flags & PRINTF_FLAG_HAS_PRECISION)) && (precCount < fmt_prec))
+            if ((state.flags & PRINTF_STATE_INTEGRAL) && state.bufferLength < fmt_prec) /* Integral should be expanded to fill precision */
                 precCount = fmt_prec;
+            else if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && state.bufferLength > fmt_prec) /* All other types should be capped at a maximum size */
+                precCount = fmt_prec;
+            else
+                precCount = state.bufferLength;
 
             if ((fmt_flags & PRINTF_FLAG_HAS_WIDTH) && fmt_width > precCount + addonCharCount)
                 fillCount = fmt_width - precCount - addonCharCount;
 
             written += fillCount + precCount + addonCharCount;
-            precCount -= state.bufferLength;
+            precCount -= MIN(precCount, state.bufferLength); /* Remove actual content so precCount only contains number of padded precision characters */
 
             /* calculate fill character for field */
             if ((state.flags & PRINTF_STATE_NUMERIC) &&
@@ -3223,7 +3335,11 @@ done_with_format:
         written += len;
     }
 
-    result = (int) written;
+    if (written > INT_MAX) {
+        io_set_error(io, CC_EOVERFLOW);
+        result = -1;
+    } else
+        result = (int) written;
 
 cleanup:
     if (state.flags & PRINTF_STATE_FREE_BUFFER)
@@ -3243,6 +3359,47 @@ int io_printf(IO io, const char *fmt, ...) {
     va_end(args);
 
     return result;
+}
+
+int io_ftime(IO io, const char *fmt, const struct tm *timeptr) {
+    char buf[128];
+
+    size_t size = strftime(buf, sizeof(buf), fmt, timeptr);
+    if (size != 0) {
+        if (io_write(buf, 1, size, io) != size)
+            return io_error(io);
+
+        return 0;
+    }
+
+    char *dbuf = NULL;
+    size_t allocated = 128;
+
+    do {
+        const size_t new_size = safe_add(allocated, allocated >> 1);
+        if (!new_size)
+            goto cleanup;
+
+        char *new_buf = REALLOC(dbuf, new_size);
+        if (!new_buf)
+            goto cleanup;
+
+        dbuf = new_buf;
+        allocated = new_size;
+
+        size = strftime(dbuf, allocated, fmt, timeptr);
+    } while (size == 0);
+
+    if (io_write(dbuf, 1, size, io) != size)
+        return io_error(io);
+
+    FREE(dbuf);
+
+    return 0;
+
+cleanup:
+    FREE(dbuf);
+    return CC_ENOMEM;
 }
 
 static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO io) {
@@ -3585,6 +3742,41 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                     }
                     else
                         fmt_len = PRINTF_LEN_L;
+                    break;
+                case 'I':
+                    if (fmt[1] == '3' && fmt[2] == '2') {
+                        fmt += 2;
+                        /* Set type */
+                        if (sizeof(unsigned int) * CHAR_BIT == 32)
+                            fmt_len = PRINTF_LEN_NONE;
+                        else if (sizeof(unsigned long) * CHAR_BIT == 32)
+                            fmt_len = PRINTF_LEN_L;
+                        else
+                            goto cleanup;
+                    } else if (fmt[1] == '6' && fmt[2] == '4') {
+                        fmt += 2;
+                        /* Set type, if available */
+                        if (sizeof(unsigned int) * CHAR_BIT == 64)
+                            fmt_len = PRINTF_LEN_NONE;
+                        else if (sizeof(unsigned long) * CHAR_BIT == 64)
+                            fmt_len = PRINTF_LEN_L;
+                        else if (sizeof(unsigned long long) * CHAR_BIT == 64)
+                            fmt_len = PRINTF_LEN_LL;
+                        else
+                            goto cleanup;
+                    } else { /* plain I is ptrdiff_t if signed, size_t if unsigned */
+                        fmt_len = PRINTF_LEN_I;
+                    }
+                    break;
+                case 'q':
+                    if (sizeof(unsigned int) * CHAR_BIT == 64)
+                        fmt_len = PRINTF_LEN_NONE;
+                    else if (sizeof(unsigned long) * CHAR_BIT == 64)
+                        fmt_len = PRINTF_LEN_L;
+                    else if (sizeof(unsigned long long) * CHAR_BIT == 64)
+                        fmt_len = PRINTF_LEN_LL;
+                    else
+                        goto cleanup;
                     break;
                 case 'j': fmt_len = PRINTF_LEN_J; break;
                 case 'z': fmt_len = PRINTF_LEN_Z; break;
@@ -4501,6 +4693,10 @@ static size_t io_write_internal_helper(const void *ptr, size_t size, size_t coun
 }
 
 static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO io) {
+    const size_t total = safe_multiply(size, count);
+    if (total == 0)
+        return 0;
+
     if (!(io->flags & IO_FLAG_BINARY)) {
 #if WINDOWS_OS
         size_t written = 0;
@@ -4590,6 +4786,8 @@ void io_setbuf(IO io, char *buf) {
             break;
         case IO_NativeFile:
         case IO_OwnNativeFile:
+            io_flush(io);
+
             if (io->flags & IO_FLAG_OWNS_BUFFER) {
                 FREE(io->data.native_file.buffer);
                 io->flags &= ~IO_FLAG_OWNS_BUFFER;
@@ -4610,7 +4808,7 @@ int io_setvbuf(IO io, char *buf, int mode, size_t size) {
             return setvbuf(io->data.file.fptr, buf, mode, size);
         case IO_NativeFile:
         case IO_OwnNativeFile:
-            if (size > (uintmax_t) LONG_MAX)
+            if (size > (uintmax_t) LONG_MAX || io_flush(io))
                 return -1;
 
             if (io->flags & IO_FLAG_OWNS_BUFFER) {
