@@ -752,10 +752,12 @@ static void io_clearerr_internal(IO io) {
             if (io->data.custom.callbacks->clearerr != NULL)
                 io->data.custom.callbacks->clearerr(io->data.custom.ptr, io);
             /* fallthrough */
-        default: io->flags &= ~(IO_FLAG_ERROR | IO_FLAG_EOF); break;
+        default: break;
         case IO_File:
         case IO_OwnFile: clearerr(io->data.file.fptr); break;
     }
+
+    io->flags &= ~(IO_FLAG_ERROR | IO_FLAG_EOF);
 }
 
 void io_clearerr(IO io) {
@@ -1597,6 +1599,119 @@ IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdat
     return io;
 }
 
+static int io_putc_n_internal(int ch, size_t count, IO io) {
+    if (count == 0)
+        return 0;
+
+    unsigned char buffer[IO_COPY_SIZE];
+    memset(buffer, ch, sizeof(buffer));
+
+    while (count > sizeof(buffer)) {
+        if (io_write_internal(buffer, 1, sizeof(buffer), io) != sizeof(buffer))
+            return EOF;
+        count -= sizeof(buffer);
+    }
+
+    if (io_write_internal(buffer, 1, count, io) != count)
+        return EOF;
+
+    return 0;
+}
+
+int io_putc(int ch, IO io) {
+    io_lock(io);
+
+    if (io_begin_write(io))
+        return io_unlocki(io, EOF);
+
+    return io_unlocki(io, io_putc_internal(ch, io));
+}
+
+int io_putc_n(int ch, size_t count, IO io) {
+    io_lock(io);
+
+    if (io_begin_write(io))
+        return io_unlocki(io, EOF);
+
+    return io_unlocki(io, io_putc_n_internal(ch, count, io));
+}
+
+int io_puts(const char *str, IO io) {
+    size_t len = strlen(str);
+    return io_write(str, 1, len, io) == len? 0: EOF;
+}
+
+size_t io_put_uint16_le(IO io, unsigned short value) {
+    char buf[2];
+    buf[0] = (value     ) & 0xff;
+    buf[1] = (value >> 8) & 0xff;
+    return io_write(buf, 2, 1, io);
+}
+
+size_t io_put_uint16_be(IO io, unsigned short value) {
+    char buf[2];
+    buf[0] = (value >> 8) & 0xff;
+    buf[1] = (value     ) & 0xff;
+    return io_write(buf, 2, 1, io);
+}
+
+size_t io_put_uint32_le(IO io, unsigned long value) {
+    char buf[4];
+    buf[0] = (value      ) & 0xff;
+    buf[1] = (value >>  8) & 0xff;
+    buf[2] = (value >> 16) & 0xff;
+    buf[3] = (value >> 24) & 0xff;
+    return io_write(buf, 4, 1, io);
+}
+
+size_t io_put_uint32_be(IO io, unsigned long value) {
+    char buf[4];
+    buf[0] = (value >> 24) & 0xff;
+    buf[1] = (value >> 16) & 0xff;
+    buf[2] = (value >>  8) & 0xff;
+    buf[3] = (value      ) & 0xff;
+    return io_write(buf, 4, 1, io);
+}
+
+size_t io_put_uint64_le(IO io, unsigned long long value) {
+    char buf[8];
+    buf[0] = (value      ) & 0xff;
+    buf[1] = (value >>  8) & 0xff;
+    buf[2] = (value >> 16) & 0xff;
+    buf[3] = (value >> 24) & 0xff;
+    buf[4] = (value >> 32) & 0xff;
+    buf[5] = (value >> 40) & 0xff;
+    buf[6] = (value >> 48) & 0xff;
+    buf[7] = (value >> 56) & 0xff;
+    return io_write(buf, 8, 1, io);
+}
+
+size_t io_put_uint64_be(IO io, unsigned long long value) {
+    char buf[8];
+    buf[0] = (value >> 56) & 0xff;
+    buf[1] = (value >> 48) & 0xff;
+    buf[2] = (value >> 40) & 0xff;
+    buf[3] = (value >> 32) & 0xff;
+    buf[4] = (value >> 24) & 0xff;
+    buf[5] = (value >> 16) & 0xff;
+    buf[6] = (value >>  8) & 0xff;
+    buf[7] = (value      ) & 0xff;
+    return io_write(buf, 8, 1, io);
+}
+
+#define PA_INT 0
+#define PA_CHAR 1
+#define PA_STRING 2
+#define PA_POINTER 3
+#define PA_FLOAT 4
+#define PA_DOUBLE 5
+#define PA_LAST 6
+#define PA_FLAG_PTR 0x1000
+#define PA_FLAG_SHORT 0x2000
+#define PA_FLAG_LONG 0x4000
+#define PA_FLAG_LONG_LONG 0x8000
+#define PA_FLAG_LONG_DOUBLE PA_FLAG_LONG_LONG
+
 #define PRINTF_FLAG_MINUS 0x01
 #define PRINTF_FLAG_PLUS 0x02
 #define PRINTF_FLAG_SPACE 0x04
@@ -1604,6 +1719,7 @@ IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdat
 #define PRINTF_FLAG_HASH 0x10
 #define PRINTF_FLAG_HAS_WIDTH 0x20
 #define PRINTF_FLAG_HAS_PRECISION 0x40
+#define PRINTF_FLAG_HAS_POSITIONAL_SPEC 0x80
 
 #define PRINTF_LEN_NONE 0
 #define PRINTF_LEN_HH 1
@@ -1640,7 +1756,7 @@ static unsigned io_stou(const char *str, const char **update) {
 struct io_printf_state {
     unsigned char *buffer;
     unsigned char internal_buffer[4 * sizeof(long long)];
-    size_t bufferLength;
+    size_t buffer_length;
     unsigned flags;
 };
 
@@ -1670,7 +1786,7 @@ typedef struct {
         }                                                           \
                                                                     \
         (state)->buffer = ptr;                                      \
-        (state)->bufferLength = eptr-ptr;                           \
+        (state)->buffer_length = eptr-ptr;                           \
     } while (0)
 
 #define PRINTF_U(type, fmt, value, flags, prec, len, state)         \
@@ -1693,7 +1809,7 @@ typedef struct {
         }                                                           \
                                                                     \
         (state)->buffer = ptr;                                      \
-        (state)->bufferLength = eptr-ptr;                           \
+        (state)->buffer_length = eptr-ptr;                           \
     } while (0)
 
 #define LOG10(len) (((len) == PRINTF_LEN_BIG_L)? log10l: log10)
@@ -1712,10 +1828,10 @@ typedef struct {
                                                                     \
         if (isinf(mval)) {                                          \
             (state)->buffer = (unsigned char *) (isupper((fmt) & UCHAR_MAX)? "INFINITY": "infinity"); \
-            (state)->bufferLength = 8;                              \
+            (state)->buffer_length = 8;                              \
         } else if (isnan(mval)) {                                   \
             (state)->buffer = (unsigned char *) (isupper((fmt) & UCHAR_MAX)? "NAN": "nan"); \
-            (state)->bufferLength = 3;                              \
+            (state)->buffer_length = 3;                              \
         } else {                                                    \
             if ((len) == PRINTF_LEN_BIG_L)                          \
                 io_printf_f_long(mval, fmt, fmt_flags, prec, len, state); \
@@ -1734,12 +1850,12 @@ typedef struct {
                                                                     \
         if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
-        if (++read > width) {io_ungetc(chr, io); return --read;}    \
+        if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
                                                                     \
         if (chr == '+' || chr == '-') {                             \
             neg = (chr == '-');                                     \
             chr = io_getc_internal(io);                             \
-            if (++read > width || !isdigit(chr)) {io_ungetc(chr, io); return UINT_MAX;}\
+            if (++read > width || !isdigit(chr)) {io_ungetc_internal(chr, io); return UINT_MAX;}\
         }                                                           \
                                                                     \
         if (chr == '0') {                                           \
@@ -1748,19 +1864,19 @@ typedef struct {
                 base = 16;                                          \
             else                                                    \
                 base = 8;                                           \
-            if (++read > width) {io_ungetc(chr, io); return --read;}\
+            if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
             if (base == 16) {                                       \
                 chr = io_getc_internal(io);                         \
                 if (!isxdigit(chr))                                 \
                     return UINT_MAX;                                \
-                if (++read > width) {io_ungetc(chr, io); return UINT_MAX;}\
+                if (++read > width) {io_ungetc_internal(chr, io); return UINT_MAX;}\
             }                                                       \
         }                                                           \
                                                                     \
         while (chr != EOF) {                                        \
             char *str = strchr(alpha, tolower(chr));                \
             if (str == NULL || (str - alpha) >= base) {             \
-                io_ungetc(chr, io);                                 \
+                io_ungetc_internal(chr, io);                        \
                 break;                                              \
             }                                                       \
                                                                     \
@@ -1769,7 +1885,7 @@ typedef struct {
             (value) = (value) * base + (neg? -chr: chr);            \
                                                                     \
             chr = io_getc_internal(io);                             \
-            if (++read > width) {io_ungetc(chr, io); return --read;}\
+            if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
         }                                                           \
                                                                     \
         return --read;                                              \
@@ -1784,17 +1900,17 @@ typedef struct {
                                                                     \
         if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
-        if (++read > width) {io_ungetc(chr, io); return --read;}    \
+        if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
                                                                     \
         if (chr == '+' || chr == '-') {                             \
             neg = (chr == '-');                                     \
             chr = io_getc_internal(io);                             \
-            if (++read > width || !isdigit(chr)) {io_ungetc(chr, io); return UINT_MAX;}\
+            if (++read > width || !isdigit(chr)) {io_ungetc_internal(chr, io); return UINT_MAX;}\
         }                                                           \
                                                                     \
         while (chr != EOF) {                                        \
             if (!isdigit(chr)) {                                    \
-                io_ungetc(chr, io);                                 \
+                io_ungetc_internal(chr, io);                        \
                 break;                                              \
             }                                                       \
                                                                     \
@@ -1803,7 +1919,7 @@ typedef struct {
             (value) = (value) * 10 + (neg? -chr: chr);              \
                                                                     \
             chr = io_getc_internal(io);                             \
-            if (++read > width) {io_ungetc(chr, io); return --read;}\
+            if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
         }                                                           \
                                                                     \
         return --read;                                              \
@@ -1818,18 +1934,18 @@ typedef struct {
                                                                     \
         if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
-        if (++read > width) {io_ungetc(chr, io); return --read;}    \
+        if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
                                                                     \
         while (chr != EOF) {                                        \
             if (!isdigit(chr)) {                                    \
-                io_ungetc(chr, io);                                 \
+                io_ungetc_internal(chr, io);                        \
                 break;                                              \
             }                                                       \
                                                                     \
             (value) = (value) * 10 + (chr - '0');                   \
                                                                     \
             chr = io_getc_internal(io);                             \
-            if (++read > width) {io_ungetc(chr, io); return --read;}\
+            if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
         }                                                           \
                                                                     \
         return --read;                                              \
@@ -1844,17 +1960,17 @@ typedef struct {
                                                                     \
         if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
-        if (++read > width) {io_ungetc(chr, io); return --read;}    \
+        if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
                                                                     \
         if (chr == '+' || chr == '-') {                             \
             neg = (chr == '-');                                     \
             chr = io_getc_internal(io);                             \
-            if (++read > width || !isdigit(chr)) {io_ungetc(chr, io); return UINT_MAX;}\
+            if (++read > width || !isdigit(chr)) {io_ungetc_internal(chr, io); return UINT_MAX;}\
         }                                                           \
                                                                     \
         while (chr != EOF) {                                        \
             if (!isdigit(chr) || chr == '8' || chr == '9') {        \
-                io_ungetc(chr, io);                                 \
+                io_ungetc_internal(chr, io);                        \
                 break;                                              \
             }                                                       \
                                                                     \
@@ -1863,7 +1979,7 @@ typedef struct {
             (value) = (value) * 8 + (neg? -chr: chr);               \
                                                                     \
             chr = io_getc_internal(io);                             \
-            if (++read > width) {io_ungetc(chr, io); return --read;}\
+            if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
         }                                                           \
                                                                     \
         return --read;                                              \
@@ -1879,28 +1995,28 @@ typedef struct {
                                                                     \
         if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
-        if (++read > width) {io_ungetc(chr, io); return --read;}    \
+        if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
                                                                     \
         if (chr == '+' || chr == '-') {                             \
             neg = (chr == '-');                                     \
             chr = io_getc_internal(io);                             \
-            if (++read > width || !isdigit(chr)) {io_ungetc(chr, io); return UINT_MAX;}\
+            if (++read > width || !isdigit(chr)) {io_ungetc_internal(chr, io); return UINT_MAX;}\
         }                                                           \
                                                                     \
         if (chr == '0') {                                           \
             chr = io_getc_internal(io);                             \
-            if (++read > width) {io_ungetc(chr, io); return --read;}\
+            if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
             if (chr == 'x' || chr == 'X') {                         \
                 chr = io_getc_internal(io);                         \
                 if (!isxdigit(chr))                                 \
                     return UINT_MAX;                                \
-                if (++read > width) {io_ungetc(chr, io); return UINT_MAX;}\
+                if (++read > width) {io_ungetc_internal(chr, io); return UINT_MAX;}\
             }                                                       \
         }                                                           \
                                                                     \
         while (chr != EOF) {                                        \
             if (!isxdigit(chr)) {                                   \
-                io_ungetc(chr, io);                                 \
+                io_ungetc_internal(chr, io);                        \
                 break;                                              \
             }                                                       \
                                                                     \
@@ -1909,60 +2025,11 @@ typedef struct {
             (value) = (value) * 16 + (neg? -chr: chr);              \
                                                                     \
             chr = io_getc_internal(io);                             \
-            if (++read > width) {io_ungetc(chr, io); return --read;}\
+            if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
         }                                                           \
                                                                     \
         return --read;                                              \
     } while (0)
-
-#define SCANF_F(type, value, width, len, io)                        \
-    do {                                                            \
-        Buffer buffer;                                              \
-        unsigned read = 0;                                          \
-        int chr, neg = 0, dec = 0;                                  \
-                                                                    \
-        buffer_init(&buffer);                                       \
-        (value) = 0;                                                \
-                                                                    \
-        if ((chr = io_getc_internal(io)) == EOF)                    \
-            return UINT_MAX;                                        \
-        if (++read > width) {io_ungetc(chr, io); buffer_destroy(&buffer); return --read;}    \
-                                                                    \
-        if (chr == '+' || chr == '-') {                             \
-            neg = (chr == '-');                                     \
-            chr = io_getc_internal(io);                             \
-            if (++read > width) {io_ungetc(chr, io); buffer_destroy(&buffer); return --read;}\
-        }                                                           \
-                                                                    \
-        while (chr != EOF) {                                        \
-            if (!isdigit(chr) && (chr != '.' || dec)) {             \
-                io_ungetc(chr, io);                                 \
-                break;                                              \
-            }                                                       \
-                                                                    \
-            if (chr == '.') dec = 1;                                \
-                                                                    \
-            /* Append to buffer */                                  \
-                                                                    \
-            chr = io_getc_internal(io);                             \
-            if (++read > width) {io_ungetc(chr, io); buffer_destroy(&buffer); return --read;}\
-        }                                                           \
-                                                                    \
-        if (chr == 'i' || chr == 'I') {                             \
-            /* Parse INFINITY */                                    \
-        } else if (chr == 'n' || chr == 'N') {                      \
-            /* Parse NAN */                                         \
-        } else if (chr == 'e' || chr == 'E') {                      \
-            /* Parse <number>E<exponent> */                         \
-        }                                                           \
-                                                                    \
-        buffer_destroy(&buffer);                                    \
-        return --read;                                              \
-    } while (0)
-
-#define SCANF_E(type, value, width, len, io) SCANF_F(type, value, width, len, io)
-#define SCANF_G(type, value, width, len, io) SCANF_F(type, value, width, len, io)
-#define SCANF_A(type, value, width, len, io) SCANF_F(type, value, width, len, io)
 
 static void io_printf_f_long(long double value, unsigned char fmt_char, unsigned flags, unsigned prec, unsigned len, struct io_printf_state *state) {
     UNUSED(len)
@@ -1998,9 +2065,9 @@ static void io_printf_f_long(long double value, unsigned char fmt_char, unsigned
 
     if (length < 0) {
         state->flags |= PRINTF_STATE_ERROR;
-        state->bufferLength = 0;
+        state->buffer_length = 0;
     } else
-        state->bufferLength = length;
+        state->buffer_length = length;
 }
 
 static void io_printf_f(double value, unsigned char fmt_char, unsigned flags, unsigned prec, unsigned len, struct io_printf_state *state) {
@@ -2037,9 +2104,9 @@ static void io_printf_f(double value, unsigned char fmt_char, unsigned flags, un
 
     if (length < 0) {
         state->flags |= PRINTF_STATE_ERROR;
-        state->bufferLength = 0;
+        state->buffer_length = 0;
     } else
-        state->bufferLength = length;
+        state->buffer_length = length;
 }
 
 static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, unsigned prec, unsigned len, va_list_wrapper *args) {
@@ -2095,7 +2162,7 @@ static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, u
         }
     }
 
-    return (int) state->bufferLength;
+    return (int) state->buffer_length;
 }
 
 static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsigned flags, unsigned prec, unsigned len, va_list_wrapper *args) {
@@ -2151,7 +2218,7 @@ static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsig
         }
     }
 
-    return (int) state->bufferLength;
+    return (int) state->buffer_length;
 }
 
 /* fmt must be one of "diuox", returns UINT_MAX on failure, number of characters read on success */
@@ -2647,6 +2714,7 @@ static unsigned io_scanf_float_no_arg(char fmt, IO io, unsigned width) {
 }
 
 /* fmt must be one of "fega", returns UINT_MAX on failure, number of characters read on success */
+/* TODO: scanning hexadecimal float representation is not supported at the moment */
 static unsigned io_scanf_float(char fmt, IO io, unsigned width, unsigned len, va_list_wrapper *args) {
     switch (len) {
         default: return UINT_MAX;
@@ -2688,126 +2756,6 @@ static unsigned io_scanf_float(char fmt, IO io, unsigned width, unsigned len, va
     return UINT_MAX;
 }
 
-int io_putc_internal(int ch, IO io) {
-    switch (io->type) {
-        case IO_Empty:
-            io->flags |= IO_FLAG_ERROR;
-            io->error = CC_EWRITE;
-            return EOF;
-        case IO_File:
-        case IO_OwnFile: return fputc(ch, io->data.file.fptr);
-        default:
-        {
-            unsigned char chr = ch;
-
-            if (io_write_internal(&chr, 1, 1, io) != 1)
-                return EOF;
-
-            return chr;
-        }
-    }
-}
-
-static int io_putc_n_internal(int ch, size_t count, IO io) {
-    if (count == 0)
-        return 0;
-
-    unsigned char buffer[IO_COPY_SIZE];
-    memset(buffer, ch, sizeof(buffer));
-
-    while (count > sizeof(buffer)) {
-        if (io_write_internal(buffer, 1, sizeof(buffer), io) != sizeof(buffer))
-            return EOF;
-        count -= sizeof(buffer);
-    }
-
-    if (io_write_internal(buffer, 1, count, io) != count)
-        return EOF;
-
-    return 0;
-}
-
-int io_putc(int ch, IO io) {
-    io_lock(io);
-
-    if (io_begin_write(io))
-        return io_unlocki(io, EOF);
-
-    return io_unlocki(io, io_putc_internal(ch, io));
-}
-
-int io_putc_n(int ch, size_t count, IO io) {
-    io_lock(io);
-
-    if (io_begin_write(io))
-        return io_unlocki(io, EOF);
-
-    return io_unlocki(io, io_putc_n_internal(ch, count, io));
-}
-
-int io_puts(const char *str, IO io) {
-    size_t len = strlen(str);
-    return io_write(str, 1, len, io) == len? 0: EOF;
-}
-
-size_t io_put_uint16_le(IO io, unsigned short value) {
-    char buf[2];
-    buf[0] = (value     ) & 0xff;
-    buf[1] = (value >> 8) & 0xff;
-    return io_write(buf, 2, 1, io);
-}
-
-size_t io_put_uint16_be(IO io, unsigned short value) {
-    char buf[2];
-    buf[0] = (value >> 8) & 0xff;
-    buf[1] = (value     ) & 0xff;
-    return io_write(buf, 2, 1, io);
-}
-
-size_t io_put_uint32_le(IO io, unsigned long value) {
-    char buf[4];
-    buf[0] = (value      ) & 0xff;
-    buf[1] = (value >>  8) & 0xff;
-    buf[2] = (value >> 16) & 0xff;
-    buf[3] = (value >> 24) & 0xff;
-    return io_write(buf, 4, 1, io);
-}
-
-size_t io_put_uint32_be(IO io, unsigned long value) {
-    char buf[4];
-    buf[0] = (value >> 24) & 0xff;
-    buf[1] = (value >> 16) & 0xff;
-    buf[2] = (value >>  8) & 0xff;
-    buf[3] = (value      ) & 0xff;
-    return io_write(buf, 4, 1, io);
-}
-
-size_t io_put_uint64_le(IO io, unsigned long long value) {
-    char buf[8];
-    buf[0] = (value      ) & 0xff;
-    buf[1] = (value >>  8) & 0xff;
-    buf[2] = (value >> 16) & 0xff;
-    buf[3] = (value >> 24) & 0xff;
-    buf[4] = (value >> 32) & 0xff;
-    buf[5] = (value >> 40) & 0xff;
-    buf[6] = (value >> 48) & 0xff;
-    buf[7] = (value >> 56) & 0xff;
-    return io_write(buf, 8, 1, io);
-}
-
-size_t io_put_uint64_be(IO io, unsigned long long value) {
-    char buf[8];
-    buf[0] = (value >> 56) & 0xff;
-    buf[1] = (value >> 48) & 0xff;
-    buf[2] = (value >> 40) & 0xff;
-    buf[3] = (value >> 32) & 0xff;
-    buf[4] = (value >> 24) & 0xff;
-    buf[5] = (value >> 16) & 0xff;
-    buf[6] = (value >>  8) & 0xff;
-    buf[7] = (value      ) & 0xff;
-    return io_write(buf, 8, 1, io);
-}
-
 #define CLEANUP(x) do {result = (x); goto cleanup;} while (0)
 
 int io_vprintf(IO io, const char *fmt, va_list args) {
@@ -2820,7 +2768,7 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
     va_list_wrapper args_copy;
 
     state.buffer = state.internal_buffer;
-    state.bufferLength = 0;
+    state.buffer_length = 0;
     state.flags = 0;
 
     if (io_begin_write(io))
@@ -2851,7 +2799,7 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
 
         /* Write the format itself */
         {
-            unsigned fmt_flags = 0, fmt_width = 0, fmt_prec = 0, fmt_len = 0;
+            unsigned fmt_flags = 0, fmt_width = 0, fmt_prec = 0, fmt_len = 0, fmt_positional_spec = 0;
 
             fmt = next_fmt + 1; /* Skip leading '%' */
 
@@ -2860,6 +2808,23 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
                     CLEANUP(-1);
                 ++written;
                 goto done_with_format;
+            }
+
+            /* read position specifier */
+            if (*fmt != '0') {
+                const char *old = fmt;
+                fmt_positional_spec = io_stou(fmt, &fmt);
+                if (fmt != old) {
+                    if (*fmt != '$') { /* We actually read the width early. Oops! */
+                        fmt_width = fmt_positional_spec;
+                        fmt_positional_spec = 0;
+                        fmt_flags |= PRINTF_FLAG_HAS_WIDTH;
+                        goto done_with_width;
+                    } else {
+                        ++fmt;
+                        fmt_flags |= PRINTF_FLAG_HAS_POSITIONAL_SPEC;
+                    }
+                }
             }
 
             /* read flags */
@@ -2895,6 +2860,7 @@ done_with_flags:
                 if (fmt != old)
                     fmt_flags |= PRINTF_FLAG_HAS_WIDTH;
             }
+done_with_width:
 
             /* read precision */
             if (*fmt == '.') {
@@ -2986,7 +2952,7 @@ done_with_flags:
                 case 'c':
                 {
                     state.internal_buffer[0] = va_arg(args_copy.args, int);
-                    state.bufferLength = 1;
+                    state.buffer_length = 1;
                     break;
                 }
                 case 's':
@@ -2998,7 +2964,7 @@ done_with_flags:
                         len = fmt_prec;
 
                     state.buffer = (unsigned char *) s;
-                    state.bufferLength = len;
+                    state.buffer_length = len;
                     break;
                 }
                 case 'n':
@@ -3041,14 +3007,14 @@ done_with_flags:
                             case 'X': fmt_prec = 1; break;
                             case 'o':
                                 if (fmt_flags & PRINTF_FLAG_HASH) /* alternative implementation */
-                                    fmt_prec = (unsigned) state.bufferLength + 1;
+                                    fmt_prec = (unsigned) state.buffer_length + 1;
                                 else
                                     fmt_prec = 1;
                                 break;
                         }
                     }
 
-                    if ((fmt_flags & PRINTF_FLAG_HASH) && (*fmt == 'x' || *fmt == 'X') && state.bufferLength > 0)
+                    if ((fmt_flags & PRINTF_FLAG_HASH) && (*fmt == 'x' || *fmt == 'X') && state.buffer_length > 0)
                         state.flags |= PRINTF_STATE_ADD_0X;
 
                     break;
@@ -3214,10 +3180,10 @@ done_with_flags:
 
                             state.flags |= PRINTF_STATE_FREE_BUFFER;
                             state.buffer = (unsigned char *) io_take_underlying_buffer(temp);
-                            state.bufferLength = io_underlying_buffer_size(temp);
+                            state.buffer_length = io_underlying_buffer_size(temp);
 
-                            if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && fmt_prec < state.bufferLength)
-                                state.bufferLength = fmt_prec;
+                            if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && fmt_prec < state.buffer_length)
+                                state.buffer_length = fmt_prec;
 
                             io_destroy(temp);
                         }
@@ -3267,18 +3233,18 @@ done_with_flags:
             size_t fillCount = 0;
             size_t precCount = 0;
 
-            if ((state.flags & PRINTF_STATE_INTEGRAL) && state.bufferLength < fmt_prec) /* Integral should be expanded to fill precision */
+            if ((state.flags & PRINTF_STATE_INTEGRAL) && state.buffer_length < fmt_prec) /* Integral should be expanded to fill precision */
                 precCount = fmt_prec;
-            else if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && state.bufferLength > fmt_prec) /* All other types should be capped at a maximum size */
+            else if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && state.buffer_length > fmt_prec) /* All other types should be capped at a maximum size */
                 precCount = fmt_prec;
             else
-                precCount = state.bufferLength;
+                precCount = state.buffer_length;
 
             if ((fmt_flags & PRINTF_FLAG_HAS_WIDTH) && fmt_width > precCount + addonCharCount)
                 fillCount = fmt_width - precCount - addonCharCount;
 
             written += fillCount + precCount + addonCharCount;
-            precCount -= MIN(precCount, state.bufferLength); /* Remove actual content so precCount only contains number of padded precision characters */
+            precCount -= MIN(precCount, state.buffer_length); /* Remove actual content so precCount only contains number of padded precision characters */
 
             /* calculate fill character for field */
             if ((state.flags & PRINTF_STATE_NUMERIC) &&
@@ -3311,7 +3277,7 @@ done_with_flags:
                 CLEANUP(-1);
 
             /* output field itself */
-            if (io_write_internal(state.buffer, 1, state.bufferLength, io) != state.bufferLength)
+            if (io_write_internal(state.buffer, 1, state.buffer_length, io) != state.buffer_length)
                 CLEANUP(-1);
 
             /* if left aligned, output field fill (this is a NOP if field was right aligned, since fillCount is now 0) */
@@ -3400,6 +3366,26 @@ int io_ftime(IO io, const char *fmt, const struct tm *timeptr) {
 cleanup:
     FREE(dbuf);
     return CC_ENOMEM;
+}
+
+int io_putc_internal(int ch, IO io) {
+    switch (io->type) {
+        case IO_Empty:
+            io->flags |= IO_FLAG_ERROR;
+            io->error = CC_EWRITE;
+            return EOF;
+        case IO_File:
+        case IO_OwnFile: return fputc(ch, io->data.file.fptr);
+        default:
+        {
+            unsigned char chr = ch;
+
+            if (io_write_internal(&chr, 1, 1, io) != 1)
+                return EOF;
+
+            return chr;
+        }
+    }
 }
 
 static size_t io_native_unbuffered_read(void *ptr, size_t size, size_t count, IO io) {
@@ -4027,8 +4013,8 @@ int io_scanf(IO io, const char *fmt, ...) {
 }
 
 static int io_state_switch(IO io) {
-    if (io->type == IO_Custom && io->data.custom.callbacks->stateSwitch != NULL) {
-        if (io->data.custom.callbacks->stateSwitch(io->data.custom.ptr, io))
+    if (io->type == IO_Custom && io->data.custom.callbacks->state_switch != NULL) {
+        if (io->data.custom.callbacks->state_switch(io->data.custom.ptr, io))
             return -1;
     }
 
@@ -4849,6 +4835,8 @@ IO io_tmpfile(void) {
         io_destroy(io);
         return NULL;
     }
+
+    io->flags |= IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_BINARY;
 
     return io;
 }

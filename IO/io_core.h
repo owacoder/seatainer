@@ -28,7 +28,7 @@ struct InputOutputDevice;
  *
  * This is an opaque handle to a runtime-polymorphic object that does not need (or want) any member access.
  *
- * Use of an IO device that references a FILE * will pass all calls on to the C Standard Library. Invariants held in the rest of the library may not apply.
+ * Use of an IO device that references a FILE * will pass some calls on to the C Standard Library. Invariants held in the rest of the library may not apply.
  * If you want more standardized file IO, use the native file functions.
  *
  * Standard IO mode flags include:
@@ -119,7 +119,7 @@ typedef int (*IO_SimpleCallback)(void *userdata, IO io);
  *         .read = custom_read,
  *         .write = custom_write,
  *         .flush = NULL,
- *         .stateSwitch = NULL,
+ *         .state_switch = NULL,
  *         .tell = NULL,
  *         .tell64 = NULL,
  *         .seek = NULL,
@@ -188,7 +188,7 @@ struct InputOutputDeviceCallbacks {
      * @param io The IO device being acted on. Reads from or writes to the device are allowed.
      * @return Zero on success, non-zero on error.
      */
-    IO_SimpleCallback stateSwitch;
+    IO_SimpleCallback state_switch;
 
     /** @brief Requests a clearing of all embedded IO objects.
      *
@@ -636,15 +636,23 @@ int io_copy_and_close(IO in, IO out);
 
 /** @brief Print a number of arguments to an IO device using a specific format string.
  *
- * With the exception of wide strings, and hexadecimal floating-point output, this function should perform identically to the standard
- * library functions in the `printf()` family. Wide strings and hexadecimal floating-point output are not supported.
+ * With the exception of wide strings, this function should perform identically to the standard
+ * library functions in the `printf()` family. Wide strings are not supported.
  *
- * An extension of '%?' (along with the normal format specifiers) is supported for container serializers. This format takes two arguments, the first being the data itself,
- * and the second being a `const CommonContainerBase *` containing the data's recipe. For example, printing a Binary item would require a call like the following:
+ * An extension of "%{}" is available to serialize a custom datatype too:
  *
- *      io_printf(io, "Binary data: %?", (Binary *) (data), container_base_binary_recipe());
- *
- * However, this extension also requires that a serializer be present in the recipe. If no serializer is present, an error is returned.
+ *   "%{type}": pass [(void*) data] - default serializer for type is used
+ *   "%{type[format]}": pass [(void*) data] - serializer for registered format is used
+ *   "%{type[*]}": pass ["format", (void*) data] - serializer for registered format is used
+ *   "%{type[?]}": pass [(Serializer) function, (void*) data] - serializer function is used
+ *   "%{*}": pass ["type", (void*) data] - default serializer for registered type is used
+ *   "%{*[format]}": pass ["type", (void*) data] - serializer for registered format is used
+ *   "%{*[*]}": pass ["type", "format", (void*) data] - serializer for registered format is used
+ *   "%{*[?]}": pass ["type", (Serializer) function, (void*) data] - serializer function is used
+ *   "%{?}": pass [(CommonContainerBase *) base, (void*) data] - serializer in container base is used
+ *   "%{?[format]}": pass [(CommonContainerBase *) base, (void*) data] - serializer for registered format is used
+ *   "%{?[*]}": pass [(CommonContainerBase *) base, "format", (void*) data] - serializer for registered format is used
+ *   "%{?[?]}": pass [(CommonContainerBase *) base, (Serializer) function, (void*) data] - serializer function is used
  *
  * @param io The IO device to write to.
  * @param fmt The format string specifying what arguments to print.
@@ -655,9 +663,6 @@ int io_vprintf(IO io, const char *fmt, va_list args);
 
 /** @brief Print a number of arguments to an IO device using a specific format string.
  *
- * With the exception of wide strings, and hexadecimal floating-point output, this function should perform identically to the standard
- * library functions in the `printf()` family. Wide strings and hexadecimal floating-point output are not supported.
- *
  * This function forwards the argument list on to io_vprintf().
  *
  * @param io The IO device to write to.
@@ -665,7 +670,11 @@ int io_vprintf(IO io, const char *fmt, va_list args);
  * @param ... A list of arguments to print.
  * @return Returns the number of characters successfully written, -1 if a write error occurred, or -2 if the format string was formatted improperly.
  */
-int io_printf(IO io, const char *fmt, ...);
+int io_printf(IO io, const char *fmt, ...)
+#if GCC_COMPILER | CLANG_COMPILER
+__attribute__((format(printf, 2, 3)))
+#endif
+;
 
 /** @brief Formats a tm struct and writes it to an IO device using a specific format string.
  *
