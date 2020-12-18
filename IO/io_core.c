@@ -36,6 +36,10 @@
 
 #define IO_COPY_SIZE 256
 
+static int c_isspace(int chr) {
+    return strchr(" \n\t\r\v\f", chr) != NULL;
+}
+
 /*
  *  HANDLE REGISTERING OF TYPES AND FORMATS FOR SCANF() AND PRINTF()
  */
@@ -1699,19 +1703,6 @@ size_t io_put_uint64_be(IO io, unsigned long long value) {
     return io_write(buf, 8, 1, io);
 }
 
-#define PA_INT 0
-#define PA_CHAR 1
-#define PA_STRING 2
-#define PA_POINTER 3
-#define PA_FLOAT 4
-#define PA_DOUBLE 5
-#define PA_LAST 6
-#define PA_FLAG_PTR 0x1000
-#define PA_FLAG_SHORT 0x2000
-#define PA_FLAG_LONG 0x4000
-#define PA_FLAG_LONG_LONG 0x8000
-#define PA_FLAG_LONG_DOUBLE PA_FLAG_LONG_LONG
-
 #define PRINTF_FLAG_MINUS 0x01
 #define PRINTF_FLAG_PLUS 0x02
 #define PRINTF_FLAG_SPACE 0x04
@@ -1719,7 +1710,7 @@ size_t io_put_uint64_be(IO io, unsigned long long value) {
 #define PRINTF_FLAG_HASH 0x10
 #define PRINTF_FLAG_HAS_WIDTH 0x20
 #define PRINTF_FLAG_HAS_PRECISION 0x40
-#define PRINTF_FLAG_HAS_POSITIONAL_SPEC 0x80
+#define PRINTF_FLAG_HAS_APOSTROPHE 0x80
 
 #define PRINTF_LEN_NONE 0
 #define PRINTF_LEN_HH 1
@@ -1763,6 +1754,75 @@ struct io_printf_state {
 typedef struct {
     va_list args;
 } va_list_wrapper;
+
+typedef struct {
+    int type;
+    union {
+        int i;
+        unsigned int ui;
+        long l;
+        unsigned long ul;
+        long long ll;
+        unsigned long long ull;
+        double d;
+        long double ld;
+        void *p;
+    } data;
+} va_list_positional_argument;
+
+typedef struct {
+    va_list_positional_argument static_args[16];
+    va_list_positional_argument *args;
+    size_t allocated, used;
+} va_list_positional_argument_list;
+
+static void positional_argument_list_init(va_list_positional_argument_list *list) {
+    list->args = list->static_args;
+    list->allocated = sizeof(list->static_args)/sizeof(list->static_args[0]);
+    list->used = 0;
+}
+
+static int positional_argument_list_add_argument(va_list_positional_argument_list *list, const va_list_positional_argument *arg) {
+    if (list->used == list->allocated) {
+        const size_t new_size = list->allocated? safe_multiply(list->allocated, list->allocated >> 1): 16;
+        if (!new_size)
+            return CC_ENOMEM;
+
+        int is_static = list->args == list->static_args;
+
+        va_list_positional_argument *new_args = REALLOC(is_static? NULL: list->args, new_size * sizeof(*list->args));
+        if (!new_args)
+            return CC_ENOMEM;
+
+        if (is_static)
+            memcpy(new_args, list->static_args, list->allocated * sizeof(*list->args));
+
+        list->args = new_args;
+        list->allocated = new_size;
+    }
+
+    list->args[list->used++] = *arg;
+
+    return 0;
+}
+
+static void positional_argument_list_free(va_list_positional_argument_list *list) {
+    if (list->args != list->static_args)
+        FREE(list->args);
+}
+
+#define PA_INT 0
+#define PA_CHAR 1
+#define PA_STRING 2
+#define PA_POINTER 3
+#define PA_FLOAT 4
+#define PA_DOUBLE 5
+#define PA_LAST 6
+#define PA_FLAG_PTR 0x1000
+#define PA_FLAG_SHORT 0x2000
+#define PA_FLAG_LONG 0x4000
+#define PA_FLAG_LONG_LONG 0x8000
+#define PA_FLAG_LONG_DOUBLE PA_FLAG_LONG_LONG
 
 #define PRINTF_D(type, value, flags, prec, len, state)              \
     do {                                                            \
@@ -1812,9 +1872,6 @@ typedef struct {
         (state)->buffer_length = eptr-ptr;                           \
     } while (0)
 
-#define LOG10(len) (((len) == PRINTF_LEN_BIG_L)? log10l: log10)
-#define CEIL(len) (((len) == PRINTF_LEN_BIG_L)? ceill: ceil)
-#define FLOOR(len) (((len) == PRINTF_LEN_BIG_L)? floorl: floor)
 #define PRINTF_ABS(len, value) (((len) == PRINTF_LEN_BIG_L)? fabsl(value): fabs((double) value))
 
 #define PRINTF_F(type, fmt, value, fmt_flags, prec, len, state)     \
@@ -2758,6 +2815,7 @@ static unsigned io_scanf_float(char fmt, IO io, unsigned width, unsigned len, va
 
 #define CLEANUP(x) do {result = (x); goto cleanup;} while (0)
 
+/* TODO: by default io_vscanf, io_vprintf, and io_ftime should be locale-independent, but should be able to support locales too */
 int io_vprintf(IO io, const char *fmt, va_list args) {
     io_lock(io);
 
@@ -2774,144 +2832,178 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
     if (io_begin_write(io))
         return io_unlocki(io, -1);
 
+    const char *save_fmt = NULL; /* Saves the start of fmt since we clobber it */
+    unsigned int gathered_positional_args = 0; /* Number of positional arguments that we encountered in the format string */
+    unsigned int gathered_normal_args = 0; /* Number of normal arguments that we encountered in the format string */
+    unsigned int passes = 1; /* Number of passes to run through the format string */
+    va_list_positional_argument_list positional_args_list;
+    positional_argument_list_init(&positional_args_list);
+
     va_copy(args_copy.args, args);
 
     const char *next_fmt = strchr(fmt, '%');
-    if (next_fmt == NULL) {
-        const size_t len = strlen(fmt);
-        if (io_write_internal(fmt, 1, len, io) != len)
+    if (next_fmt == NULL) { /* No formatting specifiers, just write string */
+        written = strlen(fmt);
+        if (io_write_internal(fmt, 1, written, io) != written)
             CLEANUP(-1);
-        CLEANUP((int) len);
+        goto done_writing;
     }
 
-    do {
-        const size_t block_size = next_fmt - fmt;
+    save_fmt = next_fmt;
 
-        /* If any data precedes the format */
-        if (block_size) {
-            const size_t written_now = io_write_internal(fmt, 1, block_size, io);
+    for (unsigned int pass = 0; pass < passes; ++pass) {
+        do {
+            const size_t block_size = next_fmt - fmt;
 
-            if (block_size != written_now)
-                CLEANUP(-1);
+            /* If any data precedes the format */
+            if (block_size) {
+                const size_t written_now = io_write_internal(fmt, 1, block_size, io);
 
-            written += written_now;
-        }
-
-        /* Write the format itself */
-        {
-            unsigned fmt_flags = 0, fmt_width = 0, fmt_prec = 0, fmt_len = 0, fmt_positional_spec = 0;
-
-            fmt = next_fmt + 1; /* Skip leading '%' */
-
-            if (*fmt == '%') {
-                if (io_putc_internal('%', io) == EOF)
+                if (block_size != written_now)
                     CLEANUP(-1);
-                ++written;
-                goto done_with_format;
+
+                written += written_now;
             }
 
-            /* read position specifier */
-            if (*fmt != '0') {
-                const char *old = fmt;
-                fmt_positional_spec = io_stou(fmt, &fmt);
-                if (fmt != old) {
-                    if (*fmt != '$') { /* We actually read the width early. Oops! */
-                        fmt_width = fmt_positional_spec;
-                        fmt_positional_spec = 0;
-                        fmt_flags |= PRINTF_FLAG_HAS_WIDTH;
-                        goto done_with_width;
-                    } else {
-                        ++fmt;
-                        fmt_flags |= PRINTF_FLAG_HAS_POSITIONAL_SPEC;
+            /* Write the format itself */
+            {
+                unsigned fmt_flags = 0, fmt_width = 0, fmt_prec = 0, fmt_len = 0, fmt_positional_spec = 0;
+
+                fmt = next_fmt + 1; /* Skip leading '%' */
+
+                if (*fmt == '%') {
+                    if (io_putc_internal('%', io) == EOF)
+                        CLEANUP(-1);
+                    ++written;
+                    goto done_with_format;
+                }
+
+                /* read position specifier */
+                ++gathered_normal_args;
+                if (*fmt != '0') {
+                    const char *old = fmt;
+                    fmt_positional_spec = io_stou(fmt, &fmt);
+                    if (fmt != old) {
+                        if (*fmt != '$') { /* We actually read the width early. Oops! */
+                            fmt_width = fmt_positional_spec;
+                            fmt_positional_spec = 0;
+                            fmt_flags |= PRINTF_FLAG_HAS_WIDTH;
+                            goto done_with_width;
+                        } else {
+                            ++fmt;
+
+                            if (--gathered_normal_args)
+                                CLEANUP(-2); /* Disallowed to have positional and normal arguments */
+
+                            if (pass == 0)
+                                ++gathered_positional_args;
+                        }
                     }
                 }
-            }
 
-            /* read flags */
-            while (1)
-            {
-                switch (*fmt++)
+                /* read flags */
+                while (1)
                 {
-                    case '-': fmt_flags |= PRINTF_FLAG_MINUS; break;
-                    case '+': fmt_flags |= PRINTF_FLAG_PLUS; break;
-                    case ' ': fmt_flags |= PRINTF_FLAG_SPACE; break;
-                    case '#': fmt_flags |= PRINTF_FLAG_HASH; break;
-                    case '0': fmt_flags |= PRINTF_FLAG_ZERO; break;
-                    default: --fmt; goto done_with_flags;
+                    switch (*fmt++)
+                    {
+                        case '-': fmt_flags |= PRINTF_FLAG_MINUS; break;
+                        case '+': fmt_flags |= PRINTF_FLAG_PLUS; break;
+                        case ' ': fmt_flags |= PRINTF_FLAG_SPACE; break;
+                        case '#': fmt_flags |= PRINTF_FLAG_HASH; break;
+                        case '0': fmt_flags |= PRINTF_FLAG_ZERO; break;
+                        case '\'': fmt_flags |= PRINTF_FLAG_HAS_APOSTROPHE; break;
+                        default: --fmt; goto done_with_flags;
+                    }
                 }
-            }
 done_with_flags:
 
-            /* read minimum field width */
-            if (*fmt == '*') {
-                int width = va_arg(args_copy.args, int);
-
-                ++fmt;
-                if (width < 0) {
-                    fmt_flags |= PRINTF_FLAG_MINUS;
-                    fmt_width = -width;
-                } else
-                    fmt_width = width;
-
-                fmt_flags |= PRINTF_FLAG_HAS_WIDTH;
-            } else {
-                const char *old = fmt;
-                fmt_width = io_stou(fmt, &fmt);
-                if (fmt != old)
-                    fmt_flags |= PRINTF_FLAG_HAS_WIDTH;
-            }
-done_with_width:
-
-            /* read precision */
-            if (*fmt == '.') {
-                ++fmt;
+                /* read minimum field width */
                 if (*fmt == '*') {
-                    int prec = va_arg(args_copy.args, int);
+                    /* TODO: positional int argument */
+
+                    int width = va_arg(args_copy.args, int);
 
                     ++fmt;
-                    if (prec >= 0) {
-                        fmt_prec = prec;
-                        fmt_flags |= PRINTF_FLAG_HAS_PRECISION;
-                    }
+                    if (width < 0) {
+                        fmt_flags |= PRINTF_FLAG_MINUS;
+                        fmt_width = -width;
+                    } else
+                        fmt_width = width;
+
+                    fmt_flags |= PRINTF_FLAG_HAS_WIDTH;
                 } else {
                     const char *old = fmt;
-                    fmt_prec = io_stou(fmt, &fmt);
+                    fmt_width = io_stou(fmt, &fmt);
                     if (fmt != old)
-                        fmt_flags |= PRINTF_FLAG_HAS_PRECISION;
+                        fmt_flags |= PRINTF_FLAG_HAS_WIDTH;
                 }
-            }
+done_with_width:
 
-            /* read length modifier */
-            switch (*fmt) {
-                case 'h':
-                    if (fmt[1] == 'h') {
+                /* read precision */
+                if (*fmt == '.') {
+                    ++fmt;
+                    if (*fmt == '*') {
+                        /* TODO: positional int argument */
+
+                        int prec = va_arg(args_copy.args, int);
+
                         ++fmt;
-                        fmt_len = PRINTF_LEN_HH;
+                        if (prec >= 0) {
+                            fmt_prec = prec;
+                            fmt_flags |= PRINTF_FLAG_HAS_PRECISION;
+                        }
+                    } else {
+                        const char *old = fmt;
+                        fmt_prec = io_stou(fmt, &fmt);
+                        if (fmt != old)
+                            fmt_flags |= PRINTF_FLAG_HAS_PRECISION;
                     }
-                    else
-                        fmt_len = PRINTF_LEN_H;
-                    break;
-                case 'l':
-                    if (fmt[1] == 'l') {
-                        ++fmt;
-                        fmt_len = PRINTF_LEN_LL;
-                    }
-                    else
-                        fmt_len = PRINTF_LEN_L;
-                    break;
-                case 'I':
-                    if (fmt[1] == '3' && fmt[2] == '2') {
-                        fmt += 2;
-                        /* Set type */
-                        if (sizeof(unsigned int) * CHAR_BIT == 32)
-                            fmt_len = PRINTF_LEN_NONE;
-                        else if (sizeof(unsigned long) * CHAR_BIT == 32)
-                            fmt_len = PRINTF_LEN_L;
+                }
+
+                /* read length modifier */
+                switch (*fmt) {
+                    case 'h':
+                        if (fmt[1] == 'h') {
+                            ++fmt;
+                            fmt_len = PRINTF_LEN_HH;
+                        }
                         else
-                            CLEANUP(-2);
-                    } else if (fmt[1] == '6' && fmt[2] == '4') {
-                        fmt += 2;
-                        /* Set type, if available */
+                            fmt_len = PRINTF_LEN_H;
+                        break;
+                    case 'l':
+                        if (fmt[1] == 'l') {
+                            ++fmt;
+                            fmt_len = PRINTF_LEN_LL;
+                        }
+                        else
+                            fmt_len = PRINTF_LEN_L;
+                        break;
+                    case 'I':
+                        if (fmt[1] == '3' && fmt[2] == '2') {
+                            fmt += 2;
+                            /* Set type */
+                            if (sizeof(unsigned int) * CHAR_BIT == 32)
+                                fmt_len = PRINTF_LEN_NONE;
+                            else if (sizeof(unsigned long) * CHAR_BIT == 32)
+                                fmt_len = PRINTF_LEN_L;
+                            else
+                                CLEANUP(-2);
+                        } else if (fmt[1] == '6' && fmt[2] == '4') {
+                            fmt += 2;
+                            /* Set type, if available */
+                            if (sizeof(unsigned int) * CHAR_BIT == 64)
+                                fmt_len = PRINTF_LEN_NONE;
+                            else if (sizeof(unsigned long) * CHAR_BIT == 64)
+                                fmt_len = PRINTF_LEN_L;
+                            else if (sizeof(unsigned long long) * CHAR_BIT == 64)
+                                fmt_len = PRINTF_LEN_LL;
+                            else
+                                CLEANUP(-2);
+                        } else { /* plain I is ptrdiff_t if signed, size_t if unsigned */
+                            fmt_len = PRINTF_LEN_I;
+                        }
+                        break;
+                    case 'q':
                         if (sizeof(unsigned int) * CHAR_BIT == 64)
                             fmt_len = PRINTF_LEN_NONE;
                         else if (sizeof(unsigned long) * CHAR_BIT == 64)
@@ -2920,379 +3012,363 @@ done_with_width:
                             fmt_len = PRINTF_LEN_LL;
                         else
                             CLEANUP(-2);
-                    } else { /* plain I is ptrdiff_t if signed, size_t if unsigned */
-                        fmt_len = PRINTF_LEN_I;
-                    }
-                    break;
-                case 'q':
-                    if (sizeof(unsigned int) * CHAR_BIT == 64)
-                        fmt_len = PRINTF_LEN_NONE;
-                    else if (sizeof(unsigned long) * CHAR_BIT == 64)
-                        fmt_len = PRINTF_LEN_L;
-                    else if (sizeof(unsigned long long) * CHAR_BIT == 64)
-                        fmt_len = PRINTF_LEN_LL;
-                    else
-                        CLEANUP(-2);
-                    break;
-                case 'j': fmt_len = PRINTF_LEN_J; break;
-                case 'z': fmt_len = PRINTF_LEN_Z; break;
-                case 't': fmt_len = PRINTF_LEN_T; break;
-                case 'L': fmt_len = PRINTF_LEN_BIG_L; break;
-                default: --fmt; break;
-            }
-            ++fmt;
-
-            /* reset state flags to internal buffer */
-            state.flags = 0;
-            state.buffer = state.internal_buffer;
-
-            /* read format specifier */
-            switch (*fmt) {
-                default: CLEANUP(-2); /* incomplete format specifier */
-                case 'c':
-                {
-                    state.internal_buffer[0] = va_arg(args_copy.args, int);
-                    state.buffer_length = 1;
-                    break;
+                        break;
+                    case 'j': fmt_len = PRINTF_LEN_J; break;
+                    case 'z': fmt_len = PRINTF_LEN_Z; break;
+                    case 't': fmt_len = PRINTF_LEN_T; break;
+                    case 'L': fmt_len = PRINTF_LEN_BIG_L; break;
+                    default: --fmt; break;
                 }
-                case 's':
-                {
-                    char *s = va_arg(args_copy.args, char *);
-                    size_t len = strlen(s);
+                ++fmt;
 
-                    if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && fmt_prec < len)
-                        len = fmt_prec;
+                /* reset state flags to internal buffer */
+                state.flags = 0;
+                state.buffer = state.internal_buffer;
 
-                    state.buffer = (unsigned char *) s;
-                    state.buffer_length = len;
-                    break;
-                }
-                case 'n':
-                    switch (fmt_len) {
-                        case PRINTF_LEN_NONE: *(va_arg(args_copy.args, int *)) = (int) written; break;
-                        case PRINTF_LEN_HH: *(va_arg(args_copy.args, signed char *)) = (signed char) written; break;
-                        case PRINTF_LEN_H: *(va_arg(args_copy.args, short *)) = (short) written; break;
-                        case PRINTF_LEN_L: *(va_arg(args_copy.args, long *)) = (long) written; break;
-                        case PRINTF_LEN_LL: *(va_arg(args_copy.args, long long *)) = (long long) written; break;
-                        case PRINTF_LEN_J: *(va_arg(args_copy.args, intmax_t *)) = (intmax_t) written; break;
-                        case PRINTF_LEN_I: /* fallthrough */
-                        case PRINTF_LEN_Z: *(va_arg(args_copy.args, size_t *)) = written; break;
-                        case PRINTF_LEN_T: *(va_arg(args_copy.args, ptrdiff_t *)) = (ptrdiff_t) written; break;
-                        default: CLEANUP(-2);
+                /* read format specifier */
+                switch (*fmt) {
+                    default: CLEANUP(-2); /* incomplete format specifier */
+                    case 'c':
+                    {
+                        state.internal_buffer[0] = va_arg(args_copy.args, int);
+                        state.buffer_length = 1;
+                        break;
                     }
-                    break;
-                case 'd':
-                case 'i':
-                    state.flags |= PRINTF_STATE_INTEGRAL | PRINTF_STATE_SIGNED;
+                    case 's':
+                    {
+                        char *s = va_arg(args_copy.args, char *);
+                        size_t len = strlen(s);
 
-                    if (io_printf_signed_int(&state, fmt_flags, fmt_prec, fmt_len, &args_copy) < 0)
-                        CLEANUP(-2);
+                        if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && fmt_prec < len)
+                            len = fmt_prec;
 
-                    if (!(fmt_flags & PRINTF_FLAG_HAS_PRECISION))
-                        fmt_prec = 1;
-                    break;
-                case 'u':
-                case 'o':
-                case 'x':
-                case 'X':
-                    state.flags |= PRINTF_STATE_INTEGRAL;
-
-                    if (io_printf_unsigned_int(&state, *fmt, fmt_flags, fmt_prec, fmt_len, &args_copy) < 0)
-                        CLEANUP(-2);
-
-                    if (!(fmt_flags & PRINTF_FLAG_HAS_PRECISION)) {
-                        switch (*fmt) {
-                            case 'u':
-                            case 'x':
-                            case 'X': fmt_prec = 1; break;
-                            case 'o':
-                                if (fmt_flags & PRINTF_FLAG_HASH) /* alternative implementation */
-                                    fmt_prec = (unsigned) state.buffer_length + 1;
-                                else
-                                    fmt_prec = 1;
-                                break;
+                        state.buffer = (unsigned char *) s;
+                        state.buffer_length = len;
+                        break;
+                    }
+                    case 'n':
+                        switch (fmt_len) {
+                            case PRINTF_LEN_NONE: *(va_arg(args_copy.args, int *)) = (int) written; break;
+                            case PRINTF_LEN_HH: *(va_arg(args_copy.args, signed char *)) = (signed char) written; break;
+                            case PRINTF_LEN_H: *(va_arg(args_copy.args, short *)) = (short) written; break;
+                            case PRINTF_LEN_L: *(va_arg(args_copy.args, long *)) = (long) written; break;
+                            case PRINTF_LEN_LL: *(va_arg(args_copy.args, long long *)) = (long long) written; break;
+                            case PRINTF_LEN_J: *(va_arg(args_copy.args, intmax_t *)) = (intmax_t) written; break;
+                            case PRINTF_LEN_I: /* fallthrough */
+                            case PRINTF_LEN_Z: *(va_arg(args_copy.args, size_t *)) = written; break;
+                            case PRINTF_LEN_T: *(va_arg(args_copy.args, ptrdiff_t *)) = (ptrdiff_t) written; break;
+                            default: CLEANUP(-2);
                         }
-                    }
+                        break;
+                    case 'd':
+                    case 'i':
+                        state.flags |= PRINTF_STATE_INTEGRAL | PRINTF_STATE_SIGNED;
 
-                    if ((fmt_flags & PRINTF_FLAG_HASH) && (*fmt == 'x' || *fmt == 'X') && state.buffer_length > 0)
-                        state.flags |= PRINTF_STATE_ADD_0X;
+                        if (io_printf_signed_int(&state, fmt_flags, fmt_prec, fmt_len, &args_copy) < 0)
+                            CLEANUP(-2);
 
-                    break;
-                case 'a':
-                case 'A':
-                case 'f':
-                case 'F':
-                case 'e':
-                case 'E':
-                case 'g':
-                case 'G':
-                    state.flags |= PRINTF_STATE_FLOATING_POINT;
+                        if (!(fmt_flags & PRINTF_FLAG_HAS_PRECISION))
+                            fmt_prec = 1;
+                        break;
+                    case 'u':
+                    case 'o':
+                    case 'x':
+                    case 'X':
+                        state.flags |= PRINTF_STATE_INTEGRAL;
 
-                    if (fmt_len == PRINTF_LEN_BIG_L) {
-                        long double value = va_arg(args_copy.args, long double);
-                        PRINTF_F(long double, *fmt, value, fmt_flags, fmt_prec, fmt_len, &state);
-                    } else {
-                        double value = va_arg(args_copy.args, double);
-                        PRINTF_F(double, *fmt, value, fmt_flags, fmt_prec, fmt_len, &state);
-                    }
+                        if (io_printf_unsigned_int(&state, *fmt, fmt_flags, fmt_prec, fmt_len, &args_copy) < 0)
+                            CLEANUP(-2);
 
-                    /* Clear precision because the helper function takes care of it for floating-point */
-                    fmt_prec = 0;
-
-                    if (state.flags & PRINTF_STATE_ERROR)
-                        CLEANUP(-1);
-
-                    break;
-                case 'p':
-                    state.flags |= PRINTF_STATE_INTEGRAL | PRINTF_STATE_ADD_0X;
-
-                    fmt_flags |= PRINTF_FLAG_HASH | PRINTF_FLAG_HAS_PRECISION;
-                    fmt_prec = sizeof(void *) * 2 /* for hex encoding */ * CHAR_BIT / 8;
-
-                    uintmax_t val = (uintmax_t) va_arg(args_copy.args, void *);
-                    PRINTF_U(uintmax_t, 'x', val, fmt_flags, fmt_prec, PRINTF_LEN_NONE, &state);
-
-                    break;
-                case '{': { /* Custom extension, print data using provided CommonContainerBase serializer */
-                    /* Formats:
-                     *   "%{type}": pass [(void*) data] - default serializer for type is used
-                     *   "%{type[format]}": pass [(void*) data] - serializer for registered format is used
-                     *   "%{type[*]}": pass ["format", (void*) data] - serializer for registered format is used
-                     *   "%{type[?]}": pass [(Serializer) function, (void*) data] - serializer function is used
-                     *   "%{*}": pass ["type", (void*) data] - default serializer for registered type is used
-                     *   "%{*[format]}": pass ["type", (void*) data] - serializer for registered format is used
-                     *   "%{*[*]}": pass ["type", "format", (void*) data] - serializer for registered format is used
-                     *   "%{*[?]}": pass ["type", (Serializer) function, (void*) data] - serializer function is used
-                     *   "%{?}": pass [(CommonContainerBase *) base, (void*) data] - serializer in container base is used
-                     *   "%{?[format]}": pass [(CommonContainerBase *) base, (void*) data] - serializer for registered format is used
-                     *   "%{?[*]}": pass [(CommonContainerBase *) base, "format", (void*) data] - serializer for registered format is used
-                     *   "%{?[?]}": pass [(CommonContainerBase *) base, (Serializer) function, (void*) data] - serializer function is used
-                     */
-                    Binary typename, formatname;
-                    const CommonContainerBase *type = NULL;
-                    Serializer serializer = NULL;
-
-                    typename.data = (char *) ++fmt;
-                    typename.length = 0;
-                    formatname.data = NULL;
-                    formatname.length = 0;
-                    size_t nested = 0;
-
-                    while (*fmt && (nested || (*fmt != '[' && *fmt != '}'))) {
-                        if (*fmt == '{') ++nested;
-                        else if (*fmt == '}') {
-                            if (!nested)
-                                break;
-                            --nested;
+                        if (!(fmt_flags & PRINTF_FLAG_HAS_PRECISION)) {
+                            switch (*fmt) {
+                                case 'u':
+                                case 'x':
+                                case 'X': fmt_prec = 1; break;
+                                case 'o':
+                                    if (fmt_flags & PRINTF_FLAG_HASH) /* alternative implementation */
+                                        fmt_prec = (unsigned) state.buffer_length + 1;
+                                    else
+                                        fmt_prec = 1;
+                                    break;
+                            }
                         }
 
-                        ++typename.length;
-                        ++fmt;
-                    }
+                        if ((fmt_flags & PRINTF_FLAG_HASH) && (*fmt == 'x' || *fmt == 'X') && state.buffer_length > 0)
+                            state.flags |= PRINTF_STATE_ADD_0X;
 
-                    if (*fmt == '[') {
-                        formatname.data = (char *) ++fmt;
+                        break;
+                    case 'a':
+                    case 'A':
+                    case 'f':
+                    case 'F':
+                    case 'e':
+                    case 'E':
+                    case 'g':
+                    case 'G':
+                        state.flags |= PRINTF_STATE_FLOATING_POINT;
 
-                        while (*fmt && (nested || *fmt != ']')) {
-                            if (*fmt == '[') ++nested;
-                            else if (*fmt == ']') {
+                        if (fmt_len == PRINTF_LEN_BIG_L) {
+                            long double value = va_arg(args_copy.args, long double);
+                            PRINTF_F(long double, *fmt, value, fmt_flags, fmt_prec, fmt_len, &state);
+                        } else {
+                            double value = va_arg(args_copy.args, double);
+                            PRINTF_F(double, *fmt, value, fmt_flags, fmt_prec, fmt_len, &state);
+                        }
+
+                        /* Clear precision because the helper function takes care of it for floating-point */
+                        fmt_prec = 0;
+
+                        if (state.flags & PRINTF_STATE_ERROR)
+                            CLEANUP(-1);
+
+                        break;
+                    case 'p':
+                        state.flags |= PRINTF_STATE_INTEGRAL | PRINTF_STATE_ADD_0X;
+
+                        fmt_flags |= PRINTF_FLAG_HASH | PRINTF_FLAG_HAS_PRECISION;
+                        fmt_prec = sizeof(void *) * 2 /* for hex encoding */ * CHAR_BIT / 8;
+
+                        uintmax_t val = (uintmax_t) va_arg(args_copy.args, void *);
+                        PRINTF_U(uintmax_t, 'x', val, fmt_flags, fmt_prec, PRINTF_LEN_NONE, &state);
+
+                        break;
+                    case '{': { /* Custom extension, print data using provided CommonContainerBase serializer */
+                        /* Formats:
+                         *   "%{type}": pass [(void*) data] - default serializer for type is used
+                         *   "%{type[format]}": pass [(void*) data] - serializer for registered format is used
+                         *   "%{type[*]}": pass ["format", (void*) data] - serializer for registered format is used
+                         *   "%{type[?]}": pass [(Serializer) function, (void*) data] - serializer function is used
+                         *   "%{*}": pass ["type", (void*) data] - default serializer for registered type is used
+                         *   "%{*[format]}": pass ["type", (void*) data] - serializer for registered format is used
+                         *   "%{*[*]}": pass ["type", "format", (void*) data] - serializer for registered format is used
+                         *   "%{*[?]}": pass ["type", (Serializer) function, (void*) data] - serializer function is used
+                         *   "%{?}": pass [(CommonContainerBase *) base, (void*) data] - serializer in container base is used
+                         *   "%{?[format]}": pass [(CommonContainerBase *) base, (void*) data] - serializer for registered format is used
+                         *   "%{?[*]}": pass [(CommonContainerBase *) base, "format", (void*) data] - serializer for registered format is used
+                         *   "%{?[?]}": pass [(CommonContainerBase *) base, (Serializer) function, (void*) data] - serializer function is used
+                         */
+                        Binary typename, formatname;
+                        const CommonContainerBase *type = NULL;
+                        Serializer serializer = NULL;
+
+                        typename.data = (char *) ++fmt;
+                        typename.length = 0;
+                        formatname.data = NULL;
+                        formatname.length = 0;
+                        size_t nested = 0;
+
+                        while (*fmt && (nested || (*fmt != '[' && *fmt != '}'))) {
+                            if (*fmt == '{') ++nested;
+                            else if (*fmt == '}') {
                                 if (!nested)
                                     break;
                                 --nested;
                             }
 
-                            ++formatname.length;
+                            ++typename.length;
                             ++fmt;
                         }
 
-                        if (*fmt == ']')
-                            ++fmt;
-                    }
+                        if (*fmt == '[') {
+                            formatname.data = (char *) ++fmt;
 
-                    if (*fmt != '}')
-                        CLEANUP(-2);
+                            while (*fmt && (nested || *fmt != ']')) {
+                                if (*fmt == '[') ++nested;
+                                else if (*fmt == ']') {
+                                    if (!nested)
+                                        break;
+                                    --nested;
+                                }
 
-                    if (typename.length == 1) {
-                        if (typename.data[0] == '*') {
-                            char *dynamic_typename = va_arg(args_copy.args, char *);
+                                ++formatname.length;
+                                ++fmt;
+                            }
 
-                            typename.data = dynamic_typename;
-                            typename.length = strlen(dynamic_typename);
-                        } else if (typename.data[0] == '?') {
-                            type = va_arg(args_copy.args, const CommonContainerBase *);
+                            if (*fmt == ']')
+                                ++fmt;
+                        }
+
+                        if (*fmt != '}')
+                            CLEANUP(-2);
+
+                        if (typename.length == 1) {
+                            if (typename.data[0] == '*') {
+                                char *dynamic_typename = va_arg(args_copy.args, char *);
+
+                                typename.data = dynamic_typename;
+                                typename.length = strlen(dynamic_typename);
+                            } else if (typename.data[0] == '?') {
+                                type = va_arg(args_copy.args, const CommonContainerBase *);
+                                if (!type)
+                                    CLEANUP(-1);
+                            }
+                        }
+
+                        if (formatname.length == 1) {
+                            if (formatname.data[0] == '*') {
+                                char *dynamic_formatname = va_arg(args_copy.args, char *);
+
+                                formatname.data = dynamic_formatname;
+                                formatname.length = strlen(dynamic_formatname);
+                            } else if (formatname.data[0] == '?') {
+                                serializer = va_arg(args_copy.args, Serializer);
+                                if (!serializer)
+                                    CLEANUP(-1);
+                            }
+                        }
+
+                        void *data = va_arg(args_copy.args, void *);
+
+                        if (!type) { /* If type not specified, it must be registered */
+                            type = io_get_registered_type(typename.data, typename.length);
                             if (!type)
                                 CLEANUP(-1);
                         }
-                    }
 
-                    if (formatname.length == 1) {
-                        if (formatname.data[0] == '*') {
-                            char *dynamic_formatname = va_arg(args_copy.args, char *);
+                        if (!serializer) { /* If serializer not specified, it could be registered name, or if not present, in the type recipe */
+                            if (formatname.data != NULL) {
+                                struct RegisteredFormat *registered_fmt = io_get_registered_format(formatname.data, formatname.length);
 
-                            formatname.data = dynamic_formatname;
-                            formatname.length = strlen(dynamic_formatname);
-                        } else if (formatname.data[0] == '?') {
-                            serializer = va_arg(args_copy.args, Serializer);
+                                serializer = registered_fmt? registered_fmt->serializer: NULL;
+                            } else if (type->serialize)
+                                serializer = type->serialize;
+
                             if (!serializer)
                                 CLEANUP(-1);
                         }
-                    }
 
-                    void *data = va_arg(args_copy.args, void *);
+                        struct SerializerIdentity serializer_identity;
+                        serializer_identity.fmt = NULL;
+                        serializer_identity.fmt_length = 0;
 
-                    if (!type) { /* If type not specified, it must be registered */
-                        type = io_get_registered_type(typename.data, typename.length);
-                        if (!type)
-                            CLEANUP(-1);
-                    }
+                        if ((fmt_flags & PRINTF_FLAG_HAS_WIDTH) ||
+                            (fmt_flags & PRINTF_FLAG_HAS_PRECISION)) {
+                            /* If a width or precision has been specified, space needs to be allocated to hold the
+                             * requested serialized data because it may have to be padded or truncated to fit the field
+                             * specifier. Unfortunately there isn't really a more optimal solution at the moment.
+                             */
 
-                    if (!serializer) { /* If serializer not specified, it could be registered name, or if not present, in the type recipe */
-                        if (formatname.data != NULL) {
-                            struct RegisteredFormat *registered_fmt = io_get_registered_format(formatname.data, formatname.length);
+                            IO temp = io_open_dynamic_buffer("wb");
+                            if (temp == NULL)
+                                CLEANUP(-1);
+                            else {
+                                if (serializer(temp, data, type, &serializer_identity)) {
+                                    io_destroy(temp);
+                                    CLEANUP(-1);
+                                }
 
-                            serializer = registered_fmt? registered_fmt->serializer: NULL;
-                        } else if (type->serialize)
-                            serializer = type->serialize;
+                                state.flags |= PRINTF_STATE_FREE_BUFFER;
+                                state.buffer = (unsigned char *) io_take_underlying_buffer(temp);
+                                state.buffer_length = io_underlying_buffer_size(temp);
 
-                        if (!serializer)
-                            CLEANUP(-1);
-                    }
+                                if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && fmt_prec < state.buffer_length)
+                                    state.buffer_length = fmt_prec;
 
-                    struct SerializerIdentity serializer_identity;
-                    serializer_identity.fmt = NULL;
-                    serializer_identity.fmt_length = 0;
-
-                    if ((fmt_flags & PRINTF_FLAG_HAS_WIDTH) ||
-                        (fmt_flags & PRINTF_FLAG_HAS_PRECISION)) {
-                        /* If a width or precision has been specified, space needs to be allocated to hold the
-                         * requested serialized data because it may have to be padded or truncated to fit the field
-                         * specifier. Unfortunately there isn't really a more optimal solution at the moment.
-                         */
-
-                        IO temp = io_open_dynamic_buffer("wb");
-                        if (temp == NULL)
-                            CLEANUP(-1);
-                        else {
-                            if (serializer(temp, data, type, &serializer_identity)) {
                                 io_destroy(temp);
+                            }
+                        } else {
+                            /* If no width or precision has been specified, the custom datatype can be directly serialized
+                             * to the underlying IO device, since no padding or truncation needs to be done. The length of the
+                             * serialized data is mandated to be returned in the serializer_identity struct so it can be added to
+                             * the return value of this function. */
+                            if (serializer(io, data, type, &serializer_identity)) {
                                 CLEANUP(-1);
                             }
 
-                            state.flags |= PRINTF_STATE_FREE_BUFFER;
-                            state.buffer = (unsigned char *) io_take_underlying_buffer(temp);
-                            state.buffer_length = io_underlying_buffer_size(temp);
-
-                            if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && fmt_prec < state.buffer_length)
-                                state.buffer_length = fmt_prec;
-
-                            io_destroy(temp);
-                        }
-                    } else {
-                        /* If no width or precision has been specified, the custom datatype can be directly serialized
-                         * to the underlying IO device, since no padding or truncation needs to be done. The length of the
-                         * serialized data is mandated to be returned in the serializer_identity struct so it can be added to
-                         * the return value of this function. */
-                        if (serializer(io, data, type, &serializer_identity)) {
-                            CLEANUP(-1);
+                            written += serializer_identity.written;
+                            goto done_with_format;
                         }
 
-                        written += serializer_identity.written;
-                        goto done_with_format;
+                        break;
                     }
-
-                    /* Dynamically allocate buffer and get length of result */
-                    /*
-                     */
-
-                    break;
                 }
-            }
 
-            /* calculate addon characters for format */
-            char addonChar = 0;
-            size_t addonCharCount = 0;
+                /* calculate addon characters for format */
+                char addonChar = 0;
+                size_t addonCharCount = 0;
 
-            if (state.flags & PRINTF_STATE_NUMERIC) {
-                if (state.flags & PRINTF_STATE_NEGATIVE) {
-                    addonChar = '-';
-                    addonCharCount = 1;
-                } else if ((state.flags & PRINTF_STATE_SIGNED)) {
-                    if (fmt_flags & PRINTF_FLAG_PLUS) {
-                        addonChar = '+';
+                if (state.flags & PRINTF_STATE_NUMERIC) {
+                    if (state.flags & PRINTF_STATE_NEGATIVE) {
+                        addonChar = '-';
                         addonCharCount = 1;
-                    }
-                    else if (fmt_flags & PRINTF_FLAG_SPACE) {
-                        addonChar = ' ';
-                        addonCharCount = 1;
-                    }
-                } else if (state.flags & PRINTF_STATE_ADD_0X)
-                    addonCharCount = 2;
-            }
+                    } else if ((state.flags & PRINTF_STATE_SIGNED)) {
+                        if (fmt_flags & PRINTF_FLAG_PLUS) {
+                            addonChar = '+';
+                            addonCharCount = 1;
+                        }
+                        else if (fmt_flags & PRINTF_FLAG_SPACE) {
+                            addonChar = ' ';
+                            addonCharCount = 1;
+                        }
+                    } else if (state.flags & PRINTF_STATE_ADD_0X)
+                        addonCharCount = 2;
+                }
 
-            /* calculate number of fill characters for field width for format */
-            size_t fillCount = 0;
-            size_t precCount = 0;
+                /* calculate number of fill characters for field width for format */
+                size_t fillCount = 0;
+                size_t precCount = 0;
 
-            if ((state.flags & PRINTF_STATE_INTEGRAL) && state.buffer_length < fmt_prec) /* Integral should be expanded to fill precision */
-                precCount = fmt_prec;
-            else if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && state.buffer_length > fmt_prec) /* All other types should be capped at a maximum size */
-                precCount = fmt_prec;
-            else
-                precCount = state.buffer_length;
+                if ((state.flags & PRINTF_STATE_INTEGRAL) && state.buffer_length < fmt_prec) /* Integral should be expanded to fill precision */
+                    precCount = fmt_prec;
+                else if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && state.buffer_length > fmt_prec) /* All other types should be capped at a maximum size */
+                    precCount = fmt_prec;
+                else
+                    precCount = state.buffer_length;
 
-            if ((fmt_flags & PRINTF_FLAG_HAS_WIDTH) && fmt_width > precCount + addonCharCount)
-                fillCount = fmt_width - precCount - addonCharCount;
+                if ((fmt_flags & PRINTF_FLAG_HAS_WIDTH) && fmt_width > precCount + addonCharCount)
+                    fillCount = fmt_width - precCount - addonCharCount;
 
-            written += fillCount + precCount + addonCharCount;
-            precCount -= MIN(precCount, state.buffer_length); /* Remove actual content so precCount only contains number of padded precision characters */
+                written += fillCount + precCount + addonCharCount;
+                precCount -= MIN(precCount, state.buffer_length); /* Remove actual content so precCount only contains number of padded precision characters */
 
-            /* calculate fill character for field */
-            if ((state.flags & PRINTF_STATE_NUMERIC) &&
-                    !(fmt_flags & (PRINTF_FLAG_MINUS | PRINTF_FLAG_HAS_PRECISION)) &&
-                    (fmt_flags & PRINTF_FLAG_ZERO)) {
-                precCount += fillCount;
-                fillCount = 0;
-            }
+                /* calculate fill character for field */
+                if ((state.flags & PRINTF_STATE_NUMERIC) &&
+                        !(fmt_flags & (PRINTF_FLAG_MINUS | PRINTF_FLAG_HAS_PRECISION)) &&
+                        (fmt_flags & PRINTF_FLAG_ZERO)) {
+                    precCount += fillCount;
+                    fillCount = 0;
+                }
 
-            /* ----- ACTUAL OUTPUT ----- */
-            /* if right aligned, output field fill */
-            if (!(fmt_flags & PRINTF_FLAG_MINUS)) /* right-align field */ {
+                /* ----- ACTUAL OUTPUT ----- */
+                /* if right aligned, output field fill */
+                if (!(fmt_flags & PRINTF_FLAG_MINUS)) /* right-align field */ {
+                    if (io_putc_n_internal(' ', fillCount, io) == EOF)
+                        CLEANUP(-1);
+
+                    fillCount = 0;
+                }
+
+                /* add addon characters */
+                if (state.flags & PRINTF_STATE_ADD_0X) {
+                    if (io_putc_internal('0', io) == EOF || io_putc_internal(isupper(*fmt & 0xff)? 'X': 'x', io) == EOF)
+                        CLEANUP(-1);
+                } else if (addonChar) {
+                    if (io_putc_internal(addonChar, io) == EOF)
+                        CLEANUP(-1);
+                }
+
+                /* output precision fill */
+                if (io_putc_n_internal('0', precCount, io) == EOF)
+                    CLEANUP(-1);
+
+                /* output field itself */
+                if (io_write_internal(state.buffer, 1, state.buffer_length, io) != state.buffer_length)
+                    CLEANUP(-1);
+
+                /* if left aligned, output field fill (this is a NOP if field was right aligned, since fillCount is now 0) */
                 if (io_putc_n_internal(' ', fillCount, io) == EOF)
                     CLEANUP(-1);
 
-                fillCount = 0;
+                if (state.flags & PRINTF_STATE_FREE_BUFFER) {
+                    FREE(state.buffer);
+                    state.flags -= PRINTF_STATE_FREE_BUFFER;
+                }
             }
-
-            /* add addon characters */
-            if (state.flags & PRINTF_STATE_ADD_0X) {
-                if (io_putc_internal('0', io) == EOF || io_putc_internal(isupper(*fmt & 0xff)? 'X': 'x', io) == EOF)
-                    CLEANUP(-1);
-            } else if (addonChar) {
-                if (io_putc_internal(addonChar, io) == EOF)
-                    CLEANUP(-1);
-            }
-
-            /* output precision fill */
-            if (io_putc_n_internal('0', precCount, io) == EOF)
-                CLEANUP(-1);
-
-            /* output field itself */
-            if (io_write_internal(state.buffer, 1, state.buffer_length, io) != state.buffer_length)
-                CLEANUP(-1);
-
-            /* if left aligned, output field fill (this is a NOP if field was right aligned, since fillCount is now 0) */
-            if (io_putc_n_internal(' ', fillCount, io) == EOF)
-                CLEANUP(-1);
-
-            if (state.flags & PRINTF_STATE_FREE_BUFFER) {
-                FREE(state.buffer);
-                state.flags -= PRINTF_STATE_FREE_BUFFER;
-            }
-        }
 
 done_with_format:
-        next_fmt = strchr(++fmt, '%');
-    } while (next_fmt != NULL);
+            next_fmt = strchr(++fmt, '%');
+        } while (next_fmt != NULL);
+    }
 
     if (*fmt) {
         const size_t len = strlen(fmt);
@@ -3301,6 +3377,7 @@ done_with_format:
         written += len;
     }
 
+done_writing:
     if (written > INT_MAX) {
         io_set_error(io, CC_EOVERFLOW);
         result = -1;
@@ -3312,6 +3389,8 @@ cleanup:
         FREE(state.buffer);
 
     va_end(args_copy.args);
+
+    positional_argument_list_free(&positional_args_list);
 
     return io_unlocki(io, result);
 }
@@ -3776,7 +3855,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                 int chr = 0;
                 do {
                     chr = io_getc_internal(io);
-                } while (chr != EOF && isspace(chr));
+                } while (chr != EOF && c_isspace(chr));
                 io_ungetc_internal(chr, io);
             }
 
@@ -3845,7 +3924,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
 
                     for (; fmt_width; --fmt_width) {
                         int chr = io_getc_internal(io);
-                        if (chr == EOF || isspace(chr)) {
+                        if (chr == EOF || c_isspace(chr)) {
                             io_ungetc_internal(chr, io);
                             break;
                         }
@@ -3962,7 +4041,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
             }
 
             ++items;
-        } else if (isspace(chr)) {
+        } else if (c_isspace(chr)) {
             /* Read zero or more space characters */
             int charRead;
 
@@ -3970,7 +4049,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                 charRead = io_getc_internal(io);
                 if (charRead != EOF)
                     ++bytes;
-            } while (charRead != EOF && isspace(charRead));
+            } while (charRead != EOF && c_isspace(charRead));
 
             if (charRead != EOF)
                 io_ungetc_internal(charRead, io);

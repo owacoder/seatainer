@@ -671,7 +671,7 @@ int io_vprintf(IO io, const char *fmt, va_list args);
  * @return Returns the number of characters successfully written, -1 if a write error occurred, or -2 if the format string was formatted improperly.
  */
 int io_printf(IO io, const char *fmt, ...)
-#if GCC_COMPILER | CLANG_COMPILER
+#if !WINDOWS_OS && (GCC_COMPILER | CLANG_COMPILER)
 __attribute__((format(printf, 2, 3)))
 #endif
 ;
