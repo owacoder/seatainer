@@ -1744,6 +1744,25 @@ static unsigned io_stou(const char *str, const char **update) {
 
 #define PRINTF_STATE_ERROR 0x80
 
+#define PA_NONE 0
+#define PA_INT 1
+#define PA_CHAR 2
+#define PA_STRING 3
+#define PA_POINTER 4
+#define PA_FLOAT 5
+#define PA_DOUBLE 6
+#define PA_SIZE_T 7
+#define PA_PTRDIFF_T 8
+#define PA_INTMAX_T 9
+#define PA_LAST 10
+#define PA_FLAG_UNSIGNED 0x0800u
+#define PA_FLAG_PTR 0x1000u
+#define PA_FLAG_SHORT 0x2000u
+#define PA_FLAG_LONG 0x4000u
+#define PA_FLAG_LONG_LONG 0x8000u
+#define PA_FLAG_LONG_DOUBLE PA_FLAG_LONG_LONG
+#define PA_FLAG_MASK 0xf800u
+
 struct io_printf_state {
     unsigned char *buffer;
     unsigned char internal_buffer[4 * sizeof(long long)];
@@ -1764,6 +1783,10 @@ typedef struct {
         unsigned long ul;
         long long ll;
         unsigned long long ull;
+        intmax_t imax;
+        uintmax_t uimax;
+        size_t sz;
+        ptrdiff_t pdiff;
         double d;
         long double ld;
         void *p;
@@ -1776,15 +1799,109 @@ typedef struct {
     size_t allocated, used;
 } va_list_positional_argument_list;
 
+static int io_vcompatible_args(const va_list_positional_argument *lhs, const va_list_positional_argument *rhs) {
+    int lbase_type = lhs->type & ~PA_FLAG_MASK;
+    int rbase_type = rhs->type & ~PA_FLAG_MASK;
+
+    if ((lhs->type & PA_FLAG_PTR) != (rhs->type & PA_FLAG_PTR) ||
+        (lhs->type & PA_FLAG_LONG_LONG) != (rhs->type & PA_FLAG_LONG_LONG) ||
+        (lhs->type & PA_FLAG_LONG) != (rhs->type & PA_FLAG_LONG))
+        return 0; /* incompatible */
+
+    if ((lbase_type == PA_CHAR && rbase_type == PA_INT) ||
+        (lbase_type == PA_INT && rbase_type == PA_CHAR))
+        return 1; /* compatible, char and short are upscaled to int */
+
+    if (lbase_type != rbase_type)
+        return 0; /* incompatible */
+
+    return 1; /* compatible */
+}
+
+static int io_vreadarg(va_list_positional_argument *arg, va_list_wrapper *args_copy) {
+    if (arg->type & PA_FLAG_PTR) {
+        arg->data.p = va_arg(args_copy->args, void *);
+    } else {
+        switch (arg->type & ~PA_FLAG_MASK) {
+            default: /* fallthrough */
+            case PA_NONE: return EOF; /* Missing a positional argument specifier (e.g. argument 1 has no type and unknown size but argument 2 is referenced) */
+            case PA_CHAR:
+                if (arg->type & PA_FLAG_UNSIGNED) {
+                    arg->data.i = (unsigned char) va_arg(args_copy->args, int);
+                    arg->type &= ~PA_FLAG_UNSIGNED;
+                }
+                else
+                    arg->data.i = (signed char) va_arg(args_copy->args, int);
+
+                arg->type &= PA_FLAG_MASK;
+                arg->type |= PA_INT;
+                break;
+            case PA_STRING:
+                arg->data.p = va_arg(args_copy->args, char *);
+                break;
+            case PA_INT:
+                if (arg->type & PA_FLAG_UNSIGNED) {
+                    if (arg->type & PA_FLAG_LONG)
+                        arg->data.ul = va_arg(args_copy->args, unsigned long);
+                    else if (arg->type & PA_FLAG_LONG_LONG)
+                        arg->data.ull = va_arg(args_copy->args, unsigned long long);
+                    else {
+                        arg->data.ui = va_arg(args_copy->args, unsigned int);
+
+                        if (arg->type & PA_FLAG_SHORT) {
+                            arg->data.ui = (unsigned short) arg->data.ui;
+                            arg->type &= ~PA_FLAG_SHORT;
+                        }
+                    }
+                } else {
+                    if (arg->type & PA_FLAG_LONG)
+                        arg->data.l = va_arg(args_copy->args, long);
+                    else if (arg->type & PA_FLAG_LONG_LONG)
+                        arg->data.ll = va_arg(args_copy->args, long long);
+                    else {
+                        arg->data.i = va_arg(args_copy->args, int);
+
+                        if (arg->type & PA_FLAG_SHORT) {
+                            arg->data.i = (short) arg->data.i;
+                            arg->type &= ~PA_FLAG_SHORT;
+                        }
+                    }
+                }
+                break;
+            case PA_FLOAT:
+            case PA_DOUBLE:
+                if (arg->type & PA_FLAG_LONG_DOUBLE)
+                    arg->data.ld = va_arg(args_copy->args, long double);
+                else
+                    arg->data.d = va_arg(args_copy->args, double);
+                break;
+            case PA_INTMAX_T:
+                if (arg->type & PA_FLAG_UNSIGNED)
+                    arg->data.uimax = va_arg(args_copy->args, uintmax_t);
+                else
+                    arg->data.imax = va_arg(args_copy->args, intmax_t);
+                break;
+            case PA_SIZE_T:
+                arg->data.sz = va_arg(args_copy->args, size_t);
+                break;
+            case PA_PTRDIFF_T:
+                arg->data.pdiff = va_arg(args_copy->args, ptrdiff_t);
+                break;
+        }
+    }
+
+    return 0;
+}
+
 static void positional_argument_list_init(va_list_positional_argument_list *list) {
     list->args = list->static_args;
     list->allocated = sizeof(list->static_args)/sizeof(list->static_args[0]);
     list->used = 0;
 }
 
-static int positional_argument_list_add_argument(va_list_positional_argument_list *list, const va_list_positional_argument *arg) {
+static int positional_argument_list_add_argument_helper(va_list_positional_argument_list *list, const va_list_positional_argument *arg) {
     if (list->used == list->allocated) {
-        const size_t new_size = list->allocated? safe_multiply(list->allocated, list->allocated >> 1): 16;
+        const size_t new_size = safe_multiply(list->allocated, list->allocated >> 1);
         if (!new_size)
             return CC_ENOMEM;
 
@@ -1806,30 +1923,35 @@ static int positional_argument_list_add_argument(va_list_positional_argument_lis
     return 0;
 }
 
+static int positional_argument_list_add_argument(va_list_positional_argument_list *list, unsigned argument_position, const va_list_positional_argument *arg) {
+    va_list_positional_argument empty = {0};
+
+    while (list->used < argument_position) {
+        if (positional_argument_list_add_argument_helper(list, &empty)) {
+            return -1; /* Generic error, in this case NOMEM */
+        }
+    }
+
+    if (list->args[argument_position-1].type &&
+            !io_vcompatible_args(&list->args[argument_position-1], arg))
+        return -2; /* Format string error */
+
+    list->args[argument_position-1] = *arg;
+
+    return 0;
+}
+
 static void positional_argument_list_free(va_list_positional_argument_list *list) {
     if (list->args != list->static_args)
         FREE(list->args);
 }
 
-#define PA_INT 0
-#define PA_CHAR 1
-#define PA_STRING 2
-#define PA_POINTER 3
-#define PA_FLOAT 4
-#define PA_DOUBLE 5
-#define PA_LAST 6
-#define PA_FLAG_PTR 0x1000
-#define PA_FLAG_SHORT 0x2000
-#define PA_FLAG_LONG 0x4000
-#define PA_FLAG_LONG_LONG 0x8000
-#define PA_FLAG_LONG_DOUBLE PA_FLAG_LONG_LONG
-
-#define PRINTF_D(type, value, flags, prec, len, state)              \
+#define PRINTF_D(type, value, flags, prec, state)                   \
     do {                                                            \
         unsigned char *eptr = (state)->internal_buffer + sizeof((state)->internal_buffer) - 1; \
         unsigned char *ptr = eptr;                                  \
         type oldval = (value), mval = oldval;                       \
-        int neg = val < 0;                                          \
+        int neg = mval < 0;                                         \
                                                                     \
         *ptr = 0;                                                   \
         if (neg) {                                                  \
@@ -1846,10 +1968,10 @@ static void positional_argument_list_free(va_list_positional_argument_list *list
         }                                                           \
                                                                     \
         (state)->buffer = ptr;                                      \
-        (state)->buffer_length = eptr-ptr;                           \
+        (state)->buffer_length = eptr-ptr;                          \
     } while (0)
 
-#define PRINTF_U(type, fmt, value, flags, prec, len, state)         \
+#define PRINTF_U(type, fmt, value, flags, prec, state)              \
     do {                                                            \
         const char *alpha = (fmt) == 'X'? "0123456789ABCDEF": "0123456789abcdef"; \
         unsigned char *eptr = (state)->internal_buffer + sizeof((state)->internal_buffer) - 1; \
@@ -1869,7 +1991,7 @@ static void positional_argument_list_free(va_list_positional_argument_list *list
         }                                                           \
                                                                     \
         (state)->buffer = ptr;                                      \
-        (state)->buffer_length = eptr-ptr;                           \
+        (state)->buffer_length = eptr-ptr;                          \
     } while (0)
 
 #define PRINTF_ABS(len, value) (((len) == PRINTF_LEN_BIG_L)? fabsl(value): fabs((double) value))
@@ -2166,114 +2288,86 @@ static void io_printf_f(double value, unsigned char fmt_char, unsigned flags, un
         state->buffer_length = length;
 }
 
-static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, unsigned prec, unsigned len, va_list_wrapper *args) {
+static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, unsigned prec, va_list_positional_argument *arg);
+static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsigned flags, unsigned prec, va_list_positional_argument *arg);
+static int io_printf_voidp(struct io_printf_state *state, unsigned flags, unsigned prec, va_list_positional_argument *arg);
+
+static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, unsigned prec, va_list_positional_argument *arg) {
     UNUSED(flags)
     UNUSED(prec)
 
-    switch (len) {
-        default: return -1;
-        case PRINTF_LEN_NONE:
-        case PRINTF_LEN_H:
-        case PRINTF_LEN_HH:
-        {
-            int val = va_arg(args->args, int);
-
-            if (len == PRINTF_LEN_HH)
-                val = (signed char) val;
-            else if (len == PRINTF_LEN_H)
-                val = (signed short) val;
-
-            PRINTF_D(int, val, flags, prec, len, state);
-            break;
-        }
-        case PRINTF_LEN_L:
-        {
-            long val = va_arg(args->args, long);
-            PRINTF_D(long, val, flags, prec, len, state);
-            break;
-        }
-        case PRINTF_LEN_LL:
-        {
-            long long val = va_arg(args->args, long long);
-            PRINTF_D(long long, val, flags, prec, len, state);
-            break;
-        }
-        case PRINTF_LEN_J:
-        {
-            intmax_t val = va_arg(args->args, intmax_t);
-            PRINTF_D(intmax_t, val, flags, prec, len, state);
-            break;
-        }
-        case PRINTF_LEN_Z:
-        {
-            size_t val = va_arg(args->args, size_t);
-            PRINTF_U(size_t, 'u', val, flags, prec, len, state);
-            break;
-        }
-        case PRINTF_LEN_T:
-        case PRINTF_LEN_I:
-        {
-            ptrdiff_t val = va_arg(args->args, ptrdiff_t);
-            PRINTF_D(ptrdiff_t, val, flags, prec, len, state);
-            break;
+    if (arg->type & PA_FLAG_PTR) {
+        PRINTF_D(intmax_t, (intmax_t) arg->data.p, flags, prec, state);
+    } else if (arg->type & PA_FLAG_UNSIGNED) {
+        return io_printf_unsigned_int(state, 'u', flags, prec, arg);
+    } else {
+        switch (arg->type & ~PA_FLAG_MASK) {
+            default: return -1;
+            case PA_INT:
+                if (arg->type & PA_FLAG_LONG)
+                    PRINTF_D(long, arg->data.l, flags, prec, state);
+                else if (arg->type & PA_FLAG_LONG_LONG)
+                    PRINTF_D(long long, arg->data.ll, flags, prec, state);
+                else
+                    PRINTF_D(int, arg->data.i, flags, prec, state);
+                break;
+            case PA_INTMAX_T:
+                PRINTF_D(intmax_t, arg->data.imax, flags, prec, state);
+                break;
+            case PA_SIZE_T:
+                PRINTF_U(size_t, 'u', arg->data.sz, flags, prec, state);
+                break;
+            case PA_PTRDIFF_T:
+                PRINTF_D(ptrdiff_t, arg->data.pdiff, flags, prec, state);
+                break;
         }
     }
 
     return (int) state->buffer_length;
 }
 
-static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsigned flags, unsigned prec, unsigned len, va_list_wrapper *args) {
+static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsigned flags, unsigned prec, va_list_positional_argument *arg) {
     UNUSED(flags)
     UNUSED(prec)
 
-    switch (len) {
-        default: return -1;
-        case PRINTF_LEN_NONE:
-        case PRINTF_LEN_H:
-        case PRINTF_LEN_HH:
-        {
-            unsigned val = va_arg(args->args, unsigned int);
-
-            if (len == PRINTF_LEN_HH)
-                val = (unsigned char) val;
-            else if (len == PRINTF_LEN_H)
-                val = (unsigned short) val;
-
-            PRINTF_U(unsigned, fmt, val, flags, prec, len, state);
-            break;
-        }
-        case PRINTF_LEN_L:
-        {
-            unsigned long val = va_arg(args->args, unsigned long);
-            PRINTF_U(unsigned long, fmt, val, flags, prec, len, state);
-            break;
-        }
-        case PRINTF_LEN_LL:
-        {
-            unsigned long long val = va_arg(args->args, unsigned long long);
-            PRINTF_U(unsigned long long, fmt, val, flags, prec, len, state);
-            break;
-        }
-        case PRINTF_LEN_J:
-        {
-            uintmax_t val = va_arg(args->args, uintmax_t);
-            PRINTF_U(uintmax_t, fmt, val, flags, prec, len, state);
-            break;
-        }
-        case PRINTF_LEN_Z:
-        case PRINTF_LEN_I:
-        {
-            size_t val = va_arg(args->args, size_t);
-            PRINTF_U(size_t, fmt, val, flags, prec, len, state);
-            break;
-        }
-        case PRINTF_LEN_T:
-        {
-            uintmax_t val = va_arg(args->args, ptrdiff_t);
-            PRINTF_U(uintmax_t, fmt, val, flags, prec, len, state);
-            break;
+    if (arg->type & PA_FLAG_PTR) {
+        PRINTF_U(uintmax_t, fmt, (uintmax_t) arg->data.p, flags, prec, state);
+    } else if ((arg->type & PA_FLAG_UNSIGNED) == 0) {
+        return io_printf_signed_int(state, flags, prec, arg);
+    } else {
+        switch (arg->type & ~PA_FLAG_MASK) {
+            default: return -1;
+            case PA_INT:
+                if (arg->type & PA_FLAG_LONG)
+                    PRINTF_U(unsigned long, fmt, arg->data.ul, flags, prec, state);
+                else if (arg->type & PA_FLAG_LONG_LONG)
+                    PRINTF_U(unsigned long long, fmt, arg->data.ull, flags, prec, state);
+                else
+                    PRINTF_U(unsigned int, fmt, arg->data.ui, flags, prec, state);
+                break;
+            case PA_INTMAX_T:
+                PRINTF_U(uintmax_t, fmt, arg->data.uimax, flags, prec, state);
+                break;
+            case PA_SIZE_T:
+                PRINTF_U(size_t, fmt, arg->data.sz, flags, prec, state);
+                break;
+            case PA_PTRDIFF_T:
+                PRINTF_U(uintmax_t, fmt, (uintmax_t) arg->data.pdiff, flags, prec, state);
+                break;
         }
     }
+
+    return (int) state->buffer_length;
+}
+
+static int io_printf_voidp(struct io_printf_state *state, unsigned flags, unsigned prec, va_list_positional_argument *arg) {
+    UNUSED(flags)
+    UNUSED(prec)
+
+    if ((arg->type & PA_FLAG_PTR) == 0)
+        return -1;
+
+    PRINTF_U(uintmax_t, 'x', (uintmax_t) arg->data.p, flags, prec, state);
 
     return (int) state->buffer_length;
 }
@@ -2832,7 +2926,7 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
     if (io_begin_write(io))
         return io_unlocki(io, -1);
 
-    const char *save_fmt = NULL; /* Saves the start of fmt since we clobber it */
+    const char *save_fmt = fmt; /* Saves the start of fmt since we clobber it */
     unsigned int gathered_positional_args = 0; /* Number of positional arguments that we encountered in the format string */
     unsigned int gathered_normal_args = 0; /* Number of normal arguments that we encountered in the format string */
     unsigned int passes = 1; /* Number of passes to run through the format string */
@@ -2849,14 +2943,23 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
         goto done_writing;
     }
 
-    save_fmt = next_fmt;
-
     for (unsigned int pass = 0; pass < passes; ++pass) {
+        fmt = save_fmt;
+
+        if (pass != 0) { /* Retrieve values for printing from positional argument list */
+            for (size_t i = 0; i < positional_args_list.used; ++i) {
+                if (io_vreadarg(&positional_args_list.args[i], &args_copy) == EOF)
+                    CLEANUP(-2);
+            }
+
+            next_fmt = strchr(fmt, '%');
+        }
+
         do {
             const size_t block_size = next_fmt - fmt;
 
             /* If any data precedes the format */
-            if (block_size) {
+            if (block_size && (pass != 0 || gathered_positional_args == 0)) {
                 const size_t written_now = io_write_internal(fmt, 1, block_size, io);
 
                 if (block_size != written_now)
@@ -2896,7 +2999,8 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
                                 CLEANUP(-2); /* Disallowed to have positional and normal arguments */
 
                             if (pass == 0)
-                                ++gathered_positional_args;
+                                if (gathered_positional_args++ == 0)
+                                    ++passes;
                         }
                     }
                 }
@@ -2919,11 +3023,31 @@ done_with_flags:
 
                 /* read minimum field width */
                 if (*fmt == '*') {
-                    /* TODO: positional int argument */
-
-                    int width = va_arg(args_copy.args, int);
-
                     ++fmt;
+                    int width = 0;
+
+                    const char *old = fmt;
+                    unsigned positional_width_spec = io_stou(fmt, &fmt);
+                    if (fmt != old) { /* positional spec argument position */
+                        if (*fmt++ != '$' || !fmt_positional_spec)
+                            CLEANUP(-2);
+
+                        if (pass == 0) {
+                            va_list_positional_argument arg = {.type = PA_INT};
+                            int err = positional_argument_list_add_argument(&positional_args_list, positional_width_spec, &arg);
+                            if (err)
+                                CLEANUP(err);
+                            ++gathered_positional_args;
+                        } else {
+                            width = positional_args_list.args[positional_width_spec-1].data.i;
+                        }
+                    } else if (gathered_positional_args) { /* positional spec required if using positional arguments */
+                        CLEANUP(-2);
+                    } else {
+                        width = va_arg(args_copy.args, int);
+                        ++gathered_normal_args;
+                    }
+
                     if (width < 0) {
                         fmt_flags |= PRINTF_FLAG_MINUS;
                         fmt_width = -width;
@@ -2943,11 +3067,31 @@ done_with_width:
                 if (*fmt == '.') {
                     ++fmt;
                     if (*fmt == '*') {
-                        /* TODO: positional int argument */
-
-                        int prec = va_arg(args_copy.args, int);
-
                         ++fmt;
+                        int prec = 0;
+
+                        const char *old = fmt;
+                        unsigned positional_prec_spec = io_stou(fmt, &fmt);
+                        if (fmt != old) { /* positional spec argument position */
+                            if (*fmt++ != '$' || !fmt_positional_spec)
+                                CLEANUP(-2);
+
+                            if (pass == 0) {
+                                va_list_positional_argument arg = {.type = PA_INT};
+                                int err = positional_argument_list_add_argument(&positional_args_list, positional_prec_spec, &arg);
+                                if (err)
+                                    CLEANUP(err);
+                                ++gathered_positional_args;
+                            } else {
+                                prec = positional_args_list.args[positional_prec_spec-1].data.i;
+                            }
+                        } else if (gathered_positional_args) { /* positional spec required if using positional arguments */
+                            CLEANUP(-2);
+                        } else {
+                            prec = va_arg(args_copy.args, int);
+                            ++gathered_normal_args;
+                        }
+
                         if (prec >= 0) {
                             fmt_prec = prec;
                             fmt_flags |= PRINTF_FLAG_HAS_PRECISION;
@@ -3025,18 +3169,110 @@ done_with_width:
                 state.flags = 0;
                 state.buffer = state.internal_buffer;
 
+                /* value store for the argument being read */
+                va_list_positional_argument format_value;
+
                 /* read format specifier */
+                if (pass == 0) {
+                    switch (*fmt) {
+                        default: CLEANUP(-2); /* incomplete format specifier */
+                        case 'c': format_value.type = PA_CHAR; break;
+                        case 's': format_value.type = PA_STRING; break;
+                        case 'n':
+                            switch (fmt_len) {
+                                case PRINTF_LEN_NONE: format_value.type = PA_INT | PA_FLAG_PTR; break;
+                                case PRINTF_LEN_HH: format_value.type = PA_CHAR | PA_FLAG_PTR; break;
+                                case PRINTF_LEN_H: format_value.type = PA_INT | PA_FLAG_SHORT | PA_FLAG_PTR; break;
+                                case PRINTF_LEN_L: format_value.type = PA_INT | PA_FLAG_LONG | PA_FLAG_PTR; break;
+                                case PRINTF_LEN_LL: format_value.type = PA_INT | PA_FLAG_LONG_LONG | PA_FLAG_PTR; break;
+                                case PRINTF_LEN_J: format_value.type = PA_INTMAX_T | PA_FLAG_PTR; break;
+                                case PRINTF_LEN_I: /* fallthrough */
+                                case PRINTF_LEN_Z: format_value.type = PA_SIZE_T | PA_FLAG_PTR; break;
+                                case PRINTF_LEN_T: format_value.type = PA_PTRDIFF_T | PA_FLAG_PTR; break;
+                                default: CLEANUP(-2);
+                            }
+                            break;
+                        case 'd':
+                        case 'i':
+                            switch (fmt_len) {
+                                case PRINTF_LEN_NONE: format_value.type = PA_INT; break;
+                                case PRINTF_LEN_HH: format_value.type = PA_CHAR; break;
+                                case PRINTF_LEN_H: format_value.type = PA_INT | PA_FLAG_SHORT; break;
+                                case PRINTF_LEN_L: format_value.type = PA_INT | PA_FLAG_LONG; break;
+                                case PRINTF_LEN_LL: format_value.type = PA_INT | PA_FLAG_LONG_LONG; break;
+                                case PRINTF_LEN_J: format_value.type = PA_INTMAX_T; break;
+                                case PRINTF_LEN_Z: format_value.type = PA_SIZE_T; break;
+                                case PRINTF_LEN_I: /* fallthrough */
+                                case PRINTF_LEN_T: format_value.type = PA_PTRDIFF_T; break;
+                                default: CLEANUP(-2);
+                            }
+                            break;
+                        case 'u':
+                        case 'o':
+                        case 'x':
+                        case 'X':
+                            switch (fmt_len) {
+                                case PRINTF_LEN_NONE: format_value.type = PA_INT | PA_FLAG_UNSIGNED; break;
+                                case PRINTF_LEN_HH: format_value.type = PA_CHAR | PA_FLAG_UNSIGNED; break;
+                                case PRINTF_LEN_H: format_value.type = PA_INT | PA_FLAG_SHORT | PA_FLAG_UNSIGNED; break;
+                                case PRINTF_LEN_L: format_value.type = PA_INT | PA_FLAG_LONG | PA_FLAG_UNSIGNED; break;
+                                case PRINTF_LEN_LL: format_value.type = PA_INT | PA_FLAG_LONG_LONG | PA_FLAG_UNSIGNED; break;
+                                case PRINTF_LEN_J: format_value.type = PA_INTMAX_T | PA_FLAG_UNSIGNED; break;
+                                case PRINTF_LEN_I: /* fallthrough */
+                                case PRINTF_LEN_Z: format_value.type = PA_SIZE_T | PA_FLAG_UNSIGNED; break;
+                                case PRINTF_LEN_T: format_value.type = PA_PTRDIFF_T | PA_FLAG_UNSIGNED; break;
+                                default: CLEANUP(-2);
+                            }
+                            break;
+                        case 'a':
+                        case 'A':
+                        case 'f':
+                        case 'F':
+                        case 'e':
+                        case 'E':
+                        case 'g':
+                        case 'G':
+                            switch (fmt_len) {
+                                case PRINTF_LEN_NONE: format_value.type = PA_DOUBLE; break;
+                                case PRINTF_LEN_BIG_L: format_value.type = PA_DOUBLE | PA_FLAG_LONG_DOUBLE; break;
+                                default: CLEANUP(-2);
+                            }
+                            break;
+                        case 'p':
+                            format_value.type = PA_POINTER;
+                            break;
+                        case '{':
+                            break;
+                    }
+
+                    if (gathered_positional_args) { /* If positional argument, it needs to be added to the argument spec list and pass 1 (not pass 0) will handle the actual writing */
+                        int err = positional_argument_list_add_argument(&positional_args_list, fmt_positional_spec, &format_value);
+                        if (err)
+                            CLEANUP(err);
+                    } else { /* If normal argument, just read it */
+                        if (io_vreadarg(&format_value, &args_copy) == EOF)
+                            CLEANUP(-2);
+                    }
+                }
+
+                /* skip format and write if gathering positional arguments */
+                if (pass == 0 && gathered_positional_args != 0)
+                    goto done_with_format;
+                else if (pass != 0) /* pass will only ever be non-zero if using positional arguments and ready for printing */
+                    format_value = positional_args_list.args[fmt_positional_spec-1];
+
+                /* format actual data */
                 switch (*fmt) {
                     default: CLEANUP(-2); /* incomplete format specifier */
                     case 'c':
                     {
-                        state.internal_buffer[0] = va_arg(args_copy.args, int);
+                        state.internal_buffer[0] = format_value.data.i;
                         state.buffer_length = 1;
                         break;
                     }
                     case 's':
                     {
-                        char *s = va_arg(args_copy.args, char *);
+                        char *s = format_value.data.p;
                         size_t len = strlen(s);
 
                         if ((fmt_flags & PRINTF_FLAG_HAS_PRECISION) && fmt_prec < len)
@@ -3048,15 +3284,15 @@ done_with_width:
                     }
                     case 'n':
                         switch (fmt_len) {
-                            case PRINTF_LEN_NONE: *(va_arg(args_copy.args, int *)) = (int) written; break;
-                            case PRINTF_LEN_HH: *(va_arg(args_copy.args, signed char *)) = (signed char) written; break;
-                            case PRINTF_LEN_H: *(va_arg(args_copy.args, short *)) = (short) written; break;
-                            case PRINTF_LEN_L: *(va_arg(args_copy.args, long *)) = (long) written; break;
-                            case PRINTF_LEN_LL: *(va_arg(args_copy.args, long long *)) = (long long) written; break;
-                            case PRINTF_LEN_J: *(va_arg(args_copy.args, intmax_t *)) = (intmax_t) written; break;
+                            case PRINTF_LEN_NONE: *((int *) format_value.data.p) = (int) written; break;
+                            case PRINTF_LEN_HH: *((signed char *) format_value.data.p) = (signed char) written; break;
+                            case PRINTF_LEN_H: *((short *) format_value.data.p) = (short) written; break;
+                            case PRINTF_LEN_L: *((long *) format_value.data.p) = (long) written; break;
+                            case PRINTF_LEN_LL: *((long long *) format_value.data.p) = (long long) written; break;
+                            case PRINTF_LEN_J: *((intmax_t *) format_value.data.p) = (intmax_t) written; break;
                             case PRINTF_LEN_I: /* fallthrough */
-                            case PRINTF_LEN_Z: *(va_arg(args_copy.args, size_t *)) = written; break;
-                            case PRINTF_LEN_T: *(va_arg(args_copy.args, ptrdiff_t *)) = (ptrdiff_t) written; break;
+                            case PRINTF_LEN_Z: *((size_t *) format_value.data.p) = written; break;
+                            case PRINTF_LEN_T: *((ptrdiff_t *) format_value.data.p) = (ptrdiff_t) written; break;
                             default: CLEANUP(-2);
                         }
                         break;
@@ -3064,7 +3300,7 @@ done_with_width:
                     case 'i':
                         state.flags |= PRINTF_STATE_INTEGRAL | PRINTF_STATE_SIGNED;
 
-                        if (io_printf_signed_int(&state, fmt_flags, fmt_prec, fmt_len, &args_copy) < 0)
+                        if (io_printf_signed_int(&state, fmt_flags, fmt_prec, &format_value) < 0)
                             CLEANUP(-2);
 
                         if (!(fmt_flags & PRINTF_FLAG_HAS_PRECISION))
@@ -3076,7 +3312,7 @@ done_with_width:
                     case 'X':
                         state.flags |= PRINTF_STATE_INTEGRAL;
 
-                        if (io_printf_unsigned_int(&state, *fmt, fmt_flags, fmt_prec, fmt_len, &args_copy) < 0)
+                        if (io_printf_unsigned_int(&state, *fmt, fmt_flags, fmt_prec, &format_value) < 0)
                             CLEANUP(-2);
 
                         if (!(fmt_flags & PRINTF_FLAG_HAS_PRECISION)) {
@@ -3128,8 +3364,8 @@ done_with_width:
                         fmt_flags |= PRINTF_FLAG_HASH | PRINTF_FLAG_HAS_PRECISION;
                         fmt_prec = sizeof(void *) * 2 /* for hex encoding */ * CHAR_BIT / 8;
 
-                        uintmax_t val = (uintmax_t) va_arg(args_copy.args, void *);
-                        PRINTF_U(uintmax_t, 'x', val, fmt_flags, fmt_prec, PRINTF_LEN_NONE, &state);
+                        if (io_printf_voidp(&state, fmt_flags, fmt_prec, &format_value) < 0)
+                            CLEANUP(-2);
 
                         break;
                     case '{': { /* Custom extension, print data using provided CommonContainerBase serializer */

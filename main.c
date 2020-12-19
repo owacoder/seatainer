@@ -291,7 +291,9 @@ int main(int argc, char **argv, const char **envp)
     time_t raw_time = time(NULL);
     io_setvbuf(io_stdout, NULL, _IOFBF, 0xfffff);
     //fscanf(stdin, "g");
-    io_printf(io_stdout, "%{intlist}|\nThe print took %{clock} seconds\n%3$40.40{tm}\n%6s|\n%#I64x\n", gl, &clk, localtime(&raw_time), "abcdefghi", (uint64_t) 0xdeadbeefdeadbeef);
+    if (io_printf(io_stdout, "%1$#16.10llx\n%1$p\n", (long long) 0x12345678, 16, 10) < 0)
+        io_puts("printf failed\n", io_stdout);
+    //io_printf(io_stdout, "%{intlist}|\nThe print took %{clock} seconds\n%3$40.40{tm}\n%6s|\n%#I64x\n", gl, &clk, localtime(&raw_time), "abcdefghi", (uint64_t) 0xdeadbeefdeadbeef);
     io_ftime(io_stdout, "%Y-%m-%dT%H:%M:%S\n", localtime(&raw_time));
 
     genericlist_destroy(gl);
