@@ -2959,12 +2959,13 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
             const size_t block_size = next_fmt - fmt;
 
             /* If any data precedes the format */
-            if (block_size && (pass != 0 || gathered_positional_args == 0)) {
+            if (block_size && (gathered_positional_args == 0 || pass != 0)) {
                 const size_t written_now = io_write_internal(fmt, 1, block_size, io);
 
                 if (block_size != written_now)
                     CLEANUP(-1);
 
+                save_fmt = next_fmt;
                 written += written_now;
             }
 
@@ -2975,9 +2976,12 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
                 fmt = next_fmt + 1; /* Skip leading '%' */
 
                 if (*fmt == '%') {
-                    if (io_putc_internal('%', io) == EOF)
-                        CLEANUP(-1);
-                    ++written;
+                    if (gathered_positional_args == 0 || pass != 0) {
+                        if (io_putc_internal('%', io) == EOF)
+                            CLEANUP(-1);
+                        ++written;
+                        save_fmt = fmt+1;
+                    }
                     goto done_with_format;
                 }
 
@@ -3344,11 +3348,9 @@ done_with_width:
                         state.flags |= PRINTF_STATE_FLOATING_POINT;
 
                         if (fmt_len == PRINTF_LEN_BIG_L) {
-                            long double value = va_arg(args_copy.args, long double);
-                            PRINTF_F(long double, *fmt, value, fmt_flags, fmt_prec, fmt_len, &state);
+                            PRINTF_F(long double, *fmt, format_value.data.ld, fmt_flags, fmt_prec, fmt_len, &state);
                         } else {
-                            double value = va_arg(args_copy.args, double);
-                            PRINTF_F(double, *fmt, value, fmt_flags, fmt_prec, fmt_len, &state);
+                            PRINTF_F(double, *fmt, format_value.data.d, fmt_flags, fmt_prec, fmt_len, &state);
                         }
 
                         /* Clear precision because the helper function takes care of it for floating-point */
