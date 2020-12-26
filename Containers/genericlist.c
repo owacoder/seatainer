@@ -1120,7 +1120,7 @@ Iterator genericlist_next(GenericList list, Iterator it) {
     } else {
         void **array = list->array;
 
-        if (it == array[list->array_size-1])
+        if (it == &array[list->array_size-1])
             return NULL;
 
         return (void **) it + 1;

@@ -271,6 +271,7 @@ void test_c_io() {
 
 int main(int argc, char **argv, const char **envp)
 {
+    char buffer[100];
     srand(time(NULL));
 
     clock_t clk = clock();
@@ -278,11 +279,15 @@ int main(int argc, char **argv, const char **envp)
     io_register_type("clock", (CommonContainerBase *) container_base_clock_t_recipe());
     io_register_type("tm", (CommonContainerBase *) container_base_tm_recipe());
 
-    GenericList gl = genericlist_create_reserve(1, container_base_int_recipe());
+    GenericList gl = genericlist_create_reserve(1, container_base_cstring_recipe());
     io_register_type("intlist", genericlist_build_recipe(gl));
 
-    for (int i = 0; i < 1000000; ++i)
-        genericlist_append(gl, REFERENCE(int, rand()));
+    io_register_format("JSON", NULL, io_serialize_json);
+
+    for (int i = 0; i < 100; ++i)
+        genericlist_append(gl, itoa(rand(), buffer, 10));
+
+    printf("%.8f\n", 392.65);
 
     // genericlist_insert_list(gl, gl, 0);
 
@@ -293,7 +298,8 @@ int main(int argc, char **argv, const char **envp)
     //fscanf(stdin, "g");
     if (io_printf(io_stdout, "%% %1$#.10f%%\n", 1.234567890123456789, 16, 10) < 0)
         io_puts("printf failed\n", io_stdout);
-    //io_printf(io_stdout, "%{intlist}|\nThe print took %{clock} seconds\n%3$40.40{tm}\n%6s|\n%#I64x\n", gl, &clk, localtime(&raw_time), "abcdefghi", (uint64_t) 0xdeadbeefdeadbeef);
+    if (io_printf(io_stdout, "%1${*6$[JSON]}|\nThe print took %2${clock} seconds\n%3${tm}\n%4$6s|\n%5$#I64x\n", gl, &clk, localtime(&raw_time), "abcdefghi", (uint64_t) 0xdeadbeefdeadbeef, "intlist", io_serialize_container) < 0)
+        io_puts("io_printf complex failed\n", io_stdout);
     io_ftime(io_stdout, "%Y-%m-%dT%H:%M:%S\n", localtime(&raw_time));
 
     genericlist_destroy(gl);

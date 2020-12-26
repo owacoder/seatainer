@@ -505,16 +505,13 @@ Serializer io_default_serializer_for_type(const CommonContainerBase *base) {
         return NULL; /* Unknown default serializer type */
 }
 
-static size_t serialize_json_stringpart_io(const void *data, size_t size, size_t count, void *userdata, IO io) {
-    IO output = (IO) userdata;
-
+static size_t serialize_json_stringpart(const char *data, size_t length, IO io) {
     size_t written = 0;
-    size_t max = size*count;
 
-    for (size_t i = 0; i < max; ++i) {
+    for (size_t i = 0; i < length; ++i) {
         char buffer[8] = {'\\'};
         size_t buffer_size = 1;
-        unsigned char c = ((unsigned char *) data)[i];
+        unsigned char c = data[i];
 
         switch (c) {
             case '\\':
@@ -540,28 +537,34 @@ static size_t serialize_json_stringpart_io(const void *data, size_t size, size_t
             }
         }
 
-        size_t written_this_time = io_write(buffer, 1, buffer_size, output);
+        size_t written_this_time = io_write(buffer, 1, buffer_size, io);
         written += written_this_time;
         if (written_this_time != buffer_size) {
-            if (io) io_set_error(io, io_error(output));
-            return written / size;
+            return written;
         }
     }
 
-    return written / size;
+    return written;
 }
 
-static int serialize_json_stringpart_internal(IO output, const Binary b) {
-    return serialize_json_stringpart_io(b.data, 1, b.length, output, NULL) == b.length? 0: io_error(output);
+static size_t serialize_json_stringpart_internal(IO output, const Binary b) {
+    return serialize_json_stringpart(b.data, b.length, output);
 }
 
-static int serialize_json_string_internal(IO output, const Binary b) {
-    if (io_putc('"', output) == EOF ||
-        serialize_json_stringpart_internal(output, b) ||
-        io_putc('"', output) == EOF)
-        return io_error(output);
+static size_t serialize_json_string_internal(IO output, const Binary b) {
+    size_t written = 0;
 
-    return 0;
+    if (io_putc('"', output) == EOF)
+        return 0;
+
+    written += 1 + serialize_json_stringpart_internal(output, b);
+    if (io_error(output))
+        return written;
+
+    if (io_putc('"', output) == EOF)
+        return written;
+
+    return written + 1;
 }
 
 /* TODO: not compliant with new type->written mandate */
@@ -594,7 +597,9 @@ int io_serialize_json(IO output, const void *data, const CommonContainerBase *ba
                     case VariantString: {
                         Binary b = variant_to_binary((Variant) data, NULL);
 
-                        return serialize_json_string_internal(output, b);
+                        type->written = serialize_json_string_internal(output, b);
+
+                        return io_error(output);
                     }
                     case VariantBinary:
                     default:
@@ -611,102 +616,121 @@ int io_serialize_json(IO output, const void *data, const CommonContainerBase *ba
 
                 if (io_putc('{', output) == EOF)
                     return io_error(output);
+                ++type->written;
 
                 Iterator start = base->collection_begin(data);
                 for (Iterator it = start; it; it = base->collection_next(data, it)) {
-                    if (it != start && io_putc(',', output) == EOF)
-                        return io_error(output);
+                    if (it != start) {
+                        if (io_putc(',', output) == EOF)
+                            return io_error(output);
+                        ++type->written;
+                    }
 
                     const void *key = base->collection_get_key(data, it);
                     const void *value = base->collection_get_value(data, it);
 
-                    int err = io_serialize_json(output, key, base->key_child, NULL);
+                    struct SerializerIdentity identity_subtype = *type;
+                    int err = io_serialize_json(output, key, base->key_child, &identity_subtype);
                     if (err)
                         return err;
+                    type->written += identity_subtype.written;
 
                     if (io_putc(':', output) == EOF)
                         return io_error(output);
+                    ++type->written;
 
-                    err = io_serialize_json(output, value, base->value_child, NULL);
+                    err = io_serialize_json(output, value, base->value_child, &identity_subtype);
                     if (err)
                         return err;
+                    type->written += identity_subtype.written;
                 }
 
                 if (io_putc('}', output) == EOF)
                     return io_error(output);
+                ++type->written;
             } else { /* An array */
                 if (io_putc('[', output) == EOF)
                     return io_error(output);
+                ++type->written;
 
                 Iterator start = base->collection_begin(data);
                 for (Iterator it = start; it; it = base->collection_next(data, it)) {
-                    if (it != start && io_putc(',', output) == EOF)
-                        return io_error(output);
+                    if (it != start) {
+                        if (io_putc(',', output) == EOF)
+                            return io_error(output);
+                        ++type->written;
+                    }
 
                     const void *value = base->collection_get_value(data, it);
 
-                    int err = io_serialize_json(output, value, base->value_child, NULL);
+                    struct SerializerIdentity identity_subtype = *type;
+
+                    int err = io_serialize_json(output, value, base->value_child, &identity_subtype);
                     if (err)
                         return err;
+                    type->written += identity_subtype.written;
                 }
 
                 if (io_putc(']', output) == EOF)
                     return io_error(output);
+                ++type->written;
             }
         } else { /* An atom */
             if (generic_types_compatible_compare(base, container_base_cstring_recipe()) == 0) {
                 Binary b = {.data = (char *) data, .length = strlen(data)};
-                return serialize_json_string_internal(output, b);
+                type->written = serialize_json_string_internal(output, b);
+                return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_boolean_recipe()) == 0) {
                 const _Bool value = *((const _Bool *) data);
                 io_puts(value? "true": "false", output);
+                type->written = 5 - value;
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_char_recipe()) == 0) {
                 const signed char value = *((const signed char *) data);
-                io_printf(output, "%hhd", value);
+                type->written = abs(io_printf(output, "%hhd", value));
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_uchar_recipe()) == 0) {
                 const unsigned char value = *((const unsigned char *) data);
-                io_printf(output, "%hhu", value);
+                type->written = abs(io_printf(output, "%hhu", value));
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_short_recipe()) == 0) {
                 const short value = *((const short *) data);
-                io_printf(output, "%hd", value);
+                type->written = abs(io_printf(output, "%hd", value));
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_ushort_recipe()) == 0) {
                 const unsigned short value = *((const unsigned short *) data);
-                io_printf(output, "%hu", value);
+                type->written = abs(io_printf(output, "%hu", value));
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_int_recipe()) == 0) {
                 const int value = *((const int *) data);
-                io_printf(output, "%d", value);
+                type->written = abs(io_printf(output, "%d", value));
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_uint_recipe()) == 0) {
                 const unsigned int value = *((const unsigned int *) data);
-                io_printf(output, "%u", value);
+                type->written = abs(io_printf(output, "%u", value));
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_long_recipe()) == 0) {
                 const long value = *((const long *) data);
-                io_printf(output, "%ld", value);
+                type->written = abs(io_printf(output, "%ld", value));
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_ulong_recipe()) == 0) {
                 const unsigned long value = *((const unsigned long *) data);
-                io_printf(output, "%lu", value);
+                type->written = abs(io_printf(output, "%lu", value));
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_long_long_recipe()) == 0) {
                 const long long value = *((const long long *) data);
-                io_printf(output, "%lld", value);
+                type->written = abs(io_printf(output, "%lld", value));
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_ulong_long_recipe()) == 0) {
                 const unsigned long long value = *((const unsigned long long *) data);
-                io_printf(output, "%llu", value);
+                type->written = abs(io_printf(output, "%llu", value));
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_float_recipe()) == 0) {
                 const float flt = *((const float *) data);
                 if (fabsf(flt) == INFINITY || isnan(flt))
                     return CC_ENOTSUP;
 
-                io_printf(output, "%.*g", FLT_DIG-1, flt);
+                type->written = abs(io_printf(output, "%.*g", FLT_DIG-1, flt));
 
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_double_recipe()) == 0) {
@@ -714,7 +738,7 @@ int io_serialize_json(IO output, const void *data, const CommonContainerBase *ba
                 if (fabs(flt) == (double) INFINITY || isnan(flt))
                     return CC_ENOTSUP;
 
-                io_printf(output, "%.*g", DBL_DIG-1, flt);
+                type->written = abs(io_printf(output, "%.*g", DBL_DIG-1, flt));
 
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_long_double_recipe()) == 0) {
@@ -722,7 +746,7 @@ int io_serialize_json(IO output, const void *data, const CommonContainerBase *ba
                 if (fabsl(flt) == (long double) INFINITY || isnan(flt))
                     return CC_ENOTSUP;
 
-                io_printf(output, "%.*Lg", LDBL_DIG-1, flt);
+                type->written = abs(io_printf(output, "%.*Lg", LDBL_DIG-1, flt));
 
                 return io_error(output);
             } else {

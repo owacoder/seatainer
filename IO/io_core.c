@@ -1754,7 +1754,8 @@ static unsigned io_stou(const char *str, const char **update) {
 #define PA_SIZE_T 7
 #define PA_PTRDIFF_T 8
 #define PA_INTMAX_T 9
-#define PA_LAST 10
+#define PA_FUNCTION_POINTER 10
+#define PA_LAST 11
 #define PA_FLAG_UNSIGNED 0x0800u
 #define PA_FLAG_PTR 0x1000u
 #define PA_FLAG_SHORT 0x2000u
@@ -1790,6 +1791,7 @@ typedef struct {
         double d;
         long double ld;
         void *p;
+        Serializer fp;
     } data;
 } va_list_positional_argument;
 
@@ -1811,6 +1813,10 @@ static int io_vcompatible_args(const va_list_positional_argument *lhs, const va_
     if ((lbase_type == PA_CHAR && rbase_type == PA_INT) ||
         (lbase_type == PA_INT && rbase_type == PA_CHAR))
         return 1; /* compatible, char and short are upscaled to int */
+
+    if ((lbase_type == PA_STRING && rbase_type == PA_POINTER) ||
+        (lbase_type == PA_POINTER && rbase_type == PA_STRING))
+        return 1; /* compatible, both are pointers */
 
     if (lbase_type != rbase_type)
         return 0; /* incompatible */
@@ -1838,6 +1844,12 @@ static int io_vreadarg(va_list_positional_argument *arg, va_list_wrapper *args_c
                 break;
             case PA_STRING:
                 arg->data.p = va_arg(args_copy->args, char *);
+                break;
+            case PA_POINTER:
+                arg->data.p = va_arg(args_copy->args, void *);
+                break;
+            case PA_FUNCTION_POINTER:
+                arg->data.fp = va_arg(args_copy->args, Serializer);
                 break;
             case PA_INT:
                 if (arg->type & PA_FLAG_UNSIGNED) {
@@ -2006,11 +2018,11 @@ static void positional_argument_list_free(va_list_positional_argument_list *list
         }                                                           \
                                                                     \
         if (isinf(mval)) {                                          \
-            (state)->buffer = (unsigned char *) (isupper((fmt) & UCHAR_MAX)? "INFINITY": "infinity"); \
-            (state)->buffer_length = 8;                              \
+            (state)->buffer = (unsigned char *) (isupper((fmt) & UCHAR_MAX)? "INF": "inf"); \
+            (state)->buffer_length = 3;                             \
         } else if (isnan(mval)) {                                   \
             (state)->buffer = (unsigned char *) (isupper((fmt) & UCHAR_MAX)? "NAN": "nan"); \
-            (state)->buffer_length = 3;                              \
+            (state)->buffer_length = 3;                             \
         } else {                                                    \
             if ((len) == PRINTF_LEN_BIG_L)                          \
                 io_printf_f_long(mval, fmt, fmt_flags, prec, len, state); \
@@ -2320,6 +2332,10 @@ static int io_printf_signed_int(struct io_printf_state *state, unsigned flags, u
             case PA_PTRDIFF_T:
                 PRINTF_D(ptrdiff_t, arg->data.pdiff, flags, prec, state);
                 break;
+            case PA_STRING:
+            case PA_POINTER:
+                PRINTF_D(intmax_t, (intmax_t) arg->data.p, flags, prec, state);
+                break;
         }
     }
 
@@ -2354,6 +2370,10 @@ static int io_printf_unsigned_int(struct io_printf_state *state, char fmt, unsig
             case PA_PTRDIFF_T:
                 PRINTF_U(uintmax_t, fmt, (uintmax_t) arg->data.pdiff, flags, prec, state);
                 break;
+            case PA_POINTER:
+            case PA_STRING:
+                PRINTF_U(uintmax_t, fmt, (uintmax_t) arg->data.p, flags, prec, state);
+                break;
         }
     }
 
@@ -2364,7 +2384,7 @@ static int io_printf_voidp(struct io_printf_state *state, unsigned flags, unsign
     UNUSED(flags)
     UNUSED(prec)
 
-    if ((arg->type & PA_FLAG_PTR) == 0)
+    if ((arg->type & PA_FLAG_PTR) == 0 && (arg->type & ~PA_FLAG_MASK) != PA_POINTER)
         return -1;
 
     PRINTF_U(uintmax_t, 'x', (uintmax_t) arg->data.p, flags, prec, state);
@@ -2971,7 +2991,12 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
 
             /* Write the format itself */
             {
-                unsigned fmt_flags = 0, fmt_width = 0, fmt_prec = 0, fmt_len = 0, fmt_positional_spec = 0;
+                unsigned fmt_flags = 0, fmt_width = 0, fmt_prec = 0, fmt_len = 0, fmt_positional_spec = 0,
+                         fmt_custom_type_positional_spec = 0, fmt_custom_format_positional_spec = 0;
+
+                Binary fmt_custom_typename = {.data = NULL, .length = 0}, fmt_custom_formatname = {.data = NULL, .length = 0};
+                const CommonContainerBase *fmt_custom_type = NULL;
+                Serializer fmt_custom_formatter = NULL;
 
                 fmt = next_fmt + 1; /* Skip leading '%' */
 
@@ -3177,7 +3202,7 @@ done_with_width:
                 va_list_positional_argument format_value;
 
                 /* read format specifier */
-                if (pass == 0) {
+                if (pass == 0 || *fmt == '{') {
                     switch (*fmt) {
                         default: CLEANUP(-2); /* incomplete format specifier */
                         case 'c': format_value.type = PA_CHAR; break;
@@ -3246,16 +3271,146 @@ done_with_width:
                             format_value.type = PA_POINTER;
                             break;
                         case '{':
+                            /* Formats:
+                             *   "%{type}": pass [(void*) data] - default serializer for type is used
+                             *   "%{type[format]}": pass [(void*) data] - serializer for registered format is used
+                             *   "%{type[*]}": pass ["format", (void*) data] - serializer for registered format is used
+                             *   "%{type[?]}": pass [(Serializer) function, (void*) data] - serializer function is used
+                             *   "%{*}": pass ["type", (void*) data] - default serializer for registered type is used
+                             *   "%{*[format]}": pass ["type", (void*) data] - serializer for registered format is used
+                             *   "%{*[*]}": pass ["type", "format", (void*) data] - serializer for registered format is used
+                             *   "%{*[?]}": pass ["type", (Serializer) function, (void*) data] - serializer function is used
+                             *   "%{?}": pass [(CommonContainerBase *) base, (void*) data] - serializer in container base is used
+                             *   "%{?[format]}": pass [(CommonContainerBase *) base, (void*) data] - serializer for registered format is used
+                             *   "%{?[*]}": pass [(CommonContainerBase *) base, "format", (void*) data] - serializer for registered format is used
+                             *   "%{?[?]}": pass [(CommonContainerBase *) base, (Serializer) function, (void*) data] - serializer function is used
+                             */
+
+                            format_value.type = PA_POINTER;
+                            ++fmt;
+
+                            /* read typename or type specifier */
+                            if (*fmt == '*' || *fmt == '?') {
+                                char fmtchar = *fmt++;
+                                const char *old = fmt;
+                                fmt_custom_type_positional_spec = io_stou(fmt, &fmt);
+
+                                if (old != fmt) {
+                                    if (*fmt++ != '$' || !fmt_positional_spec)
+                                        CLEANUP(-2);
+
+                                    if (pass == 0) {
+                                        va_list_positional_argument arg = {.type = fmtchar == '*'? PA_STRING: PA_POINTER};
+                                        int err = positional_argument_list_add_argument(&positional_args_list, fmt_custom_type_positional_spec, &arg);
+                                        if (err)
+                                            CLEANUP(err);
+                                        ++gathered_positional_args;
+                                    } else if (positional_args_list.args[fmt_custom_type_positional_spec-1].type == PA_STRING) {
+                                        fmt_custom_typename.data = positional_args_list.args[fmt_custom_type_positional_spec-1].data.p;
+                                        fmt_custom_typename.length = strlen(fmt_custom_typename.data);
+                                    } else {
+                                        fmt_custom_type = positional_args_list.args[fmt_custom_type_positional_spec-1].data.p;
+                                    }
+                                } else if (gathered_positional_args) { /* positional spec required if using positional arguments */
+                                    CLEANUP(-2);
+                                } else if (fmtchar == '*') {
+                                    fmt_custom_typename.data = va_arg(args_copy.args, char *);
+                                    fmt_custom_typename.length = strlen(fmt_custom_typename.data);
+                                    ++gathered_normal_args;
+                                } else { /* fmtchar == '?' */
+                                    fmt_custom_type = va_arg(args_copy.args, const CommonContainerBase *);
+                                    ++gathered_normal_args;
+                                }
+                            } else {
+                                size_t nested = 0;
+
+                                fmt_custom_typename.data = (char *) fmt;
+
+                                while (*fmt && (nested || (*fmt != '[' && *fmt != '}'))) {
+                                    if (*fmt == '{') ++nested;
+                                    else if (*fmt == '}') {
+                                        if (!nested)
+                                            break;
+                                        --nested;
+                                    }
+
+                                    ++fmt_custom_typename.length;
+                                    ++fmt;
+                                }
+                            }
+
+                            /* read format name or format specifier */
+                            if (*fmt == '[') {
+                                ++fmt;
+
+                                if (*fmt == '*' || *fmt == '?') {
+                                    char fmtchar = *fmt++;
+                                    const char *old = fmt;
+                                    fmt_custom_format_positional_spec = io_stou(fmt, &fmt);
+
+                                    if (old != fmt) {
+                                        if (*fmt++ != '$' || !fmt_positional_spec)
+                                            CLEANUP(-2);
+
+                                        if (pass == 0) {
+                                            va_list_positional_argument arg = {.type = fmtchar == '*'? PA_STRING: PA_FUNCTION_POINTER};
+                                            int err = positional_argument_list_add_argument(&positional_args_list, fmt_custom_format_positional_spec, &arg);
+                                            if (err)
+                                                CLEANUP(err);
+                                            ++gathered_positional_args;
+                                        } else if (positional_args_list.args[fmt_custom_format_positional_spec-1].type == PA_STRING) {
+                                            fmt_custom_formatname.data = positional_args_list.args[fmt_custom_format_positional_spec-1].data.p;
+                                            fmt_custom_formatname.length = strlen(fmt_custom_formatname.data);
+                                        } else {
+                                            fmt_custom_formatter = positional_args_list.args[fmt_custom_format_positional_spec-1].data.fp;
+                                        }
+                                    } else if (gathered_positional_args) { /* positional spec required if using positional arguments */
+                                        CLEANUP(-2);
+                                    } else if (fmtchar == '*') {
+                                        fmt_custom_typename.data = va_arg(args_copy.args, char *);
+                                        fmt_custom_typename.length = strlen(fmt_custom_typename.data);
+                                        ++gathered_normal_args;
+                                    } else { /* fmtchar == '?' */
+                                        fmt_custom_formatter = va_arg(args_copy.args, Serializer);
+                                        ++gathered_normal_args;
+                                    }
+                                } else {
+                                    size_t nested = 0;
+
+                                    fmt_custom_formatname.data = (char *) fmt;
+
+                                    while (*fmt && (nested || *fmt != ']')) {
+                                        if (*fmt == '[') ++nested;
+                                        else if (*fmt == ']') {
+                                            if (!nested)
+                                                break;
+                                            --nested;
+                                        }
+
+                                        ++fmt_custom_formatname.length;
+                                        ++fmt;
+                                    }
+                                }
+
+                                if (*fmt == ']')
+                                    ++fmt;
+                            }
+
+                            if (*fmt != '}')
+                                CLEANUP(-2);
+
                             break;
                     }
 
-                    if (gathered_positional_args) { /* If positional argument, it needs to be added to the argument spec list and pass 1 (not pass 0) will handle the actual writing */
-                        int err = positional_argument_list_add_argument(&positional_args_list, fmt_positional_spec, &format_value);
-                        if (err)
-                            CLEANUP(err);
-                    } else { /* If normal argument, just read it */
-                        if (io_vreadarg(&format_value, &args_copy) == EOF)
-                            CLEANUP(-2);
+                    if (pass == 0) {
+                        if (gathered_positional_args) { /* If positional argument, it needs to be added to the argument spec list and pass 1 (not pass 0) will handle the actual writing */
+                            int err = positional_argument_list_add_argument(&positional_args_list, fmt_positional_spec, &format_value);
+                            if (err)
+                                CLEANUP(err);
+                        } else { /* If normal argument, just read it */
+                            if (io_vreadarg(&format_value, &args_copy) == EOF)
+                                CLEANUP(-2);
+                        }
                     }
                 }
 
@@ -3370,108 +3525,26 @@ done_with_width:
                             CLEANUP(-2);
 
                         break;
-                    case '{': { /* Custom extension, print data using provided CommonContainerBase serializer */
-                        /* Formats:
-                         *   "%{type}": pass [(void*) data] - default serializer for type is used
-                         *   "%{type[format]}": pass [(void*) data] - serializer for registered format is used
-                         *   "%{type[*]}": pass ["format", (void*) data] - serializer for registered format is used
-                         *   "%{type[?]}": pass [(Serializer) function, (void*) data] - serializer function is used
-                         *   "%{*}": pass ["type", (void*) data] - default serializer for registered type is used
-                         *   "%{*[format]}": pass ["type", (void*) data] - serializer for registered format is used
-                         *   "%{*[*]}": pass ["type", "format", (void*) data] - serializer for registered format is used
-                         *   "%{*[?]}": pass ["type", (Serializer) function, (void*) data] - serializer function is used
-                         *   "%{?}": pass [(CommonContainerBase *) base, (void*) data] - serializer in container base is used
-                         *   "%{?[format]}": pass [(CommonContainerBase *) base, (void*) data] - serializer for registered format is used
-                         *   "%{?[*]}": pass [(CommonContainerBase *) base, "format", (void*) data] - serializer for registered format is used
-                         *   "%{?[?]}": pass [(CommonContainerBase *) base, (Serializer) function, (void*) data] - serializer function is used
-                         */
-                        Binary typename, formatname;
-                        const CommonContainerBase *type = NULL;
-                        Serializer serializer = NULL;
+                    case '}': { /* Custom extension, print data using provided CommonContainerBase serializer. Match '}' because we read the rest of the specifier already */
+                        void *data = format_value.data.p;
 
-                        typename.data = (char *) ++fmt;
-                        typename.length = 0;
-                        formatname.data = NULL;
-                        formatname.length = 0;
-                        size_t nested = 0;
+                        if (!fmt_custom_type) { /* If type not specified, it must be registered */
+                            if (fmt_custom_typename.data != NULL)
+                                fmt_custom_type = io_get_registered_type(fmt_custom_typename.data, fmt_custom_typename.length);
 
-                        while (*fmt && (nested || (*fmt != '[' && *fmt != '}'))) {
-                            if (*fmt == '{') ++nested;
-                            else if (*fmt == '}') {
-                                if (!nested)
-                                    break;
-                                --nested;
-                            }
-
-                            ++typename.length;
-                            ++fmt;
-                        }
-
-                        if (*fmt == '[') {
-                            formatname.data = (char *) ++fmt;
-
-                            while (*fmt && (nested || *fmt != ']')) {
-                                if (*fmt == '[') ++nested;
-                                else if (*fmt == ']') {
-                                    if (!nested)
-                                        break;
-                                    --nested;
-                                }
-
-                                ++formatname.length;
-                                ++fmt;
-                            }
-
-                            if (*fmt == ']')
-                                ++fmt;
-                        }
-
-                        if (*fmt != '}')
-                            CLEANUP(-2);
-
-                        if (typename.length == 1) {
-                            if (typename.data[0] == '*') {
-                                char *dynamic_typename = va_arg(args_copy.args, char *);
-
-                                typename.data = dynamic_typename;
-                                typename.length = strlen(dynamic_typename);
-                            } else if (typename.data[0] == '?') {
-                                type = va_arg(args_copy.args, const CommonContainerBase *);
-                                if (!type)
-                                    CLEANUP(-1);
-                            }
-                        }
-
-                        if (formatname.length == 1) {
-                            if (formatname.data[0] == '*') {
-                                char *dynamic_formatname = va_arg(args_copy.args, char *);
-
-                                formatname.data = dynamic_formatname;
-                                formatname.length = strlen(dynamic_formatname);
-                            } else if (formatname.data[0] == '?') {
-                                serializer = va_arg(args_copy.args, Serializer);
-                                if (!serializer)
-                                    CLEANUP(-1);
-                            }
-                        }
-
-                        void *data = va_arg(args_copy.args, void *);
-
-                        if (!type) { /* If type not specified, it must be registered */
-                            type = io_get_registered_type(typename.data, typename.length);
-                            if (!type)
+                            if (!fmt_custom_type)
                                 CLEANUP(-1);
                         }
 
-                        if (!serializer) { /* If serializer not specified, it could be registered name, or if not present, in the type recipe */
-                            if (formatname.data != NULL) {
-                                struct RegisteredFormat *registered_fmt = io_get_registered_format(formatname.data, formatname.length);
+                        if (!fmt_custom_formatter) { /* If serializer not specified, it could be registered name, or if not present, in the type recipe */
+                            if (fmt_custom_formatname.data != NULL) {
+                                struct RegisteredFormat *registered_fmt = io_get_registered_format(fmt_custom_formatname.data, fmt_custom_formatname.length);
 
-                                serializer = registered_fmt? registered_fmt->serializer: NULL;
-                            } else if (type->serialize)
-                                serializer = type->serialize;
+                                fmt_custom_formatter = registered_fmt? registered_fmt->serializer: NULL;
+                            } else if (fmt_custom_type->serialize)
+                                fmt_custom_formatter = fmt_custom_type->serialize;
 
-                            if (!serializer)
+                            if (!fmt_custom_formatter)
                                 CLEANUP(-1);
                         }
 
@@ -3490,7 +3563,7 @@ done_with_width:
                             if (temp == NULL)
                                 CLEANUP(-1);
                             else {
-                                if (serializer(temp, data, type, &serializer_identity)) {
+                                if (fmt_custom_formatter(temp, data, fmt_custom_type, &serializer_identity)) {
                                     io_destroy(temp);
                                     CLEANUP(-1);
                                 }
@@ -3509,7 +3582,7 @@ done_with_width:
                              * to the underlying IO device, since no padding or truncation needs to be done. The length of the
                              * serialized data is mandated to be returned in the serializer_identity struct so it can be added to
                              * the return value of this function. */
-                            if (serializer(io, data, type, &serializer_identity)) {
+                            if (fmt_custom_formatter(io, data, fmt_custom_type, &serializer_identity)) {
                                 CLEANUP(-1);
                             }
 

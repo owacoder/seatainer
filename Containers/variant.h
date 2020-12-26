@@ -9,15 +9,6 @@
 
 #include "common.h"
 
-/* IMPORTANT! Variant CommonContainerBase objects apply differently depending on the Variant type.
- *
- * Custom variants have the contained pointer passed as the context to the parser and serialization functions.
- * All other variant types have the variant itself passed as the context to the parser and serialization functions.
- */
-
-typedef Variant (*VariantParser)(void *io);
-typedef int (*VariantSerializer)(void *io, const Variant *v, const char **type);
-
 enum VariantType {
     VariantNull,
     VariantBoolean,
@@ -103,7 +94,5 @@ void variant_clear(Variant var);
 void variant_destroy(Variant var);
 const CommonContainerBase *variant_get_custom_container_base(Variant var);
 CommonContainerBase *variant_build_recipe(Variant var);
-
-int variant_serialize(void *output, Variant var, struct SerializerIdentity *type);
 
 #endif // VARIANT_H
