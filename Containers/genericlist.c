@@ -59,7 +59,7 @@ GenericList variant_get_genericlist(Variant var) {
     if (!variant_is_genericlist(var))
         return NULL;
 
-    return variant_get_custom(var);
+    return variant_get_custom_data(var);
 }
 
 int variant_set_genericlist_move(Variant var, GenericList list) {
@@ -577,6 +577,10 @@ int genericlist_insert(GenericList list, const void *item, size_t before_index) 
     }
 }
 
+int genericlist_insert_move_iterator(GenericList list, void *item, Iterator before) {
+    return genericlist_insert_move(list, item, genericlist_index_of(list, before));
+}
+
 int genericlist_replace_move_at(GenericList list, size_t index, void *item) {
     if (list->base->size > sizeof(void*)) { /* Large POD type */
         void **array = (void **) list->array;
@@ -628,6 +632,22 @@ int genericlist_replace_at(GenericList list, size_t index, const void *item) {
     }
 
     return 0;
+}
+
+int genericlist_replace_move_iterator(GenericList list, Iterator it, void *item) {
+    return genericlist_replace_move_at(list, genericlist_index_of(list, it), item);
+}
+
+Iterator genericlist_remove_at_iterator(GenericList list, Iterator it) {
+    if (it == NULL)
+        genericlist_clear(list);
+    else {
+        const size_t index = genericlist_index_of(list, it);
+        if (genericlist_remove_at(list, index) && index < genericlist_size(list))
+            return it;
+    }
+
+    return NULL;
 }
 
 size_t genericlist_remove_at(GenericList list, size_t index) {
@@ -751,6 +771,18 @@ size_t genericlist_bsearch(GenericList list, const void *item) {
     }
 
     return SIZE_MAX;
+}
+
+Iterator genericlist_find_iterator(GenericList list, const void *item, Iterator begin) {
+    if (list->base->compare == NULL)
+        return NULL;
+
+    for (Iterator it = begin; it; it = genericlist_next(list, it)) {
+        if (list->base->compare(item, genericlist_value_of(list, it)) == 0)
+            return it;
+    }
+
+    return NULL;
 }
 
 size_t genericlist_find(GenericList list, const void *item, size_t begin_index) {
@@ -1127,9 +1159,14 @@ Iterator genericlist_next(GenericList list, Iterator it) {
     }
 }
 
-void *genericlist_value_of(GenericList list, Iterator it) {
-    UNUSED(list)
+size_t genericlist_index_of(GenericList list, Iterator it) {
+    if (list->base->size && list->base->size <= sizeof(void*))
+        return ((char *) it - (char *) genericlist_begin(list)) / list->base->size;
+    else
+        return ((void **) it - (void **) genericlist_begin(list));
+}
 
+void *genericlist_value_of(GenericList list, Iterator it) {
     if (list->base->size && list->base->size <= sizeof(void*))
         return it;
     else

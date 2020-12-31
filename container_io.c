@@ -45,7 +45,7 @@ int io_serialize_char(IO output, const void *data, const CommonContainerBase *ba
     if (generic_types_compatible_compare(base, container_base_char_recipe()) != 0)
         return CC_ENOTSUP;
 
-    int result = io_printf(output, "'%.1s'", data) < 0;
+    int result = io_printf(output, "%.1s", data) < 0;
     if (result < 0)
         return io_error(output);
 
@@ -313,11 +313,12 @@ int io_serialize_variant(IO output, const void *data, const CommonContainerBase 
 
         switch (variant_get_type(v)) {
             case VariantCustom:
-                data = variant_get_custom(v);
+                data = variant_get_custom_data(v);
                 base = variant_get_custom_container_base(v);
                 continue;
+            case VariantUndefined:
             case VariantNull: {
-                const char *str = "<null>";
+                const char *str = variant_get_type(v) == VariantUndefined? "<undefined>": "<null>";
                 const size_t len = strlen(str);
                 if (io_write(str, 1, len, output) != len)
                     return io_error(output);
@@ -355,27 +356,64 @@ int io_serialize_variant(IO output, const void *data, const CommonContainerBase 
     }
 }
 
-int io_serialize_container(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
-    SERIALIZER_DECLARE("UTF-8", io_serialize_container, 1);
+int io_serialize_list_join(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    int is_utf8 = 0;
+
+    Serializer value_serialize = base && base->value_child? base->value_child->serialize: NULL;
+    if (value_serialize == NULL && base)
+        value_serialize = io_default_serializer_for_type(base->value_child);
+
+    if (value_serialize) {
+        struct SerializerIdentity subtype = {0};
+        value_serialize(NULL, NULL, NULL, &subtype);
+        is_utf8 = subtype.is_utf8;
+    }
+
+    SERIALIZER_DECLARE("list-join", io_serialize_list_join, is_utf8);
     struct SerializerIdentity subtype = *type;
 
     if (base->collection_begin == NULL ||
             base->collection_next == NULL ||
-            base->collection_get_value == NULL)
+            base->collection_get_value == NULL ||
+            value_serialize == NULL)
         return CC_ENOTSUP;
 
-    Serializer key_serialize = base->key_child? base->key_child->serialize: NULL;
-    if (key_serialize == NULL)
-        key_serialize = io_default_serializer_for_type(base->key_child);
+    Iterator start = base->collection_begin(data);
+    for (Iterator it = start; it; it = base->collection_next(data, it)) {
+        if (it != start && type->fmt_length) {
+            if (io_write(type->fmt, 1, type->fmt_length, output) != type->fmt_length)
+                return io_error(output);
+            else
+                type->written += type->fmt_length;
+        }
 
-    Serializer value_serialize = base->value_child? base->value_child->serialize: NULL;
-    if (value_serialize == NULL)
-        value_serialize = io_default_serializer_for_type(base->value_child);
+        {
+            int err = value_serialize(output, base->collection_get_value(data, it), base->value_child, &subtype);
+            if (err)
+                return err;
+            else
+                type->written += subtype.written;
+        }
+    }
 
-    if (base->collection_get_key) {
-        if (key_serialize == NULL || value_serialize == NULL)
+    return 0;
+}
+
+int io_serialize_utf8(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
+    SERIALIZER_DECLARE("UTF-8", io_serialize_utf8, 1);
+    struct SerializerIdentity subtype = *type;
+
+    if (base->collection_begin == NULL ||
+            base->collection_next == NULL ||
+            base->collection_get_value == NULL) {
+        Serializer serialize = io_default_serializer_for_type(base);
+        if (serialize == NULL)
             return CC_ENOTSUP;
 
+        return serialize(output, data, base, type);
+    }
+
+    if (base->collection_get_key) {
         if (io_putc('{', output) == EOF)
             return io_error(output);
         else
@@ -395,7 +433,7 @@ int io_serialize_container(IO output, const void *data, const CommonContainerBas
 
             /* Write key */
             {
-                int err = key_serialize(output, base->collection_get_key(data, it), base->key_child, &subtype);
+                int err = io_serialize_utf8(output, base->collection_get_key(data, it), base->key_child, &subtype);
                 if (err)
                     return err;
                 else
@@ -414,7 +452,7 @@ int io_serialize_container(IO output, const void *data, const CommonContainerBas
 
             /* Write value */
             {
-                int err = value_serialize(output, base->collection_get_value(data, it), base->value_child, &subtype);
+                int err = io_serialize_utf8(output, base->collection_get_value(data, it), base->value_child, &subtype);
                 if (err)
                     return err;
                 else
@@ -427,9 +465,6 @@ int io_serialize_container(IO output, const void *data, const CommonContainerBas
         else
             ++type->written;
     } else {
-        if (value_serialize == NULL)
-            return CC_ENOTSUP;
-
         if (io_putc('[', output) == EOF)
             return io_error(output);
         else
@@ -447,7 +482,7 @@ int io_serialize_container(IO output, const void *data, const CommonContainerBas
             }
 
             {
-                int err = value_serialize(output, base->collection_get_value(data, it), base->value_child, &subtype);
+                int err = io_serialize_utf8(output, base->collection_get_value(data, it), base->value_child, &subtype);
                 if (err)
                     return err;
                 else
@@ -457,6 +492,8 @@ int io_serialize_container(IO output, const void *data, const CommonContainerBas
 
         if (io_putc(']', output) == EOF)
             return io_error(output);
+        else
+            ++type->written;
     }
 
     return 0;
@@ -500,38 +537,301 @@ Serializer io_default_serializer_for_type(const CommonContainerBase *base) {
              generic_types_compatible_compare(base, container_base_genericset_recipe()) == 0 ||
              generic_types_compatible_compare(base, container_base_stringmap_recipe()) == 0 ||
              generic_types_compatible_compare(base, container_base_genericmap_recipe()) == 0)
-        return (Serializer) io_serialize_container;
+        return (Serializer) io_serialize_utf8;
     else
         return NULL; /* Unknown default serializer type */
 }
 
-static size_t serialize_json_stringpart(const char *data, size_t length, IO io) {
+int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct ParserIdentity *type) {
+    PARSER_DECLARE("JSON", io_parse_json, 1);
+
+    int ch;
+    do {
+        ch = io_getc(input);
+        if (ch == EOF)
+            goto cleanup;
+    } while (strchr(" \n\r\t", ch));
+
+    if (generic_types_compatible_compare(base, container_base_variant_recipe()) == 0) {
+        Variant v = (Variant) data;
+
+        enum {
+            JsonNull,
+            JsonTrue,
+            JsonFalse,
+            JsonNumber,
+            JsonString,
+            JsonArray,
+            JsonObject
+        } json_type = JsonNull;
+
+        /* Detect type of element */
+        switch (ch) {
+            case 'n': json_type = JsonNull; break;
+            case 't': json_type = JsonTrue; break;
+            case 'f': json_type = JsonFalse; break;
+            case '{': json_type = JsonObject; break;
+            case '[': json_type = JsonArray; break;
+            case '"': json_type = JsonString; break;
+            case '-':
+            case '0':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':
+            case '8':
+            case '9': json_type = JsonNumber; break;
+            default: goto cleanup;
+        }
+        io_ungetc(ch, input);
+
+        if (variant_is_undefined(v)) { /* No expected type */
+            int err = 0;
+
+            /* Then parse element type */
+            switch (json_type) {
+                case JsonNull: {
+                    int dummy = 0;
+                    err = io_parse_json(input, &dummy, container_base_empty_recipe(), type);
+                    if (!err)
+                        variant_set_null(v);
+                    break;
+                }
+                case JsonTrue:
+                case JsonFalse: {
+                    _Bool b = 0;
+                    err = io_parse_json(input, &b, container_base_boolean_recipe(), type);
+                    if (!err)
+                        variant_set_boolean(v, b);
+                    break;
+                }
+                case JsonNumber: {
+                    /* TODO: support int64 and uint64 values that would lose accuracy in a double too */
+                    double d = 0.0;
+                    err = io_parse_json(input, &d, container_base_double_recipe(), type);
+                    if (!err)
+                        variant_set_float(v, d);
+                    break;
+                }
+                case JsonString: {
+                    Binary b = {.data = NULL, .length = 0};
+                    err = io_parse_json(input, &b, container_base_binary_recipe(), type);
+                    if (!err)
+                        variant_set_binary_string_binary_move(v, b);
+                    else
+                        FREE(b.data);
+                    break;
+                }
+                case JsonArray: {
+                    GenericList gl = genericlist_create(container_base_variant_recipe());
+                    if (gl == NULL)
+                        return CC_ENOMEM;
+
+                    err = io_parse_json(input, gl, container_base_variantlist_recipe(), type);
+                    if (!err)
+                        variant_set_custom_move(v, gl, container_base_variantlist_recipe());
+                    else
+                        genericlist_destroy(gl);
+
+                    break;
+                }
+                case JsonObject: {
+                    GenericMap gm = genericmap_create(container_base_cstring_recipe(),
+                                                      container_base_variant_recipe());
+                    if (gm == NULL)
+                        return CC_ENOMEM;
+
+                    err = io_parse_json(input, gm, container_base_variantmap_recipe(), type);
+                    if (!err)
+                        variant_set_custom_move(v, gm, container_base_variantmap_recipe());
+                    else
+                        genericmap_destroy(gm);
+
+                    break;
+                }
+            }
+
+            return err;
+        } else { /* Expected type is type currently contained in Variant */
+            switch (variant_get_type(v)) {
+                default: return CC_EINVAL;
+                case VariantNull: {
+                    int dummy = 0;
+                    int err = io_parse_json(input, &dummy, container_base_empty_recipe(), type);
+                    return err;
+                }
+                case VariantBoolean: {
+                    _Bool b = 0;
+                    int err = io_parse_json(input, &b, container_base_boolean_recipe(), type);
+                    if (!err)
+                        variant_set_boolean(v, b);
+                    return err;
+                }
+                case VariantInteger: {
+                    long long i = 0;
+                    int err = io_parse_json(input, &i, container_base_long_long_recipe(), type);
+                    if (!err)
+                        variant_set_int64(v, i);
+                    return err;
+                }
+                case VariantUnsignedInteger: {
+                    unsigned long long i = 0;
+                    int err = io_parse_json(input, &i, container_base_ulong_long_recipe(), type);
+                    if (!err)
+                        variant_set_uint64(v, i);
+                    return err;
+                }
+                case VariantFloat: {
+                    double d = 0.0;
+                    int err = io_parse_json(input, &d, container_base_double_recipe(), type);
+                    if (!err)
+                        variant_set_float(v, d);
+                    return err;
+                }
+                case VariantString: {
+                    char *str = NULL;
+                    int err = io_parse_json(input, &str, container_base_cstring_recipe(), type);
+                    if (!err)
+                        variant_set_string_move(v, str);
+                    else
+                        FREE(str);
+                    return err;
+                }
+                case VariantBinary: {
+                    Binary b = {.data = NULL, .length = 0};
+                    int err = io_parse_json(input, &b, container_base_binary_recipe(), type);
+                    if (!err)
+                        variant_set_binary_string_binary_move(v, b);
+                    else
+                        FREE(b.data);
+                    return err;
+                }
+                case VariantCustom: {
+                    return io_parse_json(input, variant_get_custom_data(v), variant_get_custom_container_base(v), type);
+                }
+            }
+        }
+    }
+
+    if (base->collection_get_key != NULL) { /* Object type */
+        if (ch != '{')
+            goto cleanup;
+
+
+
+        /* Parse object into recipient type */
+    } else if (base->collection_get_value != NULL) { /* Array type */
+        if (ch != '[')
+            goto cleanup;
+
+        /* Parse array into recipient type */
+    } else if (generic_types_compatible_compare(base, container_base_cstring_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_binary_recipe()) == 0) {
+        if (ch != '"')
+            goto cleanup;
+
+        /* Parse string into recipient type */
+    } else if (generic_types_compatible_compare(base, container_base_boolean_recipe()) == 0) {
+        if (ch != 't' && ch != 'f')
+            goto cleanup;
+
+        if (io_match(input, ch == 't'? "rue": "alse"))
+            goto cleanup;
+
+        _Bool *b = (_Bool *) data;
+        *b = ch == 't';
+    } else if (generic_types_compatible_compare(base, container_base_short_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_ushort_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_int_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_uint_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_long_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_ulong_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_long_long_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_ulong_long_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_float_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_double_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_long_double_recipe()) == 0) {
+        if (ch != '-' && !isdigit(ch))
+            goto cleanup;
+
+        /* Parse number into recipient type */
+    } else if (generic_types_compatible_compare(base, container_base_empty_recipe()) == 0) {
+        if (ch != 'n' || io_match(input, "ull"))
+            goto cleanup;
+    }
+
+    return 0;
+
+cleanup:
+    return io_error(input)? io_error(input): CC_EBADMSG;
+}
+
+static size_t serialize_json_stringpart(int ascii_only, const char *data, size_t length, IO io) {
+    char buffer[16];
     size_t written = 0;
 
-    for (size_t i = 0; i < length; ++i) {
-        char buffer[8] = {'\\'};
+    while (length) {
+        buffer[0] = '\\';
         size_t buffer_size = 1;
-        unsigned char c = data[i];
+        unsigned char c = *data;
 
         switch (c) {
-            case '\\':
-            case '"': buffer[1] = c; buffer_size = 2; break;
-            case '\b': buffer[1] = 'b'; buffer_size = 2; break;
-            case '\f': buffer[1] = 'f'; buffer_size = 2; break;
-            case '\n': buffer[1] = 'n'; buffer_size = 2; break;
-            case '\r': buffer[1] = 'r'; buffer_size = 2; break;
-            case '\t': buffer[1] = 't'; buffer_size = 2; break;
+            case '"':  buffer[1] =  c ; buffer_size = 2; ++data; --length; break;
+            case '\b': buffer[1] = 'b'; buffer_size = 2; ++data; --length; break;
+            case '\f': buffer[1] = 'f'; buffer_size = 2; ++data; --length; break;
+            case '\n': buffer[1] = 'n'; buffer_size = 2; ++data; --length; break;
+            case '\r': buffer[1] = 'r'; buffer_size = 2; ++data; --length; break;
+            case '\t': buffer[1] = 't'; buffer_size = 2; ++data; --length; break;
             default: {
-                if (c < 0x20) {
+                if (c < 0x20 || c >= 0x80) {
                     const char alphabet[] = "0123456789ABCDEF";
+                    const char *data_save = data;
+                    unsigned long codepoint = utf8next_n(data, &length, &data);
 
-                    buffer[1] = 'u';
-                    buffer[2] = buffer[3] = '0';
-                    buffer[4] = alphabet[c >> 4];
-                    buffer[5] = alphabet[c & 0xf];
-                    buffer_size = 6;
-                } else
+                    if (codepoint > UTF8_MAX) {
+                        buffer[1] = 'u';
+                        buffer[2] = '0';
+                        buffer[3] = '0';
+                        buffer[4] = alphabet[c >> 4];
+                        buffer[5] = alphabet[c & 0xf];
+                        buffer_size = 6;
+                    } else if (ascii_only) {
+                        if (codepoint > 0xffff) {
+                            unsigned int high, low;
+                            utf16surrogates(codepoint, &high, &low);
+
+                            buffer[1] = 'u';
+                            buffer[2] = alphabet[(high >> 12) & 0xf];
+                            buffer[3] = alphabet[(high >>  8) & 0xf];
+                            buffer[4] = alphabet[(high >>  4) & 0xf];
+                            buffer[5] = alphabet[(high >>  0) & 0xf];
+                            buffer[6] = '\\';
+                            buffer[7] = 'u';
+                            buffer[8] = alphabet[(low >> 12) & 0xf];
+                            buffer[9] = alphabet[(low >>  8) & 0xf];
+                            buffer[10] = alphabet[(low >>  4) & 0xf];
+                            buffer[11] = alphabet[(low >>  0) & 0xf];
+                            buffer_size = 12;
+                        } else {
+                            buffer[1] = 'u';
+                            buffer[2] = alphabet[(codepoint >> 12) & 0xf];
+                            buffer[3] = alphabet[(codepoint >>  8) & 0xf];
+                            buffer[4] = alphabet[(codepoint >>  4) & 0xf];
+                            buffer[5] = alphabet[(codepoint >>  0) & 0xf];
+                            buffer_size = 6;
+                        }
+                    } else {
+                        buffer_size = data - data_save;
+                        memcpy(buffer, data_save, buffer_size);
+                    }
+                } else {
                     buffer[0] = c;
+                    ++data;
+                    --length;
+                }
 
                 break;
             }
@@ -547,17 +847,17 @@ static size_t serialize_json_stringpart(const char *data, size_t length, IO io) 
     return written;
 }
 
-static size_t serialize_json_stringpart_internal(IO output, const Binary b) {
-    return serialize_json_stringpart(b.data, b.length, output);
+static size_t serialize_json_stringpart_internal(int ascii_only, IO output, const Binary b) {
+    return serialize_json_stringpart(ascii_only, b.data, b.length, output);
 }
 
-static size_t serialize_json_string_internal(IO output, const Binary b) {
-    size_t written = 0;
+static size_t serialize_json_string_internal(int ascii_only, IO output, const Binary b) {
+    size_t written = 1;
 
     if (io_putc('"', output) == EOF)
         return 0;
 
-    written += 1 + serialize_json_stringpart_internal(output, b);
+    written += serialize_json_stringpart_internal(ascii_only, output, b);
     if (io_error(output))
         return written;
 
@@ -567,20 +867,22 @@ static size_t serialize_json_string_internal(IO output, const Binary b) {
     return written + 1;
 }
 
-/* TODO: not compliant with new type->written mandate */
 int io_serialize_json(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
     while (1) {
         SERIALIZER_DECLARE("JSON", io_serialize_json, 1);
+
+        const int ascii_only = memstr(type->fmt, type->fmt_length, "ASCII") != NULL;
 
         if (generic_types_compatible_compare(base, container_base_variant_recipe()) == 0) {
             if (variant_is_custom((Variant) data)) {
                 /* Variant is custom, just move down a level (to the child value) and restart the serializer */
                 base = base->value_child;
-                data = variant_get_custom((Variant) data);
+                data = variant_get_custom_data((Variant) data);
                 continue;
             } else {
                 /* Variant is native, just serialize it */
                 switch (variant_get_type((Variant) data)) {
+                    case VariantUndefined:
                     case VariantNull: io_puts("null", output); type->written = 4; return io_error(output);
                     case VariantBoolean: io_puts(variant_get_boolean((Variant) data)? "true": "false", output); type->written = 4 + !variant_get_boolean((Variant) data); return io_error(output);
                     case VariantInteger: type->written = abs(io_printf(output, "%lld", variant_get_int64((Variant) data))); return io_error(output);
@@ -594,14 +896,14 @@ int io_serialize_json(IO output, const void *data, const CommonContainerBase *ba
 
                         return io_error(output);
                     }
-                    case VariantString: {
+                    case VariantString:
+                    case VariantBinary: {
                         Binary b = variant_to_binary((Variant) data, NULL);
 
-                        type->written = serialize_json_string_internal(output, b);
+                        type->written = serialize_json_string_internal(ascii_only, output, b);
 
                         return io_error(output);
                     }
-                    case VariantBinary:
                     default:
                         return CC_ENOTSUP;
                 }
@@ -610,9 +912,12 @@ int io_serialize_json(IO output, const void *data, const CommonContainerBase *ba
 
         if (base->collection_begin && base->collection_next && base->collection_get_value) { /* A collection of some sort */
             if (base->collection_get_key) { /* An object */
-                /* Ensure keys are C-strings */
-                if (generic_types_compatible_compare(base->key_child, container_base_cstring_recipe()) != 0)
+                /* Ensure keys are C-strings or Binary */
+                if (generic_types_compatible_compare(base->key_child, container_base_cstring_recipe()) != 0 &&
+                    generic_types_compatible_compare(base->key_child, container_base_binary_recipe()) != 0)
                     return CC_ENOTSUP;
+
+                const int values_are_variants = generic_types_compatible_compare(base->value_child, container_base_variant_recipe()) == 0;
 
                 if (io_putc('{', output) == EOF)
                     return io_error(output);
@@ -620,14 +925,17 @@ int io_serialize_json(IO output, const void *data, const CommonContainerBase *ba
 
                 Iterator start = base->collection_begin(data);
                 for (Iterator it = start; it; it = base->collection_next(data, it)) {
+                    const void *key = base->collection_get_key(data, it);
+                    const void *value = base->collection_get_value(data, it);
+
+                    if (values_are_variants && variant_is_undefined((Variant) value)) /* If value is undefined, omit it from the JSON output */
+                        continue;
+
                     if (it != start) {
                         if (io_putc(',', output) == EOF)
                             return io_error(output);
                         ++type->written;
                     }
-
-                    const void *key = base->collection_get_key(data, it);
-                    const void *value = base->collection_get_value(data, it);
 
                     struct SerializerIdentity identity_subtype = *type;
                     int err = io_serialize_json(output, key, base->key_child, &identity_subtype);
@@ -678,7 +986,10 @@ int io_serialize_json(IO output, const void *data, const CommonContainerBase *ba
         } else { /* An atom */
             if (generic_types_compatible_compare(base, container_base_cstring_recipe()) == 0) {
                 Binary b = {.data = (char *) data, .length = strlen(data)};
-                type->written = serialize_json_string_internal(output, b);
+                type->written = serialize_json_string_internal(ascii_only, output, b);
+                return io_error(output);
+            } else if (generic_types_compatible_compare(base, container_base_binary_recipe()) == 0) {
+                type->written = serialize_json_string_internal(ascii_only, output, *((Binary *) data));
                 return io_error(output);
             } else if (generic_types_compatible_compare(base, container_base_boolean_recipe()) == 0) {
                 const _Bool value = *((const _Bool *) data);
@@ -949,7 +1260,7 @@ cleanup:
     return NULL;
 }
 
-int stringlist_join_io(IO output, StringList list, const char *separator) {
+int io_join_stringlist(IO output, StringList list, const char *separator) {
     Iterator it = stringlist_begin(list);
 
     while (it) {
@@ -965,11 +1276,11 @@ int stringlist_join_io(IO output, StringList list, const char *separator) {
     return 0;
 }
 
-int genericlist_join_io(IO output, GenericList list, const char *separator) {
-    return genericlist_join_io_n(output, list, separator, strlen(separator));
+int io_join_genericlist(IO output, GenericList list, const char *separator) {
+    return io_join_genericlist_n(output, list, separator, strlen(separator));
 }
 
-int genericlist_join_io_n(IO output, GenericList list, const char *separator, size_t separator_len) {
+int io_join_genericlist_n(IO output, GenericList list, const char *separator, size_t separator_len) {
     if (generic_types_compatible_compare(genericlist_get_container_base(list), container_base_cstring_recipe()) == 0) {
         Iterator it = genericlist_begin(list);
 

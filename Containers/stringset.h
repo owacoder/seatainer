@@ -34,6 +34,7 @@ size_t stringset_size(StringSet set);
 int stringset_compare(StringSet lhs, StringSet rhs);
 void stringset_clear(StringSet set);
 void stringset_destroy(StringSet set);
+GenericSet stringset_cast_to_genericset(StringSet set);
 const CommonContainerBase *stringset_get_container_base(StringSet set);
 CommonContainerBase *stringset_build_recipe(StringSet set);
 

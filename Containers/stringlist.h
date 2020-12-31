@@ -62,6 +62,7 @@ char *stringlist_value_of(StringList list, Iterator it);
 size_t stringlist_size(StringList list);
 void stringlist_clear(StringList list);
 void stringlist_destroy(StringList list);
+GenericList stringlist_cast_to_genericlist(StringList list);
 char *stringlist_join(StringList list, const char *separator);
 const CommonContainerBase *stringlist_get_container_base(StringList list);
 CommonContainerBase *stringlist_build_recipe(StringList list);

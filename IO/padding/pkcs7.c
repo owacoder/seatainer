@@ -37,7 +37,7 @@ int pkcs7_padding_encode_close(void *userdata, IO io) {
         size_t rest = padding->block_size - padding->written % padding->block_size;
 
         for (size_t i = 0; i < rest; ++i)
-            if (io_putc(rest, padding->io) == EOF) {
+            if (io_putc((int) rest, padding->io) == EOF) {
                 err = io_error(padding->io);
                 break;
             }

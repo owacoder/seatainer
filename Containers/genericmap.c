@@ -30,7 +30,7 @@ GenericMap variant_get_genericmap(Variant var) {
     if (!variant_is_genericmap(var))
         return NULL;
 
-    return variant_get_custom(var);
+    return variant_get_custom_data(var);
 }
 
 int variant_set_genericmap_move(Variant var, GenericMap map) {
@@ -47,6 +47,13 @@ GenericMap genericmap_create(const CommonContainerBase *key_base, const CommonCo
 
 GenericMap genericmap_copy(GenericMap other) {
     return (GenericMap) avltree_copy((struct AVLTree *) other);
+}
+
+int genericmap_insert_move_key(GenericMap map, void *key, void *item) {
+    if (avltree_insert_move_key((struct AVLTree *) map, key, item) == NULL)
+        return CC_ENOMEM;
+
+    return 0;
 }
 
 int genericmap_insert_move(GenericMap map, const void *key, void *item) {

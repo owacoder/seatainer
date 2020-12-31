@@ -47,9 +47,29 @@ int io_register_format(const char *name, Parser parser, Serializer serializer);
  */
 void io_unregister_format(const char *name);
 
+/** Default "UTF-8" parsers for known types */
+int io_parse_boolean(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_char(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_short(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_ushort(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_int(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_uint(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_long(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_ulong(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_long_long(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_ulong_long(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_size_t(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_float(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_double(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_long_double(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_cstring(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_binary(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_parse_variant(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+
 /** Default "UTF-8" serializers for known types */
 int io_serialize_boolean(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_char(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_uchar(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_short(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_ushort(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_int(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
@@ -65,7 +85,10 @@ int io_serialize_long_double(IO output, const void *data, const CommonContainerB
 int io_serialize_cstring(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_binary(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_variant(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
-int io_serialize_container(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+
+/* Serializer format specifies the separator with which to join elements. */
+int io_serialize_list_join(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+int io_serialize_utf8(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 
 int io_serialize_clock_t(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_tm(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
@@ -73,15 +96,24 @@ int io_serialize_tm(IO output, const void *data, const CommonContainerBase *base
 /** Get the default "UTF-8" serializer given a type */
 Serializer io_default_serializer_for_type(const CommonContainerBase *base);
 
-/** Generic JSON serializer, supporting Variants and containers, as well as simple types */
+/** Generic JSON parser and serializer, supporting Variants and containers, as well as simple types */
+int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct ParserIdentity *type);
+
+/** Generic JSON serializer, supporting Variants and containers, as well as simple types
+ * The user-specified format can include the following:
+ *    "ASCII": Forces all non-ASCII unicode points to be escaped in JSON strings. If this flag is not used, valid UTF-8 is passed through unchanged.
+ *             If invalid UTF-8 is encountered in a string or binary value, the invalid byte will be mapped to an escaped Unicode code point
+ *             regardless of this flag's existence. This allows simple UTF-8 decoders to decode to the same byte sequence as the source.
+ */
 int io_serialize_json(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 
+/** The following are not serializers, but they are special functions for fast operations on Binary and C-string lists */
 StringList stringlist_split_io(IO input, const char *separator, int keep_empty);
 GenericList binarylist_split_io(IO input, const char *separator, size_t separator_len, int keep_empty);
 StringList stringlist_divide_io(IO input, size_t record_size, int keep_partial);
 GenericList binarylist_divide_io(IO input, size_t record_size, int keep_partial);
-int stringlist_join_io(IO output, StringList list, const char *separator);
-int genericlist_join_io(IO output, GenericList list, const char *separator);
-int genericlist_join_io_n(IO output, GenericList list, const char *separator, size_t separator_len);
+int io_join_stringlist(IO output, StringList list, const char *separator);
+int io_join_genericlist(IO output, GenericList list, const char *separator);
+int io_join_genericlist_n(IO output, GenericList list, const char *separator, size_t separator_len);
 
 #endif // CONTAINER_IO_H

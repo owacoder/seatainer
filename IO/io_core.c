@@ -238,7 +238,7 @@ done:
 int io_register_format(const char *name, Parser parser, Serializer serializer) {
     register_io_funcs();
 
-    if (parser == NULL && serializer == NULL)
+    if (*name == 0 || (parser == NULL && serializer == NULL))
         return CC_EINVAL;
 
     struct RegisteredFormat *format = MALLOC(sizeof(*format));
@@ -1240,6 +1240,29 @@ int io_getc(IO io) {
         return io_unlocki(io, EOF);
 
     return io_unlocki(io, io_getc_internal(io));
+}
+
+int io_match_n_internal(IO io, const char *str, size_t len) {
+    while (len--) {
+        int ch = io_getc_internal(io);
+        if (ch == EOF || ch != *str++)
+            return io_error(io)? io_error(io): CC_EBADMSG;
+    }
+
+    return 0;
+}
+
+int io_match_n(IO io, const char *str, size_t len) {
+    io_lock(io);
+
+    if (io_begin_read(io))
+        return io_unlocki(io, EOF);
+
+    return io_unlocki(io, io_match_n_internal(io, str, len));
+}
+
+int io_match(IO io, const char *str) {
+    return io_match_n(io, str, strlen(str));
 }
 
 int io_getpos(IO io, IO_Pos *pos) {
@@ -2994,7 +3017,9 @@ int io_vprintf(IO io, const char *fmt, va_list args) {
                 unsigned fmt_flags = 0, fmt_width = 0, fmt_prec = 0, fmt_len = 0, fmt_positional_spec = 0,
                          fmt_custom_type_positional_spec = 0, fmt_custom_format_positional_spec = 0;
 
-                Binary fmt_custom_typename = {.data = NULL, .length = 0}, fmt_custom_formatname = {.data = NULL, .length = 0};
+                Binary fmt_custom_typename = {.data = NULL, .length = 0},
+                       fmt_custom_formatname = {.data = NULL, .length = 0},
+                       fmt_custom_userformatname = {.data = NULL, .length = 0};
                 const CommonContainerBase *fmt_custom_type = NULL;
                 Serializer fmt_custom_formatter = NULL;
 
@@ -3284,6 +3309,9 @@ done_with_width:
                              *   "%{?[format]}": pass [(CommonContainerBase *) base, (void*) data] - serializer for registered format is used
                              *   "%{?[*]}": pass [(CommonContainerBase *) base, "format", (void*) data] - serializer for registered format is used
                              *   "%{?[?]}": pass [(CommonContainerBase *) base, (Serializer) function, (void*) data] - serializer function is used
+                             *
+                             *   %{clock[JSON:hh:mm:ss]}
+                             *   If the format includes a colon ':' followed by text, the following text is a user-specified
                              */
 
                             format_value.type = PA_POINTER;
@@ -3374,6 +3402,24 @@ done_with_width:
                                         fmt_custom_formatter = va_arg(args_copy.args, Serializer);
                                         ++gathered_normal_args;
                                     }
+
+                                    if (*fmt == ':') {
+                                        size_t nested = 0;
+
+                                        fmt_custom_userformatname.data = (char *) fmt;
+
+                                        while (*fmt && (nested || *fmt != ']')) {
+                                            if (*fmt == '[') ++nested;
+                                            else if (*fmt == ']') {
+                                                if (!nested)
+                                                    break;
+                                                --nested;
+                                            }
+
+                                            ++fmt_custom_userformatname.length;
+                                            ++fmt;
+                                        }
+                                    }
                                 } else {
                                     size_t nested = 0;
 
@@ -3394,6 +3440,17 @@ done_with_width:
 
                                 if (*fmt == ']')
                                     ++fmt;
+
+                                fmt_custom_userformatname.data = memchr(fmt_custom_formatname.data, ':', fmt_custom_formatname.length);
+                                if (fmt_custom_userformatname.data) {
+                                    const size_t fmt_length = fmt_custom_userformatname.data - fmt_custom_formatname.data;
+                                    const size_t total_length = fmt_custom_formatname.length;
+
+                                    fmt_custom_formatname.length = fmt_length;
+                                    ++fmt_custom_userformatname.data;
+                                    fmt_custom_userformatname.length = total_length - fmt_length - 1;
+
+                                }
                             }
 
                             if (*fmt != '}')
@@ -3537,20 +3594,22 @@ done_with_width:
                         }
 
                         if (!fmt_custom_formatter) { /* If serializer not specified, it could be registered name, or if not present, in the type recipe */
-                            if (fmt_custom_formatname.data != NULL) {
+                            if (fmt_custom_formatname.length != 0) {
                                 struct RegisteredFormat *registered_fmt = io_get_registered_format(fmt_custom_formatname.data, fmt_custom_formatname.length);
 
                                 fmt_custom_formatter = registered_fmt? registered_fmt->serializer: NULL;
                             } else if (fmt_custom_type->serialize)
                                 fmt_custom_formatter = fmt_custom_type->serialize;
 
-                            if (!fmt_custom_formatter)
+                            if (!fmt_custom_formatter) {
+                                if (fmt_custom_type->serialize) /* Format name was not found, otherwise we would have used the default type serializer. Assume format name is actually user specifier and call type serializer */
                                 CLEANUP(-1);
+                            }
                         }
 
                         struct SerializerIdentity serializer_identity;
-                        serializer_identity.fmt = NULL;
-                        serializer_identity.fmt_length = 0;
+                        serializer_identity.fmt = fmt_custom_userformatname.data;
+                        serializer_identity.fmt_length = fmt_custom_userformatname.length;
 
                         if ((fmt_flags & PRINTF_FLAG_HAS_WIDTH) ||
                             (fmt_flags & PRINTF_FLAG_HAS_PRECISION)) {
@@ -3723,9 +3782,9 @@ int io_ftime(IO io, const char *fmt, const struct tm *timeptr) {
     size_t size = strftime(buf, sizeof(buf), fmt, timeptr);
     if (size != 0) {
         if (io_write(buf, 1, size, io) != size)
-            return io_error(io);
+            return -1;
 
-        return 0;
+        return size;
     }
 
     char *dbuf = NULL;
@@ -3746,16 +3805,16 @@ int io_ftime(IO io, const char *fmt, const struct tm *timeptr) {
         size = strftime(dbuf, allocated, fmt, timeptr);
     } while (size == 0);
 
-    if (io_write(dbuf, 1, size, io) != size)
-        return io_error(io);
+    if (io_write(dbuf, 1, size, io) != size || size > INT_MAX)
+        goto cleanup;
 
     FREE(dbuf);
 
-    return 0;
+    return size;
 
 cleanup:
     FREE(dbuf);
-    return CC_ENOMEM;
+    return -1;
 }
 
 int io_putc_internal(int ch, IO io) {

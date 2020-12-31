@@ -27,7 +27,7 @@ StringList variant_get_stringlist(Variant var) {
     if (!variant_is_stringlist(var))
         return NULL;
 
-    return variant_get_custom(var);
+    return variant_get_custom_data(var);
 }
 
 int variant_set_stringlist_move(Variant var, StringList list) {
@@ -388,6 +388,10 @@ void stringlist_clear(StringList list) {
 
 void stringlist_destroy(StringList list) {
     genericlist_destroy((GenericList) list);
+}
+
+GenericList stringlist_cast_to_genericlist(StringList list) {
+    return (GenericList) list;
 }
 
 const CommonContainerBase *stringlist_get_container_base(StringList list) {

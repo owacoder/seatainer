@@ -32,8 +32,12 @@ int genericlist_append(GenericList list, const void *item);
 int genericlist_insert_list(GenericList list, GenericList other, size_t before_index);
 int genericlist_insert_move(GenericList list, void *item, size_t before_index);
 int genericlist_insert(GenericList list, const void *item, size_t before_index);
+int genericlist_insert_move_iterator(GenericList list, void *item, Iterator before);
 int genericlist_replace_move_at(GenericList list, size_t index, void *item);
 int genericlist_replace_at(GenericList list, size_t index, const void *item);
+int genericlist_replace_move_iterator(GenericList list, Iterator it, void *item);
+/** Removes the element at the specified iterator, or if @p it is NULL, clears the entire list */
+Iterator genericlist_remove_at_iterator(GenericList list, Iterator it);
 size_t genericlist_remove_at(GenericList list, size_t index);
 size_t genericlist_remove_one(GenericList list, const void *item);
 size_t genericlist_remove_all(GenericList list, const void *item);
@@ -41,6 +45,7 @@ size_t genericlist_erase(GenericList list, size_t begin_index, size_t end_index)
 void *genericlist_data(GenericList list);
 int genericlist_contains(GenericList list, const void *item);
 size_t genericlist_bsearch(GenericList list, const void *item);
+Iterator genericlist_find_iterator(GenericList list, const void *item, Iterator iterator);
 size_t genericlist_find(GenericList list, const void *item, size_t begin_index);
 size_t genericlist_rfind(GenericList list, const void *item, size_t begin_index);
 int genericlist_compare(GenericList list, GenericList other);
@@ -51,6 +56,7 @@ int genericlist_stable_sort(GenericList list, int descending);
 void genericlist_reserve(GenericList list, size_t size);
 Iterator genericlist_begin(GenericList list);
 Iterator genericlist_next(GenericList list, Iterator it);
+size_t genericlist_index_of(GenericList list, Iterator it);
 void *genericlist_value_of(GenericList list, Iterator it);
 void *genericlist_value_at(GenericList list, size_t index);
 size_t genericlist_size(GenericList list);

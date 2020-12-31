@@ -48,6 +48,16 @@ static void variant_clear_to(Variant var, enum VariantType type) {
     var->type = type;
 }
 
+Variant variant_create_undefined() {
+    Variant var = CALLOC(sizeof(*var), 1);
+    if (var == NULL)
+        return NULL;
+
+    var->type = VariantUndefined;
+
+    return var;
+}
+
 Variant variant_create_null() {
     Variant var = CALLOC(sizeof(*var), 1);
     if (var == NULL)
@@ -243,6 +253,7 @@ cleanup:
 Variant variant_copy(Variant other) {
     switch (variant_get_type(other)) {
         default:
+        case VariantUndefined: return variant_create_undefined();
         case VariantNull: return variant_create_null();
         case VariantBoolean: return variant_create_boolean(variant_get_boolean(other));
         case VariantInteger: return variant_create_int64(variant_get_int64(other));
@@ -250,7 +261,7 @@ Variant variant_copy(Variant other) {
         case VariantFloat: return variant_create_float(variant_get_float(other));
         case VariantString: return variant_create_string(variant_get_string(other));
         case VariantBinary: return variant_create_binary_string_binary(variant_get_binary(other));
-        case VariantCustom: return variant_create_custom(variant_get_custom(other), variant_get_custom_container_base(other));
+        case VariantCustom: return variant_create_custom(variant_get_custom_data(other), variant_get_custom_container_base(other));
     }
 }
 
@@ -261,8 +272,7 @@ int variant_compare(Variant lhs, Variant rhs) {
         return 1;
 
     switch (variant_get_type(lhs)) {
-        default:
-        case VariantNull: return 0;
+        default: return 0;
         case VariantBoolean: return (lhs->d.atom.d.boolean > rhs->d.atom.d.boolean) - (lhs->d.atom.d.boolean < rhs->d.atom.d.boolean);
         case VariantInteger: return (lhs->d.atom.d.integer > rhs->d.atom.d.integer) - (lhs->d.atom.d.integer < rhs->d.atom.d.integer);
         case VariantFloat: return (lhs->d.atom.d.floating > rhs->d.atom.d.floating) - (lhs->d.atom.d.floating < rhs->d.atom.d.floating);
@@ -292,6 +302,10 @@ int variants_are_equal_types(Variant a, Variant b) {
         return !generic_types_compatible_compare(a->d.custom.base, b->d.custom.base);
 
     return a->type == b->type;
+}
+
+int variant_is_undefined(Variant var) {
+    return variant_get_type(var) == VariantUndefined;
 }
 
 int variant_is_null(Variant var) {
@@ -346,6 +360,11 @@ int variant_is_binary(Variant var) {
 
 int variant_is_custom(Variant var) {
     return variant_get_type(var) == VariantCustom;
+}
+
+int variant_set_undefined(Variant var) {
+    variant_clear_to(var, VariantUndefined);
+    return 0;
 }
 
 int variant_set_null(Variant var) {
@@ -598,11 +617,21 @@ Binary variant_get_binary(Variant var) {
     return var->d.atom.string;
 }
 
-void *variant_get_custom(Variant var) {
+void *variant_get_custom_data(Variant var) {
     if (!variant_is_custom(var))
         return NULL;
 
     return var->d.custom.data;
+}
+
+void *variant_take_custom_data(Variant var) {
+    if (!variant_is_custom(var))
+        return NULL;
+
+    void *custom = var->d.custom.data;
+    var->d.custom.data = NULL;
+
+    return custom;
 }
 
 int variant_to_boolean(Variant var, int *error) {
@@ -610,8 +639,7 @@ int variant_to_boolean(Variant var, int *error) {
         *error = 0;
 
     switch (variant_get_type(var)) {
-        default:
-        case VariantNull: return 0;
+        default: return 0;
         case VariantBoolean: return var->d.atom.d.boolean;
         case VariantInteger: return !!var->d.atom.d.integer;
         case VariantUnsignedInteger: return !!var->d.atom.d.unsigned_integer;
@@ -630,8 +658,7 @@ int variant_to_int(Variant var, int *error) {
         *error = 0;
 
     switch (variant_get_type(var)) {
-        default:
-        case VariantNull: return 0;
+        default: return 0;
         case VariantBoolean: return var->d.atom.d.boolean;
         case VariantInteger: return variant_get_int(var);
         case VariantUnsignedInteger:
@@ -674,8 +701,7 @@ unsigned int variant_to_uint(Variant var, int *error) {
         *error = 0;
 
     switch (variant_get_type(var)) {
-        default:
-        case VariantNull: return 0;
+        default: return 0;
         case VariantBoolean: return var->d.atom.d.boolean;
         case VariantInteger:
             if (var->d.atom.d.integer < 0 || var->d.atom.d.integer > UINT_MAX) {
@@ -718,8 +744,7 @@ long long variant_to_int64(Variant var, int *error) {
         *error = 0;
 
     switch (variant_get_type(var)) {
-        default:
-        case VariantNull: return 0;
+        default: return 0;
         case VariantBoolean: return var->d.atom.d.boolean;
         case VariantInteger: return var->d.atom.d.integer;
         case VariantUnsignedInteger:
@@ -755,8 +780,7 @@ unsigned long long variant_to_uint64(Variant var, int *error) {
         *error = 0;
 
     switch (variant_get_type(var)) {
-        default:
-        case VariantNull: return 0;
+        default: return 0;
         case VariantBoolean: return var->d.atom.d.boolean;
         case VariantInteger:
             if (var->d.atom.d.integer < 0) {
@@ -792,8 +816,7 @@ double variant_to_float(Variant var, int *error) {
         *error = 0;
 
     switch (variant_get_type(var)) {
-        default:
-        case VariantNull: return 0;
+        default: return 0;
         case VariantBoolean: return var->d.atom.d.boolean;
         case VariantInteger:
             if ((long long) (double) var->d.atom.d.integer != var->d.atom.d.integer) {
@@ -832,7 +855,7 @@ double variant_to_float(Variant var, int *error) {
 }
 
 const char *variant_to_string(Variant var, int *error) {
-    if (variant_is_custom(var)) {
+    if (variant_is_custom(var) || variant_is_undefined(var)) {
         if (error)
             *error = CC_ENOTSUP;
         return NULL;
@@ -889,7 +912,7 @@ const char *variant_to_string(Variant var, int *error) {
 }
 
 Binary variant_to_binary(Variant var, int *error) {
-    if (variant_is_custom(var)) {
+    if (variant_is_custom(var) || variant_is_undefined(var)) {
         if (error)
             *error = CC_ENOTSUP;
         Binary temp = {.data = NULL, .length = 0};
@@ -911,7 +934,7 @@ Binary variant_to_binary(Variant var, int *error) {
 }
 
 void variant_clear(Variant var) {
-    variant_clear_to(var, VariantNull);
+    variant_clear_to(var, VariantUndefined);
 }
 
 void variant_destroy(Variant var) {

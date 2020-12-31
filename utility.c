@@ -701,7 +701,41 @@ const char *binstr_search(const char *string, size_t *string_len, const char *to
     return NULL;
 }
 
-unsigned utf8size(uint32_t codepoint) {
+char *memstr(const char *string, size_t string_len, const char *token) {
+    return binstr_search(string, &string_len, token, strlen(token));
+}
+
+int utf16surrogate(unsigned long codepoint) {
+    return codepoint >= 0xd800 && codepoint <= 0xdfff;
+}
+
+unsigned long utf16codepoint(unsigned int high, unsigned int low) {
+    const unsigned long error = 0x8000fffdul;
+
+    if ((high >= 0xd800 && high <= 0xdbff) &&
+        ( low >= 0xdc00 &&  low <= 0xdfff))
+        return ((unsigned long) (high - 0xd800) << 10) | (low - 0xdc00);
+    else if (utf16surrogate(high))
+        return error;
+    else
+        return high;
+}
+
+unsigned utf16surrogates(unsigned long codepoint, unsigned int *high, unsigned int *low) {
+    if (utf16surrogate(codepoint) || codepoint > UTF8_MAX) {
+        return 0;
+    } else if (codepoint < 0x10000) {
+        *high = *low = codepoint;
+        return 1;
+    } else {
+        codepoint -= 0x10000;
+        *high = 0xd800 | (codepoint >> 10);
+        *low = 0xdc00 | (codepoint & 0x3ff);
+        return 2;
+    }
+}
+
+unsigned utf8size(unsigned long codepoint) {
     if (codepoint < 0x80) return 1;
     else if (codepoint < 0x800) return 2;
     else if (codepoint < 0x10000) return 3;
@@ -729,7 +763,7 @@ const char *utf8error_n(const char *utf8, size_t utf8length) {
     return NULL;
 }
 
-const char *utf8chr(const char *utf8, uint32_t chr) {
+const char *utf8chr(const char *utf8, unsigned long chr) {
     if (chr < 0x80)
         return strchr(utf8, chr);
 
@@ -742,7 +776,7 @@ const char *utf8chr(const char *utf8, uint32_t chr) {
     return NULL;
 }
 
-const char *utf8chr_n(const char *utf8, size_t utf8length, uint32_t chr) {
+const char *utf8chr_n(const char *utf8, size_t utf8length, unsigned long chr) {
     if (chr < 0x80)
         return memchr(utf8, chr, utf8length);
 
@@ -812,10 +846,10 @@ static const unsigned char utf8High5BitsToByteCount[32] = {
     0, /* 11111, invalid byte (should never be seen) */
 };
 
-uint32_t utf8next(const char *utf8, const char **next) {
-    const uint32_t error = 0x8000fffdul;
+unsigned long utf8next(const char *utf8, const char **next) {
+    const unsigned long error = 0x8000fffdul;
     const unsigned int bytesInCode = utf8High5BitsToByteCount[(unsigned char) *utf8 >> 3];
-    uint32_t codepoint = 0;
+    unsigned long codepoint = 0;
 
     if (next)
         *next = utf8 + 1;
@@ -848,11 +882,11 @@ uint32_t utf8next(const char *utf8, const char **next) {
     return codepoint;
 }
 
-uint32_t utf8next_n(const char *utf8, size_t *remainingBytes, const char **next) {
+unsigned long utf8next_n(const char *utf8, size_t *remainingBytes, const char **next) {
     const size_t remaining = *remainingBytes;
-    const uint32_t error = 0x8000fffdul;
+    const unsigned long error = 0x8000fffdul;
     const unsigned int bytesInCode = utf8High5BitsToByteCount[(unsigned char) *utf8 >> 3];
-    uint32_t codepoint = 0;
+    unsigned long codepoint = 0;
 
     if (next) {
         *next = utf8 + 1;
@@ -889,7 +923,7 @@ uint32_t utf8next_n(const char *utf8, size_t *remainingBytes, const char **next)
     return codepoint;
 }
 
-char *utf8append(char *utf8, uint32_t codepoint, size_t *remainingBytes) {
+char *utf8append(char *utf8, unsigned long codepoint, size_t *remainingBytes) {
     static const unsigned char headerForCodepointSize[5] = {
         0x80, /* 10000000 for continuation byte */
         0x00, /* 00000000 for single byte */

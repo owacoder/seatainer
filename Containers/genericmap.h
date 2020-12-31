@@ -17,6 +17,7 @@ int variant_set_genericmap(Variant var, const GenericMap map);
 int variant_set_genericmap_move(Variant var, GenericMap map);
 GenericMap genericmap_create(const CommonContainerBase *key_base, const CommonContainerBase *value_base);
 GenericMap genericmap_copy(GenericMap other);
+int genericmap_insert_move_key(GenericMap map, void *key, void *item);
 int genericmap_insert_move(GenericMap map, const void *key, void *item);
 int genericmap_insert(GenericMap map, const void *key, const void *item);
 int genericmap_replace_move(GenericMap map, Iterator it, void *item);

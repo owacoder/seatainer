@@ -217,7 +217,7 @@ int memxor(void *dst, void *src, size_t size);
 
 /** @brief Searches for a binary token inside a binary string
  *
- *  Operates the same as strstr, but for binary strings.
+ * Operates similarly to strstr, but for binary strings.
  *
  * @param string The binary data to search in (the haystack)
  * @param string_len A pointer to the length of data to search in (the size of the haystack). This field is updated to a new smaller size, unless NULL is returned.
@@ -227,15 +227,53 @@ int memxor(void *dst, void *src, size_t size);
  */
 const char *binstr_search(const char *string, size_t *string_len, const char *token, size_t token_len);
 
+/** @brief Searches for a string inside a size-specified string.
+ *
+ * Operates the same as strstr, but for a sized haystack string.
+ *
+ * @param string The binary data to search in (the haystack)
+ * @param string_len The length of data to search in (the size of the haystack)
+ * @param token The binary token to search for (the needle)
+ * @return Returns the location where token was found, or NULL if @p token was not found.
+ */
+char *memstr(const char *string, size_t string_len, const char *token);
+
 #define UTF8_MAX (0x10ffff)
 #define UTF8_MASK (0x1fffff)
+
+/** @brief Detects if a Unicode character is a UTF-16 surrogate
+ *
+ *  @param codepoint The codepoint to check
+ *  @return 1 if @p codepoint is a UTF-16 surrogate, 0 if @p codepoint is a normal UTF-16 character
+ */
+int utf16surrogate(unsigned long codepoint);
+
+/** @brief Gets the codepoint that a surrogate pair encodes in UTF-16
+ *
+ *  @param high An int that contains the high surrogate (leading code point) of the pair.
+ *  @param low An int that contains the low surrogate (trailing code point) of the pair.
+ *  @return Returns the code point that the surrogate pair encodes. If @p high and @p low do not encode a surrogate pair, the code point contained in @p high is returned.
+ *          It can easily be detected if @p high and @p low encoded a valid surrogate pair by the return value; if the return value is less than 0x10000, only a single code point was consumed.
+ */
+unsigned long utf16codepoint(unsigned int high, unsigned int low);
+
+/** @brief Gets the surrogate pair that a codepoint would be encoded with in UTF-16
+ *
+ * If the codepoint does not require surrogate pairs to be encoded, both @p high and @p low are set to the single character to be encoded.
+ *
+ * @param codepoint The codepoint to get the surrogate pair of.
+ * @param high A pointer to an int that contains the high surrogate (leading code point) of the pair. This field must not be NULL.
+ * @param low A pointer to an int that contains the low surrogate (trailing code point) of the pair. This field must not be NULL.
+ * @return The number of UTF-16 codepoints required to encode @p codepoint.
+ */
+unsigned utf16surrogates(unsigned long codepoint, unsigned int *high, unsigned int *low);
 
 /** @brief Gets the size in bytes that a codepoint would require to be encoded in UTF-8.
  *
  * @param codepoint The codepoint to get the encoding size of.
  * @return The number of bytes it would take to encode @p codepoint as UTF-8.
  */
-unsigned utf8size(uint32_t codepoint);
+unsigned utf8size(unsigned long codepoint);
 
 /** @brief Gets the length of the NUL-terminated UTF-8 string in characters
  *
@@ -273,7 +311,7 @@ const char *utf8error_n(const char *utf8, size_t utf8length);
  * @return Same as `strchr`. If the character is found, a pointer to the first instance of that character is returned, otherwise NULL is returned.
  *    If @p chr is 0, a pointer to the terminating NUL is returned.
  */
-const char *utf8chr(const char *utf8, uint32_t chr);
+const char *utf8chr(const char *utf8, unsigned long chr);
 
 /** @brief Finds a UTF-8 character in a length-specified UTF-8 string.
  *
@@ -283,7 +321,7 @@ const char *utf8chr(const char *utf8, uint32_t chr);
  * @return Same as `strchr`, except if @p chr is 0. If the character is found, a pointer to the first instance of that character is returned, otherwise NULL is returned.
  *    If @p chr is 0, the search is performed like any other character, since there could be a NUL embedded in valid UTF-8.
  */
-const char *utf8chr_n(const char *utf8, size_t utf8length, uint32_t chr);
+const char *utf8chr_n(const char *utf8, size_t utf8length, unsigned long chr);
 
 /** @brief Gets the codepoint of the first character in a NUL-terminated UTF-8 string.
  *
@@ -293,7 +331,7 @@ const char *utf8chr_n(const char *utf8, size_t utf8length, uint32_t chr);
  *    This constant allows detection of error by performing `result > UTF8_MAX`,
  *    and providing the Unicode replacement character 0xfffd if masked with UTF8_MASK.
  */
-uint32_t utf8next(const char *utf8, const char **next);
+unsigned long utf8next(const char *utf8, const char **next);
 
 /** @brief Gets the codepoint of the first character in a length-specified UTF-8 string.
  *
@@ -304,7 +342,7 @@ uint32_t utf8next(const char *utf8, const char **next);
  *    This constant allows detection of error by performing `result > UTF8_MAX`,
  *    and providing the Unicode replacement character 0xfffd if masked with UTF8_MASK.
  */
-uint32_t utf8next_n(const char *utf8, size_t *remainingBytes, const char **next);
+unsigned long utf8next_n(const char *utf8, size_t *remainingBytes, const char **next);
 
 /** @brief Attempts to concatenate a codepoint to a UTF-8 string.
  *
@@ -315,7 +353,7 @@ uint32_t utf8next_n(const char *utf8, size_t *remainingBytes, const char **next)
  *     This field is updated with the number of bytes available after the function returns.
  * @return On success, a pointer to the NUL at the end of the string is returned, otherwise NULL is returned and nothing is appended.
  */
-char *utf8append(char *utf8, uint32_t codepoint, size_t *remainingBytes);
+char *utf8append(char *utf8, unsigned long codepoint, size_t *remainingBytes);
 
 /** @brief Glob to see if string matches pattern.
  *

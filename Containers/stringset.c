@@ -27,7 +27,7 @@ StringSet variant_get_stringset(Variant var) {
     if (!variant_is_stringset(var))
         return NULL;
 
-    return variant_get_custom(var);
+    return variant_get_custom_data(var);
 }
 
 int variant_set_stringset_move(Variant var, StringSet set) {
@@ -131,6 +131,10 @@ void stringset_clear(StringSet set) {
 
 void stringset_destroy(StringSet set) {
     genericset_destroy((GenericSet) set);
+}
+
+GenericSet stringset_cast_to_genericset(StringSet set) {
+    return (GenericSet) set;
 }
 
 const CommonContainerBase *stringset_get_container_base(StringSet set) {

@@ -30,7 +30,7 @@ GenericSet variant_get_genericset(Variant var) {
     if (!variant_is_genericset(var))
         return NULL;
 
-    return variant_get_custom(var);
+    return variant_get_custom_data(var);
 }
 
 int variant_set_genericset_move(Variant var, GenericSet set) {
@@ -241,6 +241,13 @@ GenericSet genericset_difference(GenericSet a, GenericSet b) {
 
 int genericset_add(GenericSet set, const void *item) {
     if (avltree_insert_copy_key((struct AVLTree *) set, item, NULL) == NULL)
+        return CC_ENOMEM;
+
+    return 0;
+}
+
+int genericset_add_move(GenericSet set, void *item) {
+    if (avltree_insert_move_key((struct AVLTree *) set, item, NULL) == NULL)
         return CC_ENOMEM;
 
     return 0;

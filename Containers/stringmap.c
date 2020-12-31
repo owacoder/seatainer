@@ -29,7 +29,7 @@ StringMap variant_get_stringmap(Variant var) {
     if (!variant_is_stringmap(var))
         return NULL;
 
-    return variant_get_custom(var);
+    return variant_get_custom_data(var);
 }
 
 int variant_set_stringmap_move(Variant var, StringMap map) {
@@ -176,6 +176,10 @@ void stringmap_clear(StringMap map) {
 
 void stringmap_destroy(StringMap map) {
     genericmap_destroy((GenericMap) map);
+}
+
+GenericMap stringmap_cast_to_genericmap(StringMap map) {
+    return (GenericMap) map;
 }
 
 const CommonContainerBase *stringmap_get_key_container_base(StringMap map) {

@@ -40,6 +40,7 @@ Compare stringmap_get_value_compare_fn(StringMap map);
 void stringmap_set_value_compare_fn(StringMap map, Compare compare);
 void stringmap_clear(StringMap map);
 void stringmap_destroy(StringMap map);
+GenericMap stringmap_cast_to_genericmap(StringMap map);
 const CommonContainerBase *stringmap_get_key_container_base(StringMap map);
 const CommonContainerBase *stringmap_get_value_container_base(StringMap map);
 CommonContainerBase *stringmap_build_recipe(StringMap map);

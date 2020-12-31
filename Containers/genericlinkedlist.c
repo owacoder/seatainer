@@ -29,7 +29,7 @@ GenericLinkedList variant_get_genericlinkedlist(Variant var) {
     if (!variant_is_genericlinkedlist(var))
         return NULL;
 
-    return variant_get_custom(var);
+    return variant_get_custom_data(var);
 }
 
 int variant_set_genericlinkedlist_move(Variant var, GenericLinkedList list) {
@@ -134,7 +134,24 @@ GenericLinkedList genericlinkedlist_from_array_n(const void **items, size_t coun
 }
 
 int genericlinkedlist_append_list(GenericLinkedList list, GenericLinkedList other) {
+    int err = 0;
+    size_t list_size = genericlinkedlist_size(list);
+    struct GenericLinkedListNode *original_tail = list->tail;
 
+    Iterator it = genericlinkedlist_begin(other);
+    for (size_t i = 0; i < list_size; ++i, it = genericlinkedlist_next(other, it)) {
+        err = genericlinkedlist_append(list, genericlinkedlist_value_of(other, it));
+        if (err)
+            goto cleanup;
+    }
+
+    return 0;
+
+cleanup:
+    while (genericlinkedlist_remove_after(list, original_tail))
+        ;
+
+    return err;
 }
 
 int genericlinkedlist_append(GenericLinkedList list, const void *item) {

@@ -10,6 +10,7 @@
 #include "common.h"
 
 enum VariantType {
+    VariantUndefined,
     VariantNull,
     VariantBoolean,
     VariantInteger,
@@ -20,6 +21,7 @@ enum VariantType {
     VariantCustom
 };
 
+Variant variant_create_undefined();
 Variant variant_create_null();
 Variant variant_create_boolean(int b);
 Variant variant_create_int(int value);
@@ -29,7 +31,7 @@ Variant variant_create_uint64(unsigned long long value);
 Variant variant_create_float(double value);
 Variant variant_create_string(const char *value);
 Variant variant_create_string_move(char *value);
-/* If binary data is passed to a function that adopts the allocated data (e.g. the `move` functions), the user MUST ensure that data[length] == 0 */
+/* If binary data is passed to a function that adopts the allocated data (e.g. the `move` functions), the user MUST ensure that data[length] == 0 if variant_get_string() or variant_to_string() are used */
 Variant variant_create_binary_string(const char *value, size_t value_len);
 Variant variant_create_binary_string_move(char *value, size_t value_len);
 Variant variant_create_binary_string_binary(const Binary value);
@@ -40,6 +42,7 @@ Variant variant_create_custom_adopt(const void *item, CommonContainerBase *base_
 Variant variant_create_custom_move_adopt(void *item, CommonContainerBase *base_to_adopt);
 Variant variant_copy(Variant other);
 int variant_compare(Variant lhs, Variant rhs);
+int variant_is_undefined(Variant var);
 int variant_is_null(Variant var);
 int variant_is_boolean(Variant var);
 int variant_is_int(Variant var);
@@ -52,6 +55,7 @@ int variant_is_number(Variant var); /* Returns true if any integral type or floa
 int variant_is_string(Variant var);
 int variant_is_binary(Variant var);
 int variant_is_custom(Variant var);
+int variant_set_undefined(Variant var);
 int variant_set_null(Variant var);
 int variant_set_boolean(Variant var, int b);
 int variant_set_int(Variant var, int value);
@@ -79,7 +83,8 @@ unsigned long long variant_get_uint64(Variant var);
 double variant_get_float(Variant var);
 char *variant_get_string(Variant var);
 Binary variant_get_binary(Variant var);
-void *variant_get_custom(Variant var);
+void *variant_get_custom_data(Variant var);
+void *variant_take_custom_data(Variant var);
 int variant_to_boolean(Variant var, int *error);
 int variant_to_int(Variant var, int *error);
 unsigned int variant_to_uint(Variant var, int *error);

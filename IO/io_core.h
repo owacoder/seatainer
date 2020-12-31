@@ -570,6 +570,18 @@ int io_resize(IO io, long long size);
  */
 int io_getc(IO io);
 
+/** @brief Matches a string that should appear next in the input stream.
+ *
+ *  io_match() matches a NUL-terminated string and io_match_n() matches a sized string that can contain NUL characters.
+ *
+ *  @param io The IO device to match the next characters from.
+ *  @param str The string to match to the next characters to be read from @p io.
+ *  @return Returns 0 if the next characters in the input stream match @p str exactly. If they don't match, CC_EBADMSG is returned.
+ *          If an input error occurs, the error that occurred is returned.
+ */
+int io_match(IO io, const char *str);
+int io_match_n(IO io, const char *str, size_t len);
+
 /** @brief Gets the current position of the IO device, if available.
  *
  * @param io The IO device to get the current read/write position from.
@@ -683,7 +695,7 @@ __attribute__((format(printf, 2, 3)))
  * @param io The IO device to write to.
  * @param fmt The format string specifying what to print.
  * @param timeptr A pointer to a tm struct that contains the date and/or time to print.
- * @return Returns 0 on success, or an error that occured on failure.
+ * @return Returns the number of characters written on success, or a negative number on failure.
  */
 int io_ftime(IO io, const char *fmt, const struct tm *timeptr);
 
