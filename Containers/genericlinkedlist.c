@@ -162,20 +162,12 @@ int genericlinkedlist_append_move(GenericLinkedList list, void *item) {
     return genericlinkedlist_insert_move(list, item, list->tail);
 }
 
-int genericlinkedlist_prepend_list(GenericLinkedList list, GenericLinkedList other) {
-
-}
-
 int genericlinkedlist_prepend(GenericLinkedList list, const void *item) {
     return genericlinkedlist_insert(list, item, NULL);
 }
 
 int genericlinkedlist_prepend_move(GenericLinkedList list, void *item) {
     return genericlinkedlist_insert_move(list, item, NULL);
-}
-
-int genericlinkedlist_insert_list(GenericLinkedList list, GenericLinkedList other, Iterator after_it) {
-
 }
 
 int genericlinkedlist_insert(GenericLinkedList list, const void *item, Iterator after_it) {
@@ -328,7 +320,7 @@ size_t genericlinkedlist_remove_after(GenericLinkedList list, Iterator it) {
     return 1;
 }
 
-Iterator genericlinkedlist_find(GenericLinkedList list, const void *item, Iterator after, Iterator *prior) {
+Iterator genericlinkedlist_find_after(GenericLinkedList list, const void *item, Iterator after, Iterator *prior) {
     if (list->base->compare == NULL)
         return NULL;
 
@@ -350,9 +342,21 @@ Iterator genericlinkedlist_find(GenericLinkedList list, const void *item, Iterat
     return NULL;
 }
 
+Iterator genericlinkedlist_find_from(GenericLinkedList list, const void *item, Iterator begin) {
+    if (list->base->compare == NULL)
+        return NULL;
+
+    for (; begin; begin = genericlinkedlist_next(list, begin)) {
+        if (list->base->compare(item, genericlinkedlist_value_of(list, begin)) == 0)
+            return begin;
+    }
+
+    return NULL;
+}
+
 size_t genericlinkedlist_remove_one(GenericLinkedList list, const void *item) {
     Iterator prior;
-    Iterator found = genericlinkedlist_find(list, item, NULL, &prior);
+    Iterator found = genericlinkedlist_find_after(list, item, NULL, &prior);
     if (found == NULL)
         return 0;
 
@@ -364,7 +368,7 @@ size_t genericlinkedlist_remove_all(GenericLinkedList list, const void *item) {
     Iterator last = NULL;
 
     while (1) {
-        Iterator it = genericlinkedlist_find(list, item, last, &last);
+        Iterator it = genericlinkedlist_find_after(list, item, last, &last);
         if (it == NULL)
             return count;
 
@@ -373,7 +377,7 @@ size_t genericlinkedlist_remove_all(GenericLinkedList list, const void *item) {
 }
 
 int genericlinkedlist_contains(GenericLinkedList list, const void *item) {
-    return genericlinkedlist_find(list, item, NULL, NULL) != NULL;
+    return genericlinkedlist_find_after(list, item, NULL, NULL) != NULL;
 }
 
 int genericlinkedlist_compare(GenericLinkedList list, GenericLinkedList other) {
@@ -521,6 +525,21 @@ Iterator genericlinkedlist_next(GenericLinkedList list, Iterator it) {
     UNUSED(list)
 
     return it? ((struct GenericLinkedListNode *) it)->next: NULL;
+}
+
+Iterator genericlinkedlist_previous(GenericLinkedList list, Iterator it) {
+    if (it == NULL)
+        return list->tail;
+
+    Iterator last = NULL;
+    for (Iterator t = list->head; t; ) {
+        Iterator temp = t;
+        if ((t = genericlinkedlist_next(list, t)) == it)
+            break;
+        last = temp;
+    }
+
+    return last;
 }
 
 void *genericlinkedlist_value_of(GenericLinkedList list, Iterator it) {

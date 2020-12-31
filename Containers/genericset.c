@@ -253,8 +253,12 @@ int genericset_add_move(GenericSet set, void *item) {
     return 0;
 }
 
+Iterator genericset_find(GenericSet set, const void *item) {
+    return avltree_find((struct AVLTree *) set, item);
+}
+
 int genericset_contains(GenericSet set, const void *item) {
-    return avltree_find((struct AVLTree *) set, item) != NULL;
+    return genericset_find(set, item) != NULL;
 }
 
 void genericset_remove(GenericSet set, const void *item) {

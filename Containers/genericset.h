@@ -25,6 +25,7 @@ GenericSet genericset_subtract(GenericSet from, GenericSet set_to_subtract);
 GenericSet genericset_difference(GenericSet a, GenericSet b);
 int genericset_add(GenericSet set, const void *item);
 int genericset_add_move(GenericSet set, void *item);
+Iterator genericset_find(GenericSet set, const void *item);
 int genericset_contains(GenericSet set, const void *item);
 void genericset_remove(GenericSet set, const void *item);
 Iterator genericset_erase(GenericSet set, Iterator it);

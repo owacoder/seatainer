@@ -26,7 +26,6 @@ int genericlinkedlist_append_move(GenericLinkedList list, void *item);
 int genericlinkedlist_append(GenericLinkedList list, const void *item);
 int genericlinkedlist_prepend_move(GenericLinkedList list, void *item);
 int genericlinkedlist_prepend(GenericLinkedList list, const void *item);
-int genericlinkedlist_insert_list(GenericLinkedList list, GenericLinkedList other, Iterator after_it);
 int genericlinkedlist_insert_move(GenericLinkedList list, void *item, Iterator after_it);
 int genericlinkedlist_insert(GenericLinkedList list, const void *item, Iterator after_it);
 int genericlinkedlist_replace_move_at(GenericLinkedList list, Iterator it, void *item);
@@ -35,7 +34,19 @@ size_t genericlinkedlist_remove_after(GenericLinkedList list, Iterator it);
 size_t genericlinkedlist_remove_one(GenericLinkedList list, const void *item);
 size_t genericlinkedlist_remove_all(GenericLinkedList list, const void *item);
 int genericlinkedlist_contains(GenericLinkedList list, const void *item);
-Iterator genericlinkedlist_find(GenericLinkedList list, const void *item, Iterator after, Iterator *prior);
+/** Searches for a value in the linked list.
+ *
+ *  WARNING! If you want to find an item to be able to insert at its position or remove it, use genericlinkedlist_find_after(). It is capable of returning the prior element without O(n) complexity.
+ *  If you only need a simple search to detect if an element exists, genericlinkedlist_find_from() may suffice.
+ *
+ *  @param list The list to search through.
+ *  @param item The item to look for in @p list.
+ *  @param after An iterator specifying the starting position of the search. If @p after is NULL, the search begins at the beginning of the list, otherwise, it starts at the element following @p after.
+ *  @param prior A pointer to an iterator that points to the element prior to the found element. This field can be NULL.
+ *  @return A valid iterator pointing to the first found instance of @p item, or NULL if the element was not found.
+ */
+Iterator genericlinkedlist_find_after(GenericLinkedList list, const void *item, Iterator after, Iterator *prior);
+Iterator genericlinkedlist_find_from(GenericLinkedList list, const void *item, Iterator after);
 int genericlinkedlist_compare(GenericLinkedList list, GenericLinkedList other);
 GenericLinkedList genericlinkedlist_sorted(GenericLinkedList list, int descending);
 GenericLinkedList genericlinkedlist_stable_sorted(GenericLinkedList list, int descending);
@@ -43,6 +54,14 @@ int genericlinkedlist_sort(GenericLinkedList list, int descending);
 int genericlinkedlist_stable_sort(GenericLinkedList list, int descending);
 Iterator genericlinkedlist_begin(GenericLinkedList list);
 Iterator genericlinkedlist_next(GenericLinkedList list, Iterator it);
+/** @brief Gets the preceding element of the linked list
+ *
+ *  WARNING! Since GenericLinkedList is singly-linked, this function runs in O(n) time and can be very, very slow!
+ *  Use only if absolutely necessary.
+ *
+ *  Calling with @p it == NULL returns an iterator pointing to the last element in the list.
+ */
+Iterator genericlinkedlist_previous(GenericLinkedList list, Iterator it);
 void *genericlinkedlist_value_of(GenericLinkedList list, Iterator it);
 size_t genericlinkedlist_size(GenericLinkedList list);
 void genericlinkedlist_clear(GenericLinkedList list);

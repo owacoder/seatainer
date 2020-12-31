@@ -702,7 +702,7 @@ const char *binstr_search(const char *string, size_t *string_len, const char *to
 }
 
 char *memstr(const char *string, size_t string_len, const char *token) {
-    return binstr_search(string, &string_len, token, strlen(token));
+    return (char *) binstr_search(string, &string_len, token, strlen(token));
 }
 
 int utf16surrogate(unsigned long codepoint) {

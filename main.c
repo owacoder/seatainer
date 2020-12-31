@@ -288,10 +288,12 @@ int main(int argc, char **argv, const char **envp)
 
     io_printf(io_stdout, "%{?[JSON:ASCII]}\n", container_base_binary_recipe(), &b);
 
-    return 0;
+    // return 0;
 
-    for (int i = 0; i < 5000000; ++i)
+    for (int i = 0; i < 50; ++i)
         genericlist_append(gl, REFERENCE(int, rand()));
+
+    genericlist_sort(gl, 0);
 
     printf("%.8f\n", 392.65);
 

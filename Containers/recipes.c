@@ -721,6 +721,15 @@ const CommonContainerBase *container_base_variant_recipe() {
     return &container_base_variant_recipe_;
 }
 
+static Iterator genericlist_collection_erase(GenericList list, Iterator it) {
+    if (it == NULL) {
+        genericlist_clear(list);
+        return NULL;
+    }
+
+    return genericlist_remove_at_iterator(list, it);
+}
+
 static const CommonContainerBase container_base_genericlist_recipe_ = {
     .copier = (Copier) genericlist_copy,
     .compare = (Compare) genericlist_compare,
@@ -734,7 +743,7 @@ static const CommonContainerBase container_base_genericlist_recipe_ = {
     .collection_get_value = (CollectionValue) genericlist_value_of,
     .collection_find.list = (CollectionListFind) genericlist_find_iterator,
     .collection_insert.list = (CollectionListInsertMove) genericlist_insert_move_iterator,
-    .collection_erase = (CollectionErase) genericlist_remove_at_iterator,
+    .collection_erase = (CollectionErase) genericlist_collection_erase,
     .collection_replace = (CollectionReplaceMove) genericlist_replace_move_iterator,
     .dynamic = 0,
     .key_child = NULL,
@@ -743,6 +752,15 @@ static const CommonContainerBase container_base_genericlist_recipe_ = {
 
 const CommonContainerBase *container_base_genericlist_recipe() {
     return &container_base_genericlist_recipe_;
+}
+
+static Iterator genericmap_collection_erase(GenericMap map, Iterator it) {
+    if (it == NULL) {
+        genericmap_clear(map);
+        return NULL;
+    }
+
+    return genericmap_erase(map, it);
 }
 
 static const CommonContainerBase container_base_genericmap_recipe_ = {
@@ -758,7 +776,7 @@ static const CommonContainerBase container_base_genericmap_recipe_ = {
     .collection_get_value = (CollectionValue) genericmap_value_of,
     .collection_find.key_value = (CollectionKeyValueFind) genericmap_find,
     .collection_insert.key_value = (CollectionKeyValueInsertMove) genericmap_insert_move_key,
-    .collection_erase = (CollectionErase) genericmap_erase,
+    .collection_erase = (CollectionErase) genericmap_collection_erase,
     .collection_replace = (CollectionReplaceMove) genericmap_replace_move,
     .dynamic = 0,
     .key_child = NULL,
@@ -769,7 +787,21 @@ const CommonContainerBase *container_base_genericmap_recipe() {
     return &container_base_genericmap_recipe_;
 }
 
-/* TODO: find, insert, erase, and replace operations for the following recipes */
+static int genericset_collection_insert(GenericSet set, void *item, Iterator it) {
+    UNUSED(it)
+
+    return genericset_add_move(set, item);
+}
+
+static Iterator genericset_collection_erase(GenericSet set, Iterator it) {
+    if (it == NULL) {
+        genericset_clear(set);
+        return NULL;
+    }
+
+    return genericset_erase(set, it);
+}
+
 static const CommonContainerBase container_base_genericset_recipe_ = {
     .copier = (Copier) genericset_copy,
     .compare = (Compare) genericset_compare,
@@ -781,6 +813,10 @@ static const CommonContainerBase container_base_genericset_recipe_ = {
     .collection_next = (CollectionNext) genericset_next,
     .collection_get_key = NULL,
     .collection_get_value = (CollectionValue) genericset_value_of,
+    .collection_find.list = (CollectionListFind) genericset_find,
+    .collection_insert.list = (CollectionListInsertMove) genericset_collection_insert,
+    .collection_erase = (CollectionErase) genericset_collection_erase,
+    .collection_replace = NULL,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = NULL
@@ -788,6 +824,21 @@ static const CommonContainerBase container_base_genericset_recipe_ = {
 
 const CommonContainerBase *container_base_genericset_recipe() {
     return &container_base_genericset_recipe_;
+}
+
+static int genericlinkedlist_collection_insert(GenericLinkedList list, void *item, Iterator it) {
+    return genericlinkedlist_insert_move(list, item, genericlinkedlist_previous(list, it));
+}
+
+static Iterator genericlinkedlist_collection_erase(GenericLinkedList list, Iterator it) {
+    if (it == NULL) {
+        genericlinkedlist_clear(list);
+        return NULL;
+    }
+
+    Iterator next = genericlinkedlist_next(list, it);
+    genericlinkedlist_remove_after(list, genericlinkedlist_previous(list, it));
+    return next;
 }
 
 static const CommonContainerBase container_base_genericlinkedlist_recipe_ = {
@@ -801,6 +852,10 @@ static const CommonContainerBase container_base_genericlinkedlist_recipe_ = {
     .collection_next = (CollectionNext) genericlinkedlist_next,
     .collection_get_key = NULL,
     .collection_get_value = (CollectionValue) genericlinkedlist_value_of,
+    .collection_find.list = (CollectionListFind) genericlinkedlist_find_from,
+    .collection_insert.list = (CollectionListInsertMove) genericlinkedlist_collection_insert,
+    .collection_erase = (CollectionErase) genericlinkedlist_collection_erase,
+    .collection_replace = (CollectionReplaceMove) genericlinkedlist_replace_move_at,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = NULL
@@ -821,6 +876,10 @@ static const CommonContainerBase container_base_variantlist_recipe_ = {
     .collection_next = (CollectionNext) genericlist_next,
     .collection_get_key = NULL,
     .collection_get_value = (CollectionValue) genericlist_value_of,
+    .collection_find.list = (CollectionListFind) genericlist_find_iterator,
+    .collection_insert.list = (CollectionListInsertMove) genericlist_insert_move_iterator,
+    .collection_erase = (CollectionErase) genericlist_collection_erase,
+    .collection_replace = (CollectionReplaceMove) genericlist_replace_move_iterator,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = (CommonContainerBase *) &container_base_variant_recipe_
@@ -841,6 +900,10 @@ static const CommonContainerBase container_base_variantmap_recipe_ = {
     .collection_next = (CollectionNext) genericmap_next,
     .collection_get_key = (CollectionKey) genericmap_key_of,
     .collection_get_value = (CollectionValue) genericmap_value_of,
+    .collection_find.key_value = (CollectionKeyValueFind) genericmap_find,
+    .collection_insert.key_value = (CollectionKeyValueInsertMove) genericmap_insert_move_key,
+    .collection_erase = (CollectionErase) genericmap_collection_erase,
+    .collection_replace = (CollectionReplaceMove) genericmap_replace_move,
     .dynamic = 0,
     .key_child = (CommonContainerBase *) &container_base_cstring_recipe_,
     .value_child = (CommonContainerBase *) &container_base_variant_recipe_
@@ -861,6 +924,10 @@ static const CommonContainerBase container_base_variantset_recipe_ = {
     .collection_next = (CollectionNext) genericset_next,
     .collection_get_key = NULL,
     .collection_get_value = (CollectionValue) genericset_value_of,
+    .collection_find.list = (CollectionListFind) genericset_find,
+    .collection_insert.list = (CollectionListInsertMove) genericset_collection_insert,
+    .collection_erase = (CollectionErase) genericset_collection_erase,
+    .collection_replace = NULL,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = (CommonContainerBase *) &container_base_variant_recipe_
@@ -881,6 +948,10 @@ static const CommonContainerBase container_base_stringlist_recipe_ = {
     .collection_next = (CollectionNext) stringlist_next,
     .collection_get_key = NULL,
     .collection_get_value = (CollectionValue) stringlist_value_of,
+    .collection_find.list = (CollectionListFind) genericlist_find_iterator,
+    .collection_insert.list = (CollectionListInsertMove) genericlist_insert_move_iterator,
+    .collection_erase = (CollectionErase) genericlist_collection_erase,
+    .collection_replace = (CollectionReplaceMove) genericlist_replace_move_iterator,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = (CommonContainerBase *) &container_base_cstring_recipe_
@@ -901,6 +972,10 @@ static const CommonContainerBase container_base_stringmap_recipe_ = {
     .collection_next = (CollectionNext) stringmap_next,
     .collection_get_key = (CollectionKey) stringmap_key_of,
     .collection_get_value = (CollectionValue) stringmap_value_of,
+    .collection_find.key_value = (CollectionKeyValueFind) genericmap_find,
+    .collection_insert.key_value = (CollectionKeyValueInsertMove) genericmap_insert_move_key,
+    .collection_erase = (CollectionErase) genericmap_collection_erase,
+    .collection_replace = (CollectionReplaceMove) genericmap_replace_move,
     .dynamic = 0,
     .key_child = (CommonContainerBase *) &container_base_cstring_recipe_,
     .value_child = (CommonContainerBase *) &container_base_cstring_recipe_
@@ -921,6 +996,10 @@ static const CommonContainerBase container_base_stringset_recipe_ = {
     .collection_next = (CollectionNext) stringset_next,
     .collection_get_key = NULL,
     .collection_get_value = (CollectionValue) stringset_value_of,
+    .collection_find.list = (CollectionListFind) genericset_find,
+    .collection_insert.list = (CollectionListInsertMove) genericset_collection_insert,
+    .collection_erase = (CollectionErase) genericset_collection_erase,
+    .collection_replace = NULL,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = (CommonContainerBase *) &container_base_cstring_recipe_
@@ -941,6 +1020,10 @@ static const CommonContainerBase container_base_binarylist_recipe_ = {
     .collection_next = (CollectionNext) genericlist_next,
     .collection_get_key = NULL,
     .collection_get_value = (CollectionValue) genericlist_value_of,
+    .collection_find.list = (CollectionListFind) genericlist_find_iterator,
+    .collection_insert.list = (CollectionListInsertMove) genericlist_insert_move_iterator,
+    .collection_erase = (CollectionErase) genericlist_collection_erase,
+    .collection_replace = (CollectionReplaceMove) genericlist_replace_move_iterator,
     .dynamic = 0,
     .key_child = NULL,
     .value_child = (CommonContainerBase *) &container_base_binary_recipe_

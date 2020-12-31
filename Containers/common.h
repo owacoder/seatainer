@@ -40,6 +40,7 @@ typedef struct GenericMapStruct *GenericMap; /* Ordered map of items, containing
 typedef struct StringMapStruct *StringMap; /* Simple exclusive map of NUL-terminated string keys with values, each element only appears once. Elements are NUL-terminated strings. Elements are in ascending order */
 
 struct CommonContainerBaseStruct;
+
 typedef void *Iterator; /* Simple iterator, does not need to be freed */
 
 typedef struct BinaryStruct {

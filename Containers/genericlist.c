@@ -639,13 +639,9 @@ int genericlist_replace_move_iterator(GenericList list, Iterator it, void *item)
 }
 
 Iterator genericlist_remove_at_iterator(GenericList list, Iterator it) {
-    if (it == NULL)
-        genericlist_clear(list);
-    else {
-        const size_t index = genericlist_index_of(list, it);
-        if (genericlist_remove_at(list, index) && index < genericlist_size(list))
-            return it;
-    }
+    const size_t index = genericlist_index_of(list, it);
+    if (genericlist_remove_at(list, index) && index < genericlist_size(list))
+        return it;
 
     return NULL;
 }
@@ -865,67 +861,64 @@ static void genericlist_ptr_insertion_sort(void **base, size_t num, int descendi
     }
 }
 
-static void *genericlist_pod_heap_parent(void *base, void *start, size_t element_size) {
-    size_t location = ((char *) start - (char *) base) / element_size;
-    if (start == base)
-        return NULL;
+static size_t genericlist_heap_parent(size_t start) {
+    if (start == 0)
+        return 0;
 
-    return (char *) base + ((location - 1) / 2) * element_size;
+    return (start - 1) / 2;
 }
 
-static void *genericlist_pod_heap_left_child(void *base, void *start, size_t num, size_t element_size) {
-    size_t location = ((char *) start - (char *) base) / element_size;
-    if (location * 2 + 1 >= num)
-        return NULL;
+static size_t genericlist_heap_left_child(size_t start, size_t num) {
+    if (start * 2 + 1 >= num)
+        return 0;
 
-    return (char *) base + (location * 2 + 1) * element_size;
+    return start * 2 + 1;
 }
 
-static void *genericlist_pod_heap_right_child(void *base, void *start, size_t num, size_t element_size) {
-    size_t location = ((char *) start - (char *) base) / element_size;
-    if (location * 2 + 2 >= num)
-        return NULL;
+static size_t genericlist_heap_right_child(size_t start, size_t num) {
+    if (start * 2 + 2 >= num)
+        return 0;
 
-    return (char *) base + (location * 2 + 2) * element_size;
+    return start * 2 + 2;
 }
 
-static void genericlist_pod_heapify_siftdown(void *base, void *start, size_t num, size_t element_size, int descending, Compare compar) {
-    void *root = start;
+static void genericlist_pod_heapify_siftdown(char *base, size_t start, size_t num, size_t element_size, int descending, Compare compar) {
+    size_t root = start;
 
-    for (void *left = genericlist_pod_heap_left_child(base, root, num, element_size);
+    for (size_t left = genericlist_heap_left_child(root, num);
          left;
-         left = genericlist_pod_heap_left_child(base, root, num, element_size)) {
-        void *swap = root;
-        void *right = genericlist_pod_heap_right_child(base, root, num, element_size);
+         left = genericlist_heap_left_child(root, num)) {
+        size_t swap = root;
+        size_t right = genericlist_heap_right_child(root, num);
 
-        if (compar(swap, left) * descending < 0)
+        if (compar(base + swap * element_size, base + left * element_size) * descending < 0)
             swap = left;
 
-        if (right && compar(swap, right) * descending < 0)
+        if (right && compar(base + swap * element_size, base + right * element_size) * descending < 0)
             swap = right;
 
         if (swap == root)
             return;
 
-        memswap(swap, root, element_size);
+        memswap(base + swap * element_size, base + root * element_size, element_size);
 
         root = swap;
     }
 }
 
-static void genericlist_pod_heapify_helper(void **base, size_t num, size_t element_size, int descending, Compare compar) {
+static void genericlist_pod_heapify_helper(char *base, size_t num, size_t element_size, int descending, Compare compar) {
     if (num <= 1)
         return;
 
-    void *start = genericlist_pod_heap_parent(base, base + num - 1, element_size);
+    size_t start = genericlist_heap_parent(num - 1);
 
-    while (start) {
+    while (1) {
         genericlist_pod_heapify_siftdown(base, start, num, element_size, descending, compar);
 
-        if (start == base)
+        if (start == 0)
             break;
 
-        start = (char *) start - element_size;
+        --start;
     }
 }
 
@@ -938,52 +931,29 @@ static void genericlist_pod_heap_sort(void *base, size_t num, size_t element_siz
                 (char *) base + end * element_size,
                 element_size);
 
-        genericlist_pod_heapify_siftdown(base, base, --end, element_size, descending, compar);
+        genericlist_pod_heapify_siftdown(base, 0, end--, element_size, descending, compar);
     }
 }
 
-static void **genericlist_ptr_heap_parent(void **base, void **start) {
-    if (start == base)
-        return NULL;
+static void genericlist_ptr_heapify_siftdown(void **base, size_t start, size_t num, int descending, Compare compar) {
+    size_t root = start;
 
-    return base + (start - base - 1) / 2;
-}
+    for (size_t left = genericlist_heap_left_child(root, num); left; left = genericlist_heap_left_child(root, num)) {
+        size_t swap = root;
+        size_t right = genericlist_heap_right_child(root, num);
 
-static void **genericlist_ptr_heap_left_child(void **base, void **start, size_t num) {
-    size_t location = start - base;
-    if (location * 2 + 1 >= num)
-        return NULL;
-
-    return base + location * 2 + 1;
-}
-
-static void **genericlist_ptr_heap_right_child(void **base, void **start, size_t num) {
-    size_t location = start - base;
-    if (location * 2 + 2 >= num)
-        return NULL;
-
-    return base + location * 2 + 2;
-}
-
-static void genericlist_ptr_heapify_siftdown(void **base, void **start, size_t num, int descending, Compare compar) {
-    void **root = start;
-
-    for (void **left = genericlist_ptr_heap_left_child(base, root, num); left; left = genericlist_ptr_heap_left_child(base, root, num)) {
-        void **swap = root;
-        void **right = genericlist_ptr_heap_right_child(base, root, num);
-
-        if (compar(*swap, *left) * descending < 0)
+        if (compar(base[swap], base[left]) * descending < 0)
             swap = left;
 
-        if (right && compar(*swap, *right) * descending < 0)
+        if (right && compar(base[swap], base[right]) * descending < 0)
             swap = right;
 
         if (swap == root)
             return;
 
-        void *temp = *swap;
-        *swap = *root;
-        *root = temp;
+        void *temp = base[swap];
+        base[swap] = base[root];
+        base[root] = temp;
 
         root = swap;
     }
@@ -993,12 +963,12 @@ static void genericlist_ptr_heapify_helper(void **base, size_t num, int descendi
     if (num <= 1)
         return;
 
-    void **start = genericlist_ptr_heap_parent(base, base + num - 1);
+    size_t start = genericlist_heap_parent(num - 1);
 
-    while (start) {
+    while (1) {
         genericlist_ptr_heapify_siftdown(base, start, num, descending, compar);
 
-        if (start == base)
+        if (start == 0)
             break;
 
         --start;
@@ -1014,7 +984,7 @@ static void genericlist_ptr_heap_sort(void **base, size_t num, int descending, C
         base[end] = base[0];
         base[0] = temp;
 
-        genericlist_ptr_heapify_siftdown(base, base, --end, descending, compar);
+        genericlist_ptr_heapify_siftdown(base, 0, end--, descending, compar);
     }
 }
 
@@ -1159,11 +1129,31 @@ Iterator genericlist_next(GenericList list, Iterator it) {
     }
 }
 
+/* Pointer subtractions greater than PTRDIFF_MAX are UB in C, so adjust the offset until it fits within range */
 size_t genericlist_index_of(GenericList list, Iterator it) {
-    if (list->base->size && list->base->size <= sizeof(void*))
-        return ((char *) it - (char *) genericlist_begin(list)) / list->base->size;
-    else
-        return ((void **) it - (void **) genericlist_begin(list));
+    if (list->base->size && list->base->size <= sizeof(void*)) {
+        const char *ptr_offset = list->array;
+        size_t size_left = list->array_size;
+        size_t index_offset = 0;
+        while (size_left > PTRDIFF_MAX) {
+            index_offset += PTRDIFF_MAX;
+            ptr_offset += PTRDIFF_MAX;
+            size_left -= PTRDIFF_MAX;
+        }
+
+        return (((const char *) it - ptr_offset) + index_offset) / list->base->size;
+    } else {
+        const void **ptr_offset = list->array;
+        size_t size_left = list->array_size;
+        size_t index_offset = 0;
+        while (size_left > PTRDIFF_MAX / sizeof(void*)) {
+            index_offset += PTRDIFF_MAX / sizeof(void*);
+            ptr_offset += PTRDIFF_MAX / sizeof(void*);
+            size_left -= PTRDIFF_MAX / sizeof(void*);
+        }
+
+        return ((void **) it - ptr_offset) + index_offset;
+    }
 }
 
 void *genericlist_value_of(GenericList list, Iterator it) {

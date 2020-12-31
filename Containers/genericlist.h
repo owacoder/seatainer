@@ -36,7 +36,6 @@ int genericlist_insert_move_iterator(GenericList list, void *item, Iterator befo
 int genericlist_replace_move_at(GenericList list, size_t index, void *item);
 int genericlist_replace_at(GenericList list, size_t index, const void *item);
 int genericlist_replace_move_iterator(GenericList list, Iterator it, void *item);
-/** Removes the element at the specified iterator, or if @p it is NULL, clears the entire list */
 Iterator genericlist_remove_at_iterator(GenericList list, Iterator it);
 size_t genericlist_remove_at(GenericList list, size_t index);
 size_t genericlist_remove_one(GenericList list, const void *item);
