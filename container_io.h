@@ -47,7 +47,7 @@ int io_register_format(const char *name, Parser parser, Serializer serializer);
  */
 void io_unregister_format(const char *name);
 
-int io_parser_nested_parse_and_insert(void *input, void *container, const CommonContainerBase *base, Parser nested_parser, struct ParserIdentity *type);
+int io_parser_nested_parse_and_list_insert(void *input, void *container, const CommonContainerBase *base, Parser nested_parser, struct ParserIdentity *type);
 
 /** The following are not serializers, but they are special functions for fast operations on Binary and C-string lists */
 StringList io_split_to_stringlist(IO input, const char *separator, int keep_empty);
