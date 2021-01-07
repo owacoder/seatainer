@@ -47,7 +47,8 @@ StringList stringlist_create_custom(const CommonContainerBase *base) {
 }
 
 StringList stringlist_create_reserve(size_t reserve, const CommonContainerBase *base) {
-    return (StringList) genericlist_create_reserve(reserve, base? base: container_base_cstring_recipe());
+    return (StringList) genericlist_create_reserve(reserve, base && generic_types_compatible_compare(base, container_base_cstring_recipe()) == 0?
+                                                            base: container_base_cstring_recipe());
 }
 
 StringList stringlist_concatenate(StringList left, StringList right) {

@@ -288,7 +288,7 @@ int variant_compare(Variant lhs, Variant rhs) {
             else if (rhs->d.custom.base->compare)
                 return rhs->d.custom.base->compare(lhs->d.custom.data, rhs->d.custom.data);
 
-            return 0; /* Assume equal if no comparison function */
+            return CompareUnordered;
         }
     }
 }

@@ -172,11 +172,12 @@ int genericlinkedlist_prepend_move(GenericLinkedList list, void *item) {
 
 int genericlinkedlist_insert(GenericLinkedList list, const void *item, Iterator after_it) {
     if (list->base->size) { /* POD type */
-        struct GenericLinkedListNode *new_node = MALLOC(sizeof(*new_node) + list->base->size), *prev_node = after_it;
+        struct GenericLinkedListNode *new_node = CALLOC(1, sizeof(*new_node) + list->base->size), *prev_node = after_it;
         if (new_node == NULL)
             return CC_ENOMEM;
 
-        memcpy(new_node->data, item, list->base->size);
+        if (item != NULL)
+            memcpy(new_node->data, item, list->base->size);
 
         if (prev_node) { /* Inserting after a node */
             new_node->next = prev_node->next;
@@ -249,7 +250,10 @@ int genericlinkedlist_replace_at(GenericLinkedList list, Iterator it, const void
     if (list->base->size) { /* POD type */
         struct GenericLinkedListNode *node = it;
 
-        memmove(node->data, item, list->base->size);
+        if (item == NULL)
+            memset(node->data, 0, list->base->size);
+        else
+            memmove(node->data, item, list->base->size);
     } else { /* Non-POD type */
         if (list->base->copier == NULL)
             return CC_ENOTSUP;

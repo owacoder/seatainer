@@ -492,7 +492,25 @@ non_pod_cleanup: ;
 }
 
 int genericlist_insert_move(GenericList list, void *item, size_t before_index) {
-    if (list->base->size && list->base->size <= sizeof(void*)) { /* Small POD type */
+    if (list->base->size > sizeof(void*)) { /* Large POD type */
+        int owns_item = 0;
+        const size_t element_size = list->base->size;
+
+        if (item == NULL) {
+            owns_item = 1;
+            item = CALLOC(1, element_size);
+            if (item == NULL)
+                return CC_ENOMEM;
+        }
+
+        int error = genericlist_grow(list, 1);
+        if (error) {
+            if (owns_item) FREE(item);
+            return error;
+        }
+
+        /* Fallthrough to non-POD type code below */
+    } else if (list->base->size) { /* Small POD type */
         int err = genericlist_insert(list, item, before_index);
         if (err)
             return err;
@@ -501,12 +519,14 @@ int genericlist_insert_move(GenericList list, void *item, size_t before_index) {
 
         return 0;
     } else { /* Non-POD type */
-        if (before_index >= genericlist_size(list))
-            before_index = genericlist_size(list);
-
         int error = genericlist_grow(list, 1);
         if (error)
             return error;
+    }
+
+    { /* Non-POD type or verified large-POD type */
+        if (before_index >= genericlist_size(list))
+            before_index = genericlist_size(list);
 
         void **array = (void **) list->array;
 
@@ -524,9 +544,12 @@ int genericlist_insert(GenericList list, const void *item, size_t before_index) 
     if (list->base->size > sizeof(void*)) { /* Large POD type */
         const size_t element_size = list->base->size;
 
-        void *duplicate = generic_pod_copy_alloc(item, element_size);
-        if (duplicate == NULL && item != NULL)
+        void *duplicate = CALLOC(1, element_size);
+        if (duplicate == NULL)
             return CC_ENOMEM;
+
+        if (item != NULL)
+            memcpy(duplicate, item, element_size);
 
         int err = genericlist_insert_move(list, duplicate, before_index);
         if (err)
@@ -534,15 +557,16 @@ int genericlist_insert(GenericList list, const void *item, size_t before_index) 
 
         return err;
     } else if (list->base->size) { /* Small POD type */
-        unsigned char temp_buffer[sizeof(void*)]; /* Allows us to save the data of the specified item,
-                                                     in case it's a reference to an element in this list
-                                                     that will possibly get invalidated if we grow it. */
+        unsigned char temp_buffer[sizeof(void*)] = {0}; /* Allows us to save the data of the specified item,
+                                                           in case it's a reference to an element in this list
+                                                           that will possibly get invalidated if we grow it. */
         const size_t element_size = list->base->size;
 
         if (before_index >= genericlist_size(list))
             before_index = genericlist_size(list);
 
-        memcpy(temp_buffer, item, element_size);
+        if (item != NULL)
+            memcpy(temp_buffer, item, element_size);
 
         int error = genericlist_grow(list, 1);
         if (error)
@@ -581,17 +605,30 @@ int genericlist_insert_move_iterator(GenericList list, void *item, Iterator befo
     return genericlist_insert_move(list, item, genericlist_index_of(list, before));
 }
 
+int genericlist_insert_copy_iterator(GenericList list, const void *item, Iterator before) {
+    return genericlist_insert(list, item, genericlist_index_of(list, before));
+}
+
 int genericlist_replace_move_at(GenericList list, size_t index, void *item) {
     if (list->base->size > sizeof(void*)) { /* Large POD type */
         void **array = (void **) list->array;
 
-        FREE(array[index]);
+        if (item == NULL) {
+            const size_t element_size = list->base->size;
 
-        array[index] = item;
+            memset(array[index], 0, element_size);
+        } else {
+            FREE(array[index]);
+
+            array[index] = item;
+        }
     } else if (list->base->size) { /* Small POD type */
         const size_t element_size = list->base->size;
 
-        memcpy((char *) list->array + (index * element_size), item, element_size);
+        if (item == NULL)
+            memset((char *) list->array + (index * element_size), 0, element_size);
+        else
+            memcpy((char *) list->array + (index * element_size), item, element_size);
 
         FREE(item);
     } else { /* Non-POD type */
@@ -615,7 +652,10 @@ int genericlist_replace_at(GenericList list, size_t index, const void *item) {
     } else if (list->base->size) { /* Small POD type */
         const size_t element_size = list->base->size;
 
-        memmove((char *) list->array + (index * element_size), item, element_size);
+        if (item == NULL)
+            memset((char *) list->array + (index * element_size), 0, element_size);
+        else
+            memmove((char *) list->array + (index * element_size), item, element_size);
     } else { /* Non-POD type */
         if (list->base->copier == NULL)
             return CC_ENOTSUP;
@@ -1105,7 +1145,7 @@ void genericlist_reserve(GenericList list, size_t size) {
 }
 
 Iterator genericlist_begin(GenericList list) {
-    return list->array;
+    return list->array_size == 0? NULL: list->array;
 }
 
 Iterator genericlist_next(GenericList list, Iterator it) {

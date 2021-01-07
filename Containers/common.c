@@ -28,6 +28,13 @@
 struct ContainerStruct {char dummy;};
 #endif
 
+size_t container_base_element_space_required(const CommonContainerBase *base) {
+    if (base == NULL)
+        return 0;
+
+    return base->size? base->size: sizeof(void*);
+}
+
 static CommonContainerBase *container_base_copy_first_level(const CommonContainerBase *base) {
     if (base == NULL)
         return NULL;
@@ -176,7 +183,7 @@ void container_base_destroy_if_dynamic(CommonContainerBase *base) {
 }
 
 int generic_types_compatible_compare(const CommonContainerBase *lhs, const CommonContainerBase *rhs) {
-    if (lhs == NULL && rhs == NULL)
+    if (lhs == rhs || (lhs == NULL && rhs == NULL))
         return 0;
     else if (lhs == NULL || rhs == NULL)
         return CompareUnordered;
@@ -258,15 +265,6 @@ void *generic_pod_copy_alloc(const void *p, size_t bytes) {
     return new_p;
 }
 
-void *generic_nocopy(const void *p) {
-    UNUSED(p)
-    return NULL;
-}
-
 void *generic_identitycopy(const void *p) {
     return (void *) p;
-}
-
-void generic_nofree(void *p) {
-    UNUSED(p)
 }

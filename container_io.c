@@ -13,6 +13,303 @@
 
 #include <time.h>
 
+int io_parser_nested_parse_and_list_insert(void *input, void *container, const CommonContainerBase *base, Parser nested_parser, struct ParserIdentity *type) {
+    if (base->size > sizeof(void*)) { /* Large POD type */
+        if (base->collection_insert.list.copy == NULL)
+            return CC_EINVAL;
+
+        char *item = MALLOC(base->size);
+        if (item == NULL)
+            return CC_ENOMEM;
+
+        int err = nested_parser(input, item, base->value_child, type);
+        if (!err)
+            err = base->collection_insert.list.copy(container, item, NULL);
+
+        FREE(item);
+        if (err)
+            return err;
+    } else if (base->size) { /* Small POD type */
+        if (base->collection_insert.list.copy == NULL)
+            return CC_EINVAL;
+
+        void *item[1];
+
+        int err = io_parse_json(input, item, base->value_child, type);
+        if (!err)
+            err = base->collection_insert.list.copy(container, item, NULL);
+
+        if (err)
+            return err;
+    } else { /* Non-POD type */
+        if (base->collection_insert.list.move == NULL)
+            return CC_EINVAL;
+
+        void *handle = NULL;
+
+        int err = io_parse_json(input, &handle, base->value_child, type);
+        if (!err)
+            err = base->collection_insert.list.move(container, handle, NULL);
+
+        if (err) {
+            if (base->deleter)
+                base->deleter(handle);
+
+            return err;
+        }
+    }
+
+    return 0;
+}
+
+StringList io_split_to_stringlist(IO input, const char *separator, int keep_empty) {
+    Buffer data_buffer;
+    size_t separator_matched = 0, separator_len = strlen(separator); /* If non-zero, contains number of separator characters matched */
+    StringList list = stringlist_create();
+    if (list == NULL) {
+        stringlist_destroy(list);
+        return NULL;
+    }
+
+    buffer_init(&data_buffer);
+
+    while (1) {
+        int ch = io_getc(input);
+        if (ch == EOF)
+            break;
+
+        char c = ch;
+
+try_match_again:
+        if (separator[separator_matched] == c) {
+            ++separator_matched;
+
+            if (separator_matched == separator_len) {
+                if ((keep_empty || data_buffer.length) && stringlist_append(list, data_buffer.data))
+                    goto cleanup;
+
+                buffer_clear(&data_buffer);
+                separator_matched = 0;
+            }
+
+            continue;
+        } else if (separator_matched) {
+            if (buffer_append_n(&data_buffer, separator, separator_matched))
+                goto cleanup;
+
+            separator_matched = 0;
+            goto try_match_again;
+        }
+
+        if (buffer_append_n(&data_buffer, &c, 1))
+            goto cleanup;
+    }
+
+    if (separator_matched && buffer_append_n(&data_buffer, separator, separator_matched))
+        goto cleanup;
+
+    if (keep_empty || data_buffer.length) {
+        if (stringlist_append(list, data_buffer.data))
+            goto cleanup;
+    }
+
+    buffer_destroy(&data_buffer);
+    return list;
+
+cleanup:
+    buffer_destroy(&data_buffer);
+    stringlist_destroy(list);
+    return NULL;
+}
+
+GenericList io_split_to_binarylist(IO input, const char *separator, size_t separator_len, int keep_empty) {
+    Buffer data_buffer;
+    size_t separator_matched = 0; /* If non-zero, contains number of separator characters matched */
+    GenericList list = genericlist_create(container_base_binary_recipe());
+    if (list == NULL) {
+        genericlist_destroy(list);
+        return NULL;
+    }
+
+    buffer_init(&data_buffer);
+
+    while (1) {
+        int ch = io_getc(input);
+        if (ch == EOF)
+            break;
+
+        char c = ch;
+
+try_match_again:
+        if (separator[separator_matched] == c) {
+            ++separator_matched;
+
+            if (separator_matched == separator_len) {
+                Binary b = {.data = data_buffer.data, .length = data_buffer.length};
+                if ((keep_empty || data_buffer.length) && genericlist_append(list, &b))
+                    goto cleanup;
+
+                buffer_clear(&data_buffer);
+                separator_matched = 0;
+            }
+
+            continue;
+        } else if (separator_matched) {
+            if (buffer_append_n(&data_buffer, separator, separator_matched))
+                goto cleanup;
+
+            separator_matched = 0;
+            goto try_match_again;
+        }
+
+        if (buffer_append_n(&data_buffer, &c, 1))
+            goto cleanup;
+    }
+
+    if (separator_matched && buffer_append_n(&data_buffer, separator, separator_matched))
+        goto cleanup;
+
+    if (keep_empty || data_buffer.length) {
+        Binary b = {.data = data_buffer.data, .length = data_buffer.length};
+        if (genericlist_append(list, &b))
+            goto cleanup;
+    }
+
+    buffer_destroy(&data_buffer);
+    return list;
+
+cleanup:
+    buffer_destroy(&data_buffer);
+    genericlist_destroy(list);
+    return NULL;
+}
+
+StringList io_divide_to_stringlist(IO input, size_t record_size, int keep_partial) {
+    char *buffer = MALLOC(record_size+1);
+    StringList list = stringlist_create();
+    if (buffer == NULL || list == NULL)
+        goto cleanup;
+
+    size_t read = 0;
+    do {
+        read = io_read(buffer, 1, record_size, input);
+        buffer[read] = 0;
+
+        if (read == record_size) { /* Full record */
+            if (strlen(buffer) != record_size) {
+                io_set_error(input, CC_EBADMSG);
+                goto cleanup;
+            }
+
+            if (stringlist_append(list, buffer))
+                goto cleanup;
+        } else if (io_error(input)) {
+            goto cleanup;
+        } else if (read > 0 && keep_partial) {
+            if (stringlist_append(list, buffer))
+                goto cleanup;
+        }
+    } while (read == record_size);
+
+    FREE(buffer);
+
+    return list;
+
+cleanup:
+    FREE(buffer);
+    stringlist_destroy(list);
+    return NULL;
+}
+
+GenericList io_divide_to_binarylist(IO input, size_t record_size, int keep_partial) {
+    char *buffer = MALLOC(record_size);
+    GenericList list = genericlist_create(container_base_binary_recipe());
+    if (buffer == NULL || list == NULL)
+        goto cleanup;
+
+    size_t read = 0;
+    do {
+        read = io_read(buffer, 1, record_size, input);
+        Binary b = {.data = buffer, .length = read};
+
+        if (read == record_size) { /* Full record */
+            if (genericlist_append(list, &b))
+                goto cleanup;
+        } else if (io_error(input)) {
+            goto cleanup;
+        } else if (read > 0 && keep_partial) {
+            if (genericlist_append(list, &b))
+                goto cleanup;
+        }
+    } while (read == record_size);
+
+    FREE(buffer);
+
+    return list;
+
+cleanup:
+    FREE(buffer);
+    genericlist_destroy(list);
+    return NULL;
+}
+
+int io_join_stringlist(IO output, StringList list, const char *separator) {
+    Iterator it = stringlist_begin(list);
+
+    while (it) {
+        if (io_puts(stringlist_value_of(list, it), output))
+            return io_error(output);
+
+        it = stringlist_next(list, it);
+
+        if (it && io_puts(separator, output))
+            return io_error(output);
+    }
+
+    return 0;
+}
+
+int io_join_genericlist(IO output, GenericList list, const char *separator) {
+    return io_join_genericlist_n(output, list, separator, strlen(separator));
+}
+
+int io_join_genericlist_n(IO output, GenericList list, const char *separator, size_t separator_len) {
+    if (generic_types_compatible_compare(genericlist_get_container_base(list), container_base_cstring_recipe()) == 0) {
+        Iterator it = genericlist_begin(list);
+
+        while (it) {
+            if (io_puts(genericlist_value_of(list, it), output))
+                return io_error(output);
+
+            it = genericlist_next(list, it);
+
+            if (it && io_write(separator, 1, separator_len, output) != separator_len)
+                return io_error(output);
+        }
+
+        return 0;
+    } else if (generic_types_compatible_compare(genericlist_get_container_base(list), container_base_binary_recipe()) == 0) {
+        Iterator it = genericlist_begin(list);
+
+        while (it) {
+            Binary item = *((Binary *) genericlist_value_of(list, it));
+
+            if (io_write(item.data, 1, item.length, output) != item.length)
+                return io_error(output);
+
+            it = genericlist_next(list, it);
+
+            if (it && io_write(separator, 1, separator_len, output) != separator_len)
+                return io_error(output);
+        }
+
+        return 0;
+    }
+
+    return CC_EINVAL;
+}
+
+
 /* Serializer basics:
  *
  * Value serializers are used where specified, if they're the same type as the format
@@ -278,7 +575,7 @@ int io_serialize_cstring(IO output, const void *data, const CommonContainerBase 
 int io_serialize_binary(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type) {
     SERIALIZER_DECLARE("UTF-8", io_serialize_binary, 1);
 
-    if (generic_types_compatible_compare(base, container_base_cstring_recipe()) != 0)
+    if (generic_types_compatible_compare(base, container_base_binary_recipe()) != 0)
         return CC_ENOTSUP;
 
     const Binary *binary = data;
@@ -328,27 +625,27 @@ int io_serialize_variant(IO output, const void *data, const CommonContainerBase 
             }
             case VariantBoolean: {
                 _Bool bool = variant_get_boolean(v);
-                return io_serialize_boolean(output, &bool, container_base_boolean_recipe(), NULL);
+                return io_serialize_boolean(output, &bool, container_base_boolean_recipe(), type);
             }
             case VariantInteger: {
                 long long i = variant_get_int64(v);
-                return io_serialize_long_long(output, &i, container_base_long_long_recipe(), NULL);
+                return io_serialize_long_long(output, &i, container_base_long_long_recipe(), type);
             }
             case VariantUnsignedInteger: {
                 unsigned long long i = variant_get_uint64(v);
-                return io_serialize_ulong_long(output, &i, container_base_ulong_long_recipe(), NULL);
+                return io_serialize_ulong_long(output, &i, container_base_ulong_long_recipe(), type);
             }
             case VariantFloat: {
                 double d = variant_get_float(v);
-                return io_serialize_double(output, &d, container_base_double_recipe(), NULL);
+                return io_serialize_double(output, &d, container_base_double_recipe(), type);
             }
             case VariantString: {
                 const char *s = variant_get_string(v);
-                return io_serialize_double(output, s, container_base_cstring_recipe(), NULL);
+                return io_serialize_double(output, s, container_base_cstring_recipe(), type);
             }
             case VariantBinary: {
                 Binary b = variant_get_binary(v);
-                return io_serialize_binary(output, &b, container_base_binary_recipe(), NULL);
+                return io_serialize_binary(output, &b, container_base_binary_recipe(), type);
             }
             default:
                 return CC_ENOTSUP;
@@ -542,18 +839,260 @@ Serializer io_default_serializer_for_type(const CommonContainerBase *base) {
         return NULL; /* Unknown default serializer type */
 }
 
+int io_parse_json_unicode_escape(IO input, unsigned long *codepoint) {
+    const char *alphabet = "0123456789abcdef";
+    unsigned char buf[16];
+
+    *codepoint = 0;
+
+    if (io_read(buf, 1, 4, input) != 4)
+        return io_error(input);
+
+    for (size_t i = 0; i < 4; ++i) {
+        char *pos = strchr(alphabet, tolower(buf[i]));
+        if (!pos)
+            return CC_EBADMSG;
+
+        *codepoint = (*codepoint << 4) + (unsigned int) (pos - alphabet);
+    }
+
+    return 0;
+}
+
+/** Assumes no part of the number has been parsed. If integral, the double is set to NAN */
+int io_parse_json_number(IO input, double *d, signed long long *i, unsigned long long *u) {
+    Buffer buffer;
+    int err = 0;
+    int negative = 0;
+
+    buffer_init(&buffer);
+
+    int ch = io_getc(input);
+    if (!isdigit(ch) && ch != '-')
+        goto cleanup;
+
+    negative = ch == '-';
+    if (negative) {
+        if ((err = buffer_append_chr(&buffer, ch)) != 0)
+            goto cleanup;
+
+        ch = io_getc(input);
+        if (!isdigit(ch))
+            goto cleanup;
+    }
+
+    if (ch == '0') { /* JSON spec (https://www.json.org/json-en.html) says only one leading zero ever, with a possible decimal point */
+        if ((err = buffer_append_chr(&buffer, ch)) != 0)
+            goto cleanup;
+
+        ch = io_getc(input);
+        if (isdigit(ch))
+            goto cleanup;
+    } else {
+        do {
+            if ((err = buffer_append_chr(&buffer, ch)) != 0)
+                goto cleanup;
+
+            ch = io_getc(input);
+        } while (isdigit(ch));
+    }
+
+    if (ch == 'e' || ch == 'E')
+        goto parse_exponent;
+    else if (ch == '.') {
+        do {
+            if ((err = buffer_append_chr(&buffer, ch)) != 0)
+                goto cleanup;
+
+            ch = io_getc(input);
+        } while (isdigit(ch));
+
+        if (ch == 'e' || ch == 'E') {
+parse_exponent:
+            if ((err = buffer_append_chr(&buffer, ch)) != 0)
+                goto cleanup;
+
+            ch = io_getc(input);
+            if (ch != '+' && ch != '-' && !isdigit(ch))
+                goto cleanup;
+
+            do {
+                if ((err = buffer_append_chr(&buffer, ch)) != 0)
+                    goto cleanup;
+
+                ch = io_getc(input);
+            } while (isdigit(ch));
+            io_ungetc(ch, input);
+        } else {
+            io_ungetc(ch, input);
+        }
+    } else {
+        io_ungetc(ch, input);
+
+        if (negative) {
+            /* Parse as integer */
+            char *endptr = NULL;
+
+            errno = 0;
+            *d = NAN;
+            *i = strtoll(buffer.data, &endptr, 10);
+            *u = 0;
+            if (!errno && !*endptr)
+                goto finish;
+        } else {
+            /* Parse as integer */
+            char *endptr = NULL;
+
+            errno = 0;
+            *d = NAN;
+            *i = 0;
+            *u = strtoull(buffer.data, &endptr, 10);
+            if (!errno && !*endptr)
+                goto finish;
+        }
+    }
+
+    /* Parse as double (parsing as integer will fallback to this) */
+    char *endptr = NULL;
+
+    *i = 0;
+    *u = 0;
+    *d = strtod(buffer.data, &endptr);
+    if (*endptr) {
+        goto cleanup;
+    }
+
+    /* Fall back to integral if within range */
+    if (trunc(*d) == *d) {
+        if (!negative && *d <= ULLONG_MAX) {
+            *i = 0;
+            *u = (unsigned long long) *d;
+            *d = NAN;
+        } else if (negative && *d >= LLONG_MIN) {
+            *i = (long long) *d;
+            *u = 0;
+            *d = NAN;
+        }
+    }
+
+finish:
+    buffer_destroy(&buffer);
+
+    return 0;
+
+cleanup:
+    buffer_destroy(&buffer);
+    return err? err: CC_EBADMSG;
+}
+
+/* Assumes initial '"' has already been parsed */
+int io_parse_json_string(IO input, Binary *b) {
+    unsigned int unicode_surrogate = 0; /* Stores the unicode surrogate we decoded last round */
+    Buffer buffer;
+    int err = 0;
+
+    buffer_init(&buffer);
+
+    int ch;
+    while (1) {
+        ch = io_getc(input);
+        if (ch == EOF)
+            goto cleanup;
+
+        if (ch == '"')
+            break;
+        else if (ch == '\\') {
+            ch = io_getc(input);
+            if (ch == EOF)
+                goto cleanup;
+
+            switch (ch) {
+                case '"':
+                case '\\':
+                case '/': break;
+                case 'b': ch = '\b'; break;
+                case 'f': ch = '\f'; break;
+                case 'n': ch = '\n'; break;
+                case 'r': ch = '\r'; break;
+                case 't': ch = '\t'; break;
+                case 'u': {
+                    unsigned long codepoint = 0;
+                    unsigned char buf[16];
+
+                    err = io_parse_json_unicode_escape(input, &codepoint);
+                    if (err)
+                        goto cleanup;
+
+                    if (utf16surrogate(codepoint)) {
+                        if (!unicode_surrogate) {
+                            unicode_surrogate = codepoint;
+                            continue;
+                        }
+
+                        codepoint = utf16codepoint(unicode_surrogate, codepoint);
+                        if (codepoint > UTF8_MAX)
+                            goto cleanup;
+
+                        unicode_surrogate = 0;
+                    }
+
+                    size_t len = sizeof(buf);
+                    utf8append(buf, codepoint & UTF8_MASK, &len);
+                    err = buffer_append(&buffer, buf);
+                    if (err)
+                        goto cleanup;
+
+                    continue;
+                }
+            }
+        }
+
+        if (unicode_surrogate)
+            goto cleanup; /* Unmatched surrogate characters not supported */
+
+        err = buffer_append_chr(&buffer, ch);
+        if (err)
+            goto cleanup;
+    }
+
+    FREE(b->data);
+    b->length = buffer.length;
+    b->data = buffer_take(&buffer);
+    buffer_destroy(&buffer);
+
+    return 0;
+
+cleanup:
+    buffer_destroy(&buffer);
+    return err? err: io_error(input)? io_error(input): CC_EBADMSG;
+}
+
 int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct ParserIdentity *type) {
     PARSER_DECLARE("JSON", io_parse_json, 1);
 
     int ch;
-    do {
-        ch = io_getc(input);
-        if (ch == EOF)
-            goto cleanup;
-    } while (strchr(" \n\r\t", ch));
 
     if (generic_types_compatible_compare(base, container_base_variant_recipe()) == 0) {
-        Variant v = (Variant) data;
+        Variant v = *((Variant *) data);
+
+        if (v == NULL) {
+            Variant new_v = variant_create_undefined();
+            if (new_v == NULL)
+                return CC_ENOMEM;
+
+            int err = io_parse_json(input, &new_v, base, type);
+            if (!err)
+                *((Variant *) data) = new_v;
+            else
+                variant_destroy(new_v);
+            return err;
+        }
+
+        do {
+            ch = io_getc(input);
+            if (ch == EOF)
+                goto cleanup;
+        } while (strchr(" \n\r\t", ch));
 
         enum {
             JsonNull,
@@ -609,19 +1148,30 @@ int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct 
                     break;
                 }
                 case JsonNumber: {
-                    /* TODO: support int64 and uint64 values that would lose accuracy in a double too */
+                    int negative = 0;
                     double d = 0.0;
-                    err = io_parse_json(input, &d, container_base_double_recipe(), type);
-                    if (!err)
-                        variant_set_float(v, d);
+                    signed long long i = 0;
+                    unsigned long long u = 0;
+                    err = io_parse_json_number(input, &d, &i, &u);
+                    if (!err) {
+                        if (!isnan(d))
+                            variant_set_float(v, d);
+                        else if (i)
+                            variant_set_int64(v, i);
+                        else
+                            variant_set_uint64(v, u);
+                    }
                     break;
                 }
                 case JsonString: {
                     Binary b = {.data = NULL, .length = 0};
                     err = io_parse_json(input, &b, container_base_binary_recipe(), type);
-                    if (!err)
-                        variant_set_binary_string_binary_move(v, b);
-                    else
+                    if (!err) {
+                        if (memchr(b.data, 0, b.length))
+                            variant_set_binary_string_binary_move(v, b);
+                        else
+                            variant_set_string_move(v, b.data);
+                    } else
                         FREE(b.data);
                     break;
                 }
@@ -630,7 +1180,7 @@ int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct 
                     if (gl == NULL)
                         return CC_ENOMEM;
 
-                    err = io_parse_json(input, gl, container_base_variantlist_recipe(), type);
+                    err = io_parse_json(input, &gl, container_base_variantlist_recipe(), type);
                     if (!err)
                         variant_set_custom_move(v, gl, container_base_variantlist_recipe());
                     else
@@ -644,7 +1194,7 @@ int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct 
                     if (gm == NULL)
                         return CC_ENOMEM;
 
-                    err = io_parse_json(input, gm, container_base_variantmap_recipe(), type);
+                    err = io_parse_json(input, &gm, container_base_variantmap_recipe(), type);
                     if (!err)
                         variant_set_custom_move(v, gm, container_base_variantmap_recipe());
                     else
@@ -710,30 +1260,154 @@ int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct 
                     return err;
                 }
                 case VariantCustom: {
-                    return io_parse_json(input, variant_get_custom_data(v), variant_get_custom_container_base(v), type);
+                    void *custom_data = NULL;
+                    CommonContainerBase *base_copy = container_base_copy_if_dynamic(variant_get_custom_container_base(v));
+                    if (base_copy == NULL)
+                        return CC_ENOMEM;
+
+                    int err = io_parse_json(input, &custom_data, base_copy, type);
+                    if (!err)
+                        variant_set_custom_move_adopt(v, custom_data, base_copy);
+                    else
+                        container_base_destroy_if_dynamic(base_copy);
+
+                    return err;
                 }
             }
         }
     }
 
+    do {
+        ch = io_getc(input);
+        if (ch == EOF)
+            goto cleanup;
+    } while (strchr(" \n\r\t", ch));
+
     if (base->collection_get_key != NULL) { /* Object type */
+        int has_item = 0;
+
         if (ch != '{')
             goto cleanup;
 
+        void *container = *((void **) data);
 
+        if (base->key_child == NULL || base->value_child == NULL)
+            return CC_EINVAL;
+
+        if (container == NULL) {
+            io_ungetc(ch, input);
+
+            if (base->collection_create.key_value == NULL)
+                return CC_EINVAL;
+
+            container = base->collection_create.key_value(base->key_child, base->value_child);
+            if (container == NULL)
+                return CC_ENOMEM;
+
+            int err = io_parse_json(input, container, base, type);
+            if (!err)
+                *((void **) data) = container;
+            else if (base->deleter)
+                base->deleter(container);
+
+            return err;
+        }
+
+        while (1) {
+            do {
+                ch = io_getc(input);
+                if (ch == EOF)
+                    goto cleanup;
+            } while (strchr(" \n\r\t", ch));
+
+            if (ch == '}')
+                break;
+            else if (has_item) {
+                if (ch != ',')
+                    goto cleanup;
+
+                do {
+                    ch = io_getc(input);
+                    if (ch == EOF)
+                        goto cleanup;
+                } while (strchr(" \n\r\t", ch));
+            }
+
+            if (ch != '"')
+                goto cleanup;
+
+            /* Parse key of pair */
+        }
 
         /* Parse object into recipient type */
     } else if (base->collection_get_value != NULL) { /* Array type */
+        int has_item = 0;
+
         if (ch != '[')
             goto cleanup;
 
-        /* Parse array into recipient type */
-    } else if (generic_types_compatible_compare(base, container_base_cstring_recipe()) == 0 ||
-               generic_types_compatible_compare(base, container_base_binary_recipe()) == 0) {
+        void *container = *((void **) data);
+
+        if (container == NULL) {
+            io_ungetc(ch, input);
+
+            if (base->collection_create.list == NULL)
+                return CC_EINVAL;
+
+            container = base->collection_create.list(base->value_child);
+            if (container == NULL)
+                return CC_ENOMEM;
+
+            int err = io_parse_json(input, container, base, type);
+            if (!err)
+                *((void **) data) = container;
+            else if (base->deleter)
+                base->deleter(container);
+
+            return err;
+        }
+
+        while (1) {
+            do {
+                ch = io_getc(input);
+                if (ch == EOF)
+                    goto cleanup;
+            } while (strchr(" \n\r\t", ch));
+
+            if (ch == ']')
+                break;
+            else if (has_item) {
+                if (ch != ',')
+                    goto cleanup;
+            } else {
+                io_ungetc(ch, input);
+            }
+            has_item = 1;
+
+            int err = io_parser_nested_parse_and_list_insert(input, container, base, io_parse_json, type);
+            if (err)
+                return err;
+        }
+    } else if (generic_types_compatible_compare(base, container_base_cstring_recipe()) == 0) {
         if (ch != '"')
             goto cleanup;
 
-        /* Parse string into recipient type */
+        Binary b = {.data = NULL, .length = 0};
+        int err = io_parse_json_string(input, &b);
+        if (err || memchr(b.data, 0, b.length))
+            goto cleanup;
+
+        char **cstr = (char **) data;
+
+        FREE(*cstr);
+        *cstr = b.data;
+
+        return 0;
+    } else if (generic_types_compatible_compare(base, container_base_binary_recipe()) == 0) {
+        if (ch != '"')
+            goto cleanup;
+
+        return io_parse_json_string(input, data);
     } else if (generic_types_compatible_compare(base, container_base_boolean_recipe()) == 0) {
         if (ch != 't' && ch != 'f')
             goto cleanup;
@@ -743,21 +1417,83 @@ int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct 
 
         _Bool *b = (_Bool *) data;
         *b = ch == 't';
-    } else if (generic_types_compatible_compare(base, container_base_short_recipe()) == 0 ||
-               generic_types_compatible_compare(base, container_base_ushort_recipe()) == 0 ||
-               generic_types_compatible_compare(base, container_base_int_recipe()) == 0 ||
-               generic_types_compatible_compare(base, container_base_uint_recipe()) == 0 ||
-               generic_types_compatible_compare(base, container_base_long_recipe()) == 0 ||
-               generic_types_compatible_compare(base, container_base_ulong_recipe()) == 0 ||
-               generic_types_compatible_compare(base, container_base_long_long_recipe()) == 0 ||
-               generic_types_compatible_compare(base, container_base_ulong_long_recipe()) == 0 ||
-               generic_types_compatible_compare(base, container_base_float_recipe()) == 0 ||
-               generic_types_compatible_compare(base, container_base_double_recipe()) == 0 ||
-               generic_types_compatible_compare(base, container_base_long_double_recipe()) == 0) {
+    } else if (generic_types_compatible_compare(base, container_base_short_recipe()) == 0) {
         if (ch != '-' && !isdigit(ch))
             goto cleanup;
+        io_ungetc(ch, input);
 
-        /* Parse number into recipient type */
+        if (io_scanf(input, "%hd", data) != 1)
+            goto cleanup;
+    } else if (generic_types_compatible_compare(base, container_base_ushort_recipe()) == 0) {
+        if (ch != '-' && !isdigit(ch))
+            goto cleanup;
+        io_ungetc(ch, input);
+
+        if (io_scanf(input, "%hu", data) != 1)
+            goto cleanup;
+    } else if (generic_types_compatible_compare(base, container_base_int_recipe()) == 0) {
+        if (ch != '-' && !isdigit(ch))
+            goto cleanup;
+        io_ungetc(ch, input);
+
+        if (io_scanf(input, "%d", data) != 1)
+            goto cleanup;
+    } else if (generic_types_compatible_compare(base, container_base_uint_recipe()) == 0) {
+        if (ch != '-' && !isdigit(ch))
+            goto cleanup;
+        io_ungetc(ch, input);
+
+        if (io_scanf(input, "%u", data) != 1)
+            goto cleanup;
+    } else if (generic_types_compatible_compare(base, container_base_long_recipe()) == 0) {
+        if (ch != '-' && !isdigit(ch))
+            goto cleanup;
+        io_ungetc(ch, input);
+
+        if (io_scanf(input, "%ld", data) != 1)
+            goto cleanup;
+    } else if (generic_types_compatible_compare(base, container_base_ulong_recipe()) == 0) {
+        if (ch != '-' && !isdigit(ch))
+            goto cleanup;
+        io_ungetc(ch, input);
+
+        if (io_scanf(input, "%lu", data) != 1)
+            goto cleanup;
+    } else if (generic_types_compatible_compare(base, container_base_long_long_recipe()) == 0) {
+        if (ch != '-' && !isdigit(ch))
+            goto cleanup;
+        io_ungetc(ch, input);
+
+        if (io_scanf(input, "%lld", data) != 1)
+            goto cleanup;
+    } else if (generic_types_compatible_compare(base, container_base_ulong_long_recipe()) == 0) {
+        if (ch != '-' && !isdigit(ch))
+            goto cleanup;
+        io_ungetc(ch, input);
+
+        if (io_scanf(input, "%llu", data) != 1)
+            goto cleanup;
+    } else if (generic_types_compatible_compare(base, container_base_float_recipe()) == 0) {
+        if (ch != '-' && !isdigit(ch))
+            goto cleanup;
+        io_ungetc(ch, input);
+
+        if (io_scanf(input, "%g", data) != 1)
+            goto cleanup;
+    } else if (generic_types_compatible_compare(base, container_base_double_recipe()) == 0) {
+        if (ch != '-' && !isdigit(ch))
+            goto cleanup;
+        io_ungetc(ch, input);
+
+        if (io_scanf(input, "%lg", data) != 1)
+            goto cleanup;
+    } else if (generic_types_compatible_compare(base, container_base_long_double_recipe()) == 0) {
+        if (ch != '-' && !isdigit(ch))
+            goto cleanup;
+        io_ungetc(ch, input);
+
+        if (io_scanf(input, "%Lg", data) != 1)
+            goto cleanup;
     } else if (generic_types_compatible_compare(base, container_base_empty_recipe()) == 0) {
         if (ch != 'n' || io_match(input, "ull"))
             goto cleanup;
@@ -791,7 +1527,7 @@ static size_t serialize_json_stringpart(int ascii_only, const char *data, size_t
                     const char *data_save = data;
                     unsigned long codepoint = utf8next_n(data, &length, &data);
 
-                    if (codepoint > UTF8_MAX) {
+                    if (codepoint > UTF8_MAX) { /* TODO: shouldn't map to a unicode escape since that will be decoded to more than one byte */
                         buffer[1] = 'u';
                         buffer[2] = '0';
                         buffer[3] = '0';
@@ -874,21 +1610,23 @@ int io_serialize_json(IO output, const void *data, const CommonContainerBase *ba
         const int ascii_only = memstr(type->fmt, type->fmt_length, "ASCII") != NULL;
 
         if (generic_types_compatible_compare(base, container_base_variant_recipe()) == 0) {
-            if (variant_is_custom((Variant) data)) {
+            Variant v = (Variant) data;
+
+            if (variant_is_custom(v)) {
                 /* Variant is custom, just move down a level (to the child value) and restart the serializer */
-                base = base->value_child;
-                data = variant_get_custom_data((Variant) data);
+                data = variant_get_custom_data(v);
+                base = variant_get_custom_container_base(v);
                 continue;
             } else {
                 /* Variant is native, just serialize it */
-                switch (variant_get_type((Variant) data)) {
+                switch (variant_get_type(v)) {
                     case VariantUndefined:
                     case VariantNull: io_puts("null", output); type->written = 4; return io_error(output);
-                    case VariantBoolean: io_puts(variant_get_boolean((Variant) data)? "true": "false", output); type->written = 4 + !variant_get_boolean((Variant) data); return io_error(output);
-                    case VariantInteger: type->written = abs(io_printf(output, "%lld", variant_get_int64((Variant) data))); return io_error(output);
-                    case VariantUnsignedInteger: type->written = abs(io_printf(output, "%llu", variant_get_uint64((Variant) data))); return io_error(output);
+                    case VariantBoolean: io_puts(variant_get_boolean(v)? "true": "false", output); type->written = 4 + !variant_get_boolean(v); return io_error(output);
+                    case VariantInteger: type->written = abs(io_printf(output, "%lld", variant_get_int64(v))); return io_error(output);
+                    case VariantUnsignedInteger: type->written = abs(io_printf(output, "%llu", variant_get_uint64(v))); return io_error(output);
                     case VariantFloat: {
-                        double flt = variant_get_float((Variant) data);
+                        double flt = variant_get_float(v);
                         if (fabs(flt) == (double) INFINITY || isnan(flt))
                             return CC_ENOTSUP;
 
@@ -898,7 +1636,7 @@ int io_serialize_json(IO output, const void *data, const CommonContainerBase *ba
                     }
                     case VariantString:
                     case VariantBinary: {
-                        Binary b = variant_to_binary((Variant) data, NULL);
+                        Binary b = variant_to_binary(v, NULL);
 
                         type->written = serialize_json_string_internal(ascii_only, output, b);
 
@@ -1067,251 +1805,4 @@ int io_serialize_json(IO output, const void *data, const CommonContainerBase *ba
 
         return 0;
     }
-}
-
-StringList stringlist_split_io(IO input, const char *separator, int keep_empty) {
-    Buffer data_buffer;
-    size_t separator_matched = 0, separator_len = strlen(separator); /* If non-zero, contains number of separator characters matched */
-    StringList list = stringlist_create();
-    if (list == NULL) {
-        stringlist_destroy(list);
-        return NULL;
-    }
-
-    buffer_init(&data_buffer);
-
-    while (1) {
-        int ch = io_getc(input);
-        if (ch == EOF)
-            break;
-
-        char c = ch;
-
-try_match_again:
-        if (separator[separator_matched] == c) {
-            ++separator_matched;
-
-            if (separator_matched == separator_len) {
-                if ((keep_empty || data_buffer.length) && stringlist_append(list, data_buffer.data))
-                    goto cleanup;
-
-                buffer_clear(&data_buffer);
-                separator_matched = 0;
-            }
-
-            continue;
-        } else if (separator_matched) {
-            if (buffer_append_n(&data_buffer, separator, separator_matched))
-                goto cleanup;
-
-            separator_matched = 0;
-            goto try_match_again;
-        }
-
-        if (buffer_append_n(&data_buffer, &c, 1))
-            goto cleanup;
-    }
-
-    if (separator_matched && buffer_append_n(&data_buffer, separator, separator_matched))
-        goto cleanup;
-
-    if (keep_empty || data_buffer.length) {
-        if (stringlist_append(list, data_buffer.data))
-            goto cleanup;
-    }
-
-    buffer_destroy(&data_buffer);
-    return list;
-
-cleanup:
-    buffer_destroy(&data_buffer);
-    stringlist_destroy(list);
-    return NULL;
-}
-
-GenericList binarylist_split_io(IO input, const char *separator, size_t separator_len, int keep_empty) {
-    Buffer data_buffer;
-    size_t separator_matched = 0; /* If non-zero, contains number of separator characters matched */
-    GenericList list = genericlist_create(container_base_binary_recipe());
-    if (list == NULL) {
-        genericlist_destroy(list);
-        return NULL;
-    }
-
-    buffer_init(&data_buffer);
-
-    while (1) {
-        int ch = io_getc(input);
-        if (ch == EOF)
-            break;
-
-        char c = ch;
-
-try_match_again:
-        if (separator[separator_matched] == c) {
-            ++separator_matched;
-
-            if (separator_matched == separator_len) {
-                Binary b = {.data = data_buffer.data, .length = data_buffer.length};
-                if ((keep_empty || data_buffer.length) && genericlist_append(list, &b))
-                    goto cleanup;
-
-                buffer_clear(&data_buffer);
-                separator_matched = 0;
-            }
-
-            continue;
-        } else if (separator_matched) {
-            if (buffer_append_n(&data_buffer, separator, separator_matched))
-                goto cleanup;
-
-            separator_matched = 0;
-            goto try_match_again;
-        }
-
-        if (buffer_append_n(&data_buffer, &c, 1))
-            goto cleanup;
-    }
-
-    if (separator_matched && buffer_append_n(&data_buffer, separator, separator_matched))
-        goto cleanup;
-
-    if (keep_empty || data_buffer.length) {
-        Binary b = {.data = data_buffer.data, .length = data_buffer.length};
-        if (genericlist_append(list, &b))
-            goto cleanup;
-    }
-
-    buffer_destroy(&data_buffer);
-    return list;
-
-cleanup:
-    buffer_destroy(&data_buffer);
-    genericlist_destroy(list);
-    return NULL;
-}
-
-StringList stringlist_divide_io(IO input, size_t record_size, int keep_partial) {
-    char *buffer = MALLOC(record_size+1);
-    StringList list = stringlist_create();
-    if (buffer == NULL || list == NULL)
-        goto cleanup;
-
-    size_t read = 0;
-    do {
-        read = io_read(buffer, 1, record_size, input);
-        buffer[read] = 0;
-
-        if (read == record_size) { /* Full record */
-            if (strlen(buffer) != record_size) {
-                io_set_error(input, CC_EBADMSG);
-                goto cleanup;
-            }
-
-            if (stringlist_append(list, buffer))
-                goto cleanup;
-        } else if (io_error(input)) {
-            goto cleanup;
-        } else if (read > 0 && keep_partial) {
-            if (stringlist_append(list, buffer))
-                goto cleanup;
-        }
-    } while (read == record_size);
-
-    FREE(buffer);
-
-    return list;
-
-cleanup:
-    FREE(buffer);
-    stringlist_destroy(list);
-    return NULL;
-}
-
-GenericList binarylist_divide_io(IO input, size_t record_size, int keep_partial) {
-    char *buffer = MALLOC(record_size);
-    GenericList list = genericlist_create(container_base_binary_recipe());
-    if (buffer == NULL || list == NULL)
-        goto cleanup;
-
-    size_t read = 0;
-    do {
-        read = io_read(buffer, 1, record_size, input);
-        Binary b = {.data = buffer, .length = read};
-
-        if (read == record_size) { /* Full record */
-            if (genericlist_append(list, &b))
-                goto cleanup;
-        } else if (io_error(input)) {
-            goto cleanup;
-        } else if (read > 0 && keep_partial) {
-            if (genericlist_append(list, &b))
-                goto cleanup;
-        }
-    } while (read == record_size);
-
-    FREE(buffer);
-
-    return list;
-
-cleanup:
-    FREE(buffer);
-    genericlist_destroy(list);
-    return NULL;
-}
-
-int io_join_stringlist(IO output, StringList list, const char *separator) {
-    Iterator it = stringlist_begin(list);
-
-    while (it) {
-        if (io_puts(stringlist_value_of(list, it), output))
-            return io_error(output);
-
-        it = stringlist_next(list, it);
-
-        if (it && io_puts(separator, output))
-            return io_error(output);
-    }
-
-    return 0;
-}
-
-int io_join_genericlist(IO output, GenericList list, const char *separator) {
-    return io_join_genericlist_n(output, list, separator, strlen(separator));
-}
-
-int io_join_genericlist_n(IO output, GenericList list, const char *separator, size_t separator_len) {
-    if (generic_types_compatible_compare(genericlist_get_container_base(list), container_base_cstring_recipe()) == 0) {
-        Iterator it = genericlist_begin(list);
-
-        while (it) {
-            if (io_puts(genericlist_value_of(list, it), output))
-                return io_error(output);
-
-            it = genericlist_next(list, it);
-
-            if (it && io_write(separator, 1, separator_len, output) != separator_len)
-                return io_error(output);
-        }
-
-        return 0;
-    } else if (generic_types_compatible_compare(genericlist_get_container_base(list), container_base_binary_recipe()) == 0) {
-        Iterator it = genericlist_begin(list);
-
-        while (it) {
-            Binary item = *((Binary *) genericlist_value_of(list, it));
-
-            if (io_write(item.data, 1, item.length, output) != item.length)
-                return io_error(output);
-
-            it = genericlist_next(list, it);
-
-            if (it && io_write(separator, 1, separator_len, output) != separator_len)
-                return io_error(output);
-        }
-
-        return 0;
-    }
-
-    return CC_EINVAL;
 }

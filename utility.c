@@ -934,8 +934,8 @@ char *utf8append(char *utf8, unsigned long codepoint, size_t *remainingBytes) {
     const size_t bytesInCode = utf8size(codepoint);
     const size_t continuationBytesInCode = bytesInCode - 1;
 
-    if (bytesInCode == 0 || *remainingBytes < bytesInCode ||
-            (codepoint >= 0xd800 && codepoint <= 0xdfff)) /* Invalid codepoint or no room for encoding */
+    if (bytesInCode == 0 || *remainingBytes <= bytesInCode ||
+            utf16surrogate(codepoint)) /* Invalid codepoint or no room for encoding */
         return NULL;
 
     *utf8++ = headerForCodepointSize[bytesInCode] | (unsigned char) (codepoint >> (continuationBytesInCode * 6));

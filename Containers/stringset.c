@@ -39,11 +39,12 @@ int variant_set_stringset(Variant var, StringSet set) {
 }
 
 StringSet stringset_create() {
-    return (StringSet) genericset_create();
+    return (StringSet) genericset_create(container_base_cstring_recipe());
 }
 
 StringSet stringset_create_custom(const CommonContainerBase *base) {
-    return (StringSet) genericset_create_custom(base? base: container_base_cstring_recipe());
+    return (StringSet) genericset_create(base && generic_types_compatible_compare(base, container_base_cstring_recipe()) == 0?
+                                         base: container_base_cstring_recipe());
 }
 
 StringSet stringset_from_stringlist(StringList list, const CommonContainerBase *base) {

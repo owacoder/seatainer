@@ -274,6 +274,7 @@ int main(int argc, char **argv, const char **envp)
     char buffer[100];
     srand(time(NULL));
 
+    io_register_type("", (CommonContainerBase *) container_base_variant_recipe());
     io_register_type("clock", (CommonContainerBase *) container_base_clock_t_recipe());
     io_register_type("tm", (CommonContainerBase *) container_base_tm_recipe());
 
@@ -285,6 +286,25 @@ int main(int argc, char **argv, const char **envp)
 
     Binary b = {.data = "\b880fajzkk文章和新聞報導😂\x80\x90\x20"};
     b.length = strlen(b.data);
+
+    Variant parsed = NULL;
+    io_printf(io_stdout, "%s", error_description(io_parse_json(io_open_cstring("[\"A string \n1232\",10e12,\"Another string\",null]", "r"), &parsed, container_base_variant_recipe(), NULL)));
+    if (parsed) {
+        switch (variant_get_type(parsed)) {
+            case VariantUndefined: io_printf(io_stdout, "undefined\n"); break;
+            case VariantNull: io_printf(io_stdout, "null\n"); break;
+            case VariantBoolean: io_printf(io_stdout, "boolean\n"); break;
+            case VariantInteger: io_printf(io_stdout, "integer\n"); break;
+            case VariantUnsignedInteger: io_printf(io_stdout, "uinteger\n"); break;
+            case VariantFloat: io_printf(io_stdout, "float\n"); break;
+            case VariantString: io_printf(io_stdout, "string(%zu)\n", strlen(variant_get_string(parsed))); break;
+            case VariantBinary: io_printf(io_stdout, "binary(%zu)\n", variant_get_binary(parsed).length); break;
+            case VariantCustom: io_printf(io_stdout, "custom\n"); break;
+        }
+        if (io_printf(io_stdout, "%{[JSON]}\n\n", parsed) < 0)
+            io_printf(io_stdout, "variant print failed\n");
+        variant_destroy(parsed);
+    }
 
     io_printf(io_stdout, "%{?[JSON:ASCII]}\n", container_base_binary_recipe(), &b);
 
@@ -473,7 +493,7 @@ int main(int argc, char **argv, const char **envp)
     {
         IO cstrio = io_open_cstring("First\r\nSecond\r\nThird\r\nFourth\r\n", "r");
 
-        StringList cstrlist = stringlist_split_io(cstrio, "\n", 1);
+        StringList cstrlist = io_split_to_stringlist(cstrio, "\n", 1);
 
         for (size_t i = 0; i < stringlist_size(cstrlist); ++i) {
             printf("Item %u: '%s'\n", (unsigned) i, stringlist_array(cstrlist)[i]);

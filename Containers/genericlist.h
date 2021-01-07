@@ -33,6 +33,7 @@ int genericlist_insert_list(GenericList list, GenericList other, size_t before_i
 int genericlist_insert_move(GenericList list, void *item, size_t before_index);
 int genericlist_insert(GenericList list, const void *item, size_t before_index);
 int genericlist_insert_move_iterator(GenericList list, void *item, Iterator before);
+int genericlist_insert_copy_iterator(GenericList list, const void *item, Iterator before);
 int genericlist_replace_move_at(GenericList list, size_t index, void *item);
 int genericlist_replace_at(GenericList list, size_t index, const void *item);
 int genericlist_replace_move_iterator(GenericList list, Iterator it, void *item);

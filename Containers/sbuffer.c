@@ -40,7 +40,7 @@ int buffer_append_chr(Buffer *buf, int chr) {
     if (chr != (chr & UCHAR_MAX))
         return CC_EINVAL;
 
-    char c = chr;
+    unsigned char c = chr;
     return buffer_append_n(buf, &c, 1);
 }
 
@@ -83,7 +83,7 @@ char *buffer_take(Buffer *buf) {
     char *buffer = buf->data;
 
     if (buffer == buf->small_data)
-        buffer = strdup_alloc(buffer);
+        buffer = generic_pod_copy_alloc(buffer, buf->length+1);
 
     if (buffer)
         buffer_init(buf);

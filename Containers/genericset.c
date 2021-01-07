@@ -41,11 +41,7 @@ int variant_set_genericset(Variant var, const GenericSet set) {
     return variant_set_custom_adopt(var, set, genericset_build_recipe(set));
 }
 
-GenericSet genericset_create() {
-    return genericset_create_custom(NULL);
-}
-
-GenericSet genericset_create_custom(const CommonContainerBase *base) {
+GenericSet genericset_create(const CommonContainerBase *base) {
     return (GenericSet) avltree_create(base, container_base_empty_recipe());
 }
 
@@ -58,7 +54,7 @@ GenericSet genericset_union(GenericSet a, GenericSet b) {
         return NULL;
 
     const CommonContainerBase *base = avltree_get_key_container_base((struct AVLTree *) a);
-    GenericSet result = genericset_create_custom(base);
+    GenericSet result = genericset_create(base);
     if (result == NULL)
         return NULL;
 
@@ -114,7 +110,7 @@ GenericSet genericset_intersection(GenericSet a, GenericSet b) {
         return NULL;
 
     const CommonContainerBase *base = avltree_get_key_container_base((struct AVLTree *) a);
-    GenericSet result = genericset_create_custom(base);
+    GenericSet result = genericset_create(base);
     if (result == NULL)
         return NULL;
 
@@ -147,7 +143,7 @@ GenericSet genericset_subtract(GenericSet from, GenericSet set_to_subtract) {
         return NULL;
 
     const CommonContainerBase *base = avltree_get_key_container_base((struct AVLTree *) from);
-    GenericSet result = genericset_create_custom(base);
+    GenericSet result = genericset_create(base);
     if (result == NULL)
         return NULL;
 
@@ -189,7 +185,7 @@ GenericSet genericset_difference(GenericSet a, GenericSet b) {
         return NULL;
 
     const CommonContainerBase *base = avltree_get_key_container_base((struct AVLTree *) a);
-    GenericSet result = genericset_create_custom(base);
+    GenericSet result = genericset_create(base);
     if (result == NULL)
         return NULL;
 

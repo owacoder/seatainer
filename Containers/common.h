@@ -54,6 +54,8 @@ Binary *binary_copy(const Binary *other);
 int binary_compare(const Binary *a, const Binary *b);
 void binary_destroy(Binary *b);
 
+typedef struct CommonContainerBaseStruct CommonContainerBase;
+
 /** @brief Structure containing the identity of a Parser function. See `Parser` for details. */
 struct ParserIdentity {
     const char *fmt; /* IN, specifies extra user data containing parser-specific formatting information. */
@@ -78,17 +80,19 @@ struct ParserIdentity {
  * @param parser_is_utf8 Whether the parser is UTF-8 output (1) or not (0).
  */
 #define PARSER_DECLARE(parser_type, fname, parser_is_utf8) \
-    if (data == NULL || base == NULL || type == NULL) { /* Not passing a recipient object or ParserIdentity struct is an error */ \
+    if (data == NULL || base == NULL) { /* Not passing a recipient object or ParserIdentity struct is an error */ \
         return CC_EINVAL; \
     } else if (input == NULL) { /* Just looking for the parser type? */ \
-        if (type) { \
+        if (type != NULL) { \
             type->type = (parser_type); \
             type->is_utf8 = (parser_is_utf8); \
         } \
         return 0; \
-    } else if (base->parse && base->parse != (Parser) fname) { /* Serialize using value parser if same format */ \
+    } else if (base->parse && base->parse != (Parser) fname) { /* Parse using value parser if same format */ \
         int err = 0; \
-        struct ParserIdentity identity_ = *type; \
+        struct ParserIdentity identity_; \
+        if (type) \
+            identity_ = *type; \
         if ((err = base->parse(NULL, NULL, NULL, &identity_)) != 0) \
             return err; \
         if (!strcmp((parser_type), identity_.type)) \
@@ -124,11 +128,17 @@ struct ParserIdentity {
  *
  * @param input The IO device to read from and set errors to. If this parameter is NULL, it is treated as a request for the parsing function to identify itself, and all other parameters except for @p type can be NULL.
  * @param data A container or item containing value restrictions on what can be parsed.
+ *             All types should be passed as a pointer to the native value, so:
+ *               - Simple types should point to the actual value.
+ *               - C-strings should be passed as `char **`, a pointer to a char pointer.
+ *               - Binary objects should be passed as `Binary *`, a pointer to the binary data.
+ *               - Other types that use custom handles should be passed as `Handle *`, a pointer to the handle.
+ *
  * @param base The type of the custom container or datatype to parse.
  * @param type A pointer to a `struct ParserIdentity` that contains extra information regarding the input and output of the parser. Required to always be non-NULL. If an error occurs, the output values placed in @p type are undefined.
- * @return An error that occurred while parsing or identifying the parser, or 0 on success. If an error occurs, the value in @p data is unspecified.
+ * @return An error that occurred while parsing or identifying the parser, or 0 on success. If an error occurs, the value in @p data is valid, but unspecified. All implementations *MUST* comply with these specifications.
  */
-typedef int (*Parser)(void *input, void *data, const struct CommonContainerBase *base, struct ParserIdentity *type);
+typedef int (*Parser)(void *input, void *data, const CommonContainerBase *base, struct ParserIdentity *type);
 
 /** @brief Structure containing the identity of a Serializer function. See `Serializer` for details. */
 struct SerializerIdentity {
@@ -175,7 +185,6 @@ struct SerializerIdentity {
     } \
     type->written = 0;
 
-
 /** Serializes a container or datatype to an IO device
  *
  * WARNING: The special case with @p output == NULL passed to this function is treated as a request for the serializing function to identify itself.
@@ -208,6 +217,13 @@ typedef enum {
  * If performing a search for an item inside a collection, the item being searched for should be passed as the first parameter
  */
 typedef int (*Compare)(const void *a, const void *b);
+
+/** Creates a collection. The collection is later destroyed with the Deleter function
+ *
+ * @return Returns a handle to the collection, or NULL if an error occurred.
+ */
+typedef void *(*CollectionCreateList)(const CommonContainerBase *base);
+typedef void *(*CollectionCreateKeyValue)(const CommonContainerBase *key_base, const CommonContainerBase *value_base);
 
 /** Returns the beginning of a collection
  *
@@ -291,6 +307,7 @@ typedef int (*CollectionKeyValueInsertMove)(void *container, void *key, void *va
  *  @return 0 on success, or an error that occurred on failure.
  */
 typedef int (*CollectionListInsertMove)(void *container, void *value, Iterator it);
+typedef int (*CollectionListInsertCopy)(void *container, const void *value, Iterator it);
 
 /** Replaces an element in a container
  *
@@ -315,14 +332,16 @@ typedef void *(*Copier)(const void *p);
  */
 typedef void (*Deleter)(void *p);
 
-typedef struct CommonContainerBaseStruct CommonContainerBase;
-
 struct CommonContainerBaseStruct {
     Copier copier;
     Compare compare;
     Deleter deleter;
     Parser parse;
     Serializer serialize;
+    union {
+        CollectionCreateList list;
+        CollectionCreateKeyValue key_value;
+    } collection_create;
     CollectionSize collection_size;
     CollectionBegin collection_begin;
     CollectionNext collection_next;
@@ -333,7 +352,10 @@ struct CommonContainerBaseStruct {
         CollectionKeyValueFind key_value;
     } collection_find;
     union {
-        CollectionListInsertMove list;
+        struct {
+            CollectionListInsertMove move;
+            CollectionListInsertCopy copy;
+        } list;
         CollectionKeyValueInsertMove key_value;
     } collection_insert;
     CollectionErase collection_erase;
@@ -407,23 +429,11 @@ int generic_types_compatible_compare(const CommonContainerBase *lhs, const Commo
  */
 void *generic_pod_copy_alloc(const void *p, size_t bytes);
 
-/** @brief A copier function that always returns NULL
- *
- * Use this function as a copier when you don't want generic containers to copy objects
- */
-void *generic_nocopy(const void *p);
-
 /** @brief A copier function that simply returns its argument
  *
  * Use this function as a copier when you want generic containers to treat objects as atomic values
  */
 void *generic_identitycopy(const void *p);
-
-/** @brief A destructor function that does nothing to its argument
- *
- * Use this function as a destructor when you don't want generic containers to free() their objects
- */
-void generic_nofree(void *p);
 
 #define REFERENCE(type, value) ((void *) ((type [1]) {(value)}))
 #define VALUE(type, generic) (*((type *) (generic)))

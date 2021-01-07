@@ -2060,11 +2060,11 @@ static void positional_argument_list_free(va_list_positional_argument_list *list
         char alpha[] = "0123456789abcdef";                          \
         int chr, neg = 0, base = 10;                                \
                                                                     \
-        (value) = 0;                                                \
-                                                                    \
         if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
         if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
+                                                                    \
+        (value) = 0;                                                \
                                                                     \
         if (chr == '+' || chr == '-') {                             \
             neg = (chr == '-');                                     \
@@ -2110,8 +2110,6 @@ static void positional_argument_list_free(va_list_positional_argument_list *list
         unsigned read = 0;                                          \
         int chr, neg = 0;                                           \
                                                                     \
-        (value) = 0;                                                \
-                                                                    \
         if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
         if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
@@ -2144,11 +2142,11 @@ static void positional_argument_list_free(va_list_positional_argument_list *list
         unsigned read = 0;                                          \
         int chr;                                                    \
                                                                     \
-        (value) = 0;                                                \
-                                                                    \
         if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
         if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
+                                                                    \
+        (value) = 0;                                                \
                                                                     \
         while (chr != EOF) {                                        \
             if (!isdigit(chr)) {                                    \
@@ -2170,11 +2168,11 @@ static void positional_argument_list_free(va_list_positional_argument_list *list
         unsigned read = 0;                                          \
         int chr, neg = 0;                                           \
                                                                     \
-        (value) = 0;                                                \
-                                                                    \
         if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
         if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
+                                                                    \
+        (value) = 0;                                                \
                                                                     \
         if (chr == '+' || chr == '-') {                             \
             neg = (chr == '-');                                     \
@@ -2205,11 +2203,11 @@ static void positional_argument_list_free(va_list_positional_argument_list *list
         char alpha[] = "0123456789abcdef";                          \
         int chr, neg = 0;                                           \
                                                                     \
-        (value) = 0;                                                \
-                                                                    \
         if ((chr = io_getc_internal(io)) == EOF)                    \
             return UINT_MAX;                                        \
         if (++read > width) {io_ungetc_internal(chr, io); return --read;}\
+                                                                    \
+        (value) = 0;                                                \
                                                                     \
         if (chr == '+' || chr == '-') {                             \
             neg = (chr == '-');                                     \
@@ -2417,7 +2415,7 @@ static int io_printf_voidp(struct io_printf_state *state, unsigned flags, unsign
 
 /* fmt must be one of "diuox", returns UINT_MAX on failure, number of characters read on success */
 static unsigned io_scanf_int_no_arg(char fmt, IO io, unsigned width) {
-    unsigned int dummy;
+    unsigned int dummy = 0;
     UNUSED(dummy)
     switch (fmt) {
         case 'd': SCANF_D(unsigned int, dummy, width, PRINTF_LEN_NONE, io); break;
@@ -2429,7 +2427,9 @@ static unsigned io_scanf_int_no_arg(char fmt, IO io, unsigned width) {
     }
 }
 
-/* fmt must be one of "diuox", returns UINT_MAX on failure, number of characters read on success */
+/* fmt must be one of "diuox", returns UINT_MAX on failure, number of characters read on success (if 0, failure also occurred)
+ * TODO: fail on overflow for specified type
+ */
 static unsigned io_scanf_int(char fmt, IO io, unsigned width, unsigned len, va_list_wrapper *args) {
     switch (len) {
         default: return UINT_MAX;
@@ -3784,7 +3784,7 @@ int io_ftime(IO io, const char *fmt, const struct tm *timeptr) {
         if (io_write(buf, 1, size, io) != size)
             return -1;
 
-        return size;
+        return (int) size;
     }
 
     char *dbuf = NULL;
@@ -3810,7 +3810,7 @@ int io_ftime(IO io, const char *fmt, const struct tm *timeptr) {
 
     FREE(dbuf);
 
-    return size;
+    return (int) size;
 
 cleanup:
     FREE(dbuf);
@@ -4141,15 +4141,15 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
         unsigned char chr = *fmt;
 
         if (chr == '%' && fmt[1] != '%') {
-            int discardResult = 0;
-            int noWidth = 1;
+            int discard_result = 0;
+            int no_width = 1;
             unsigned fmt_width = 0;
             unsigned fmt_len = PRINTF_LEN_NONE;
 
             ++fmt;
 
             if (*fmt == '*') {
-                discardResult = 1;
+                discard_result = 1;
                 ++fmt;
             }
 
@@ -4158,7 +4158,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
             if (oldfmt == fmt)
                 fmt_width = UINT_MAX - 1;
             else
-                noWidth = 0;
+                no_width = 0;
 
             /* read length modifier */
             switch (*fmt) {
@@ -4237,7 +4237,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                 case 'o':
                 case 'x':
                 case 'X': {
-                    unsigned result = discardResult? io_scanf_int_no_arg(*fmt, io, fmt_width):
+                    unsigned result = discard_result? io_scanf_int_no_arg(*fmt, io, fmt_width):
                                                      io_scanf_int(*fmt, io, fmt_width, fmt_len, &args_copy);
                     if (result == UINT_MAX || result == 0) {
                         bytes += !io_eof_internal(io) && !io_error_internal(io);
@@ -4254,7 +4254,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                 case 'G':
                 case 'a':
                 case 'A': {
-                    unsigned result = discardResult? io_scanf_float_no_arg(*fmt, io, fmt_width):
+                    unsigned result = discard_result? io_scanf_float_no_arg(*fmt, io, fmt_width):
                                                      io_scanf_float(*fmt, io, fmt_width, fmt_len, &args_copy);
                     if (result == UINT_MAX || result == 0) {
                         bytes += !io_eof_internal(io) && !io_error_internal(io);
@@ -4264,10 +4264,10 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                     break;
                 }
                 case 'c': {
-                    if (noWidth)
+                    if (no_width)
                         fmt_width = 1;
 
-                    if (discardResult) {
+                    if (discard_result) {
                         unsigned saved_width = fmt_width;
 
                         for (; fmt_width; --fmt_width) {
@@ -4290,7 +4290,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                     break;
                 }
                 case 's': {
-                    char *dst = discardResult? NULL: va_arg(args_copy.args, char *);
+                    char *dst = discard_result? NULL: va_arg(args_copy.args, char *);
 
                     for (; fmt_width; --fmt_width) {
                         int chr = io_getc_internal(io);
@@ -4333,7 +4333,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
                     }
 
                     const char *oldfmt = fmt;
-                    char *cptr = discardResult? NULL: va_arg(args_copy.args, char *);
+                    char *cptr = discard_result? NULL: va_arg(args_copy.args, char *);
                     int match = 0;
 
                     for (; fmt_width; --fmt_width) {
@@ -4493,7 +4493,7 @@ int io_seek(IO io, long int offset, int origin) {
             if ((io->flags & IO_FLAG_HAS_JUST_WRITTEN) && io_flush(io))
                 return -1;
             else if ((io->flags & IO_FLAG_HAS_JUST_READ) && origin == SEEK_CUR)
-                offset -= io->data.native_file.buffer_bytes;
+                offset -= (long) io->data.native_file.buffer_bytes;
 
 #if LINUX_OS
             if (lseek(io->data.native_file.native, offset, origin) < 0)
@@ -4799,9 +4799,9 @@ long int io_tell(IO io) {
                     offset = (long) val;
 
                 if (io->flags & IO_FLAG_HAS_JUST_READ)
-                    return offset - io->data.native_file.buffer_bytes;
+                    return offset - (long) io->data.native_file.buffer_bytes;
                 else
-                    return offset + io->data.native_file.buffer_bytes;
+                    return offset + (long) io->data.native_file.buffer_bytes;
             } else {
                 LARGE_INTEGER li;
 
@@ -4812,9 +4812,14 @@ long int io_tell(IO io) {
                     return -1;
 
                 if (io->flags & IO_FLAG_HAS_JUST_READ)
-                    return li.QuadPart - io->data.native_file.buffer_bytes;
+                    li.QuadPart -= (long) io->data.native_file.buffer_bytes;
                 else
-                    return li.QuadPart + io->data.native_file.buffer_bytes;
+                    li.QuadPart += (long) io->data.native_file.buffer_bytes;
+
+                if (li.QuadPart > LONG_MAX)
+                    return -1;
+
+                return (long) li.QuadPart;
             }
 #endif
         case IO_Custom:
@@ -4824,8 +4829,8 @@ long int io_tell(IO io) {
             else
                 return -1L;
         }
-        case IO_SizedBuffer: return io->data.sized_buffer.buffer_pos;
-        case IO_DynamicBuffer: return io->data.dynamic_buffer.buffer_pos;
+        case IO_SizedBuffer: return io->data.sized_buffer.buffer_pos > LONG_MAX? -1: (long) io->data.sized_buffer.buffer_pos;
+        case IO_DynamicBuffer: return io->data.dynamic_buffer.buffer_pos > LONG_MAX? -1: (long) io->data.dynamic_buffer.buffer_pos;
     }
 }
 

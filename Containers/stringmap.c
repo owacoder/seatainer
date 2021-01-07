@@ -45,7 +45,10 @@ StringMap stringmap_create() {
 }
 
 StringMap stringmap_create_custom(const CommonContainerBase *key_base, const CommonContainerBase *value_base) {
-    return (StringMap) genericmap_create(key_base? key_base: container_base_cstring_recipe(), value_base? value_base: container_base_cstring_recipe());
+    return (StringMap) genericmap_create(key_base && generic_types_compatible_compare(key_base, container_base_cstring_recipe()) == 0?
+                                         key_base: container_base_cstring_recipe(),
+                                         value_base && generic_types_compatible_compare(value_base, container_base_cstring_recipe()) == 0?
+                                         value_base: container_base_cstring_recipe());
 }
 
 StringMap stringmap_copy(StringMap other) {

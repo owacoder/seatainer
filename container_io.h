@@ -34,7 +34,7 @@ void io_unregister_type(const char *name);
 
 /** @brief Registers a type to be used with the io_printf and io_scanf family of functions.
  *
- * @param name The constant name of the type. This value is not copied, so it's essential the string stays valid.
+ * @param name The constant name of the type, which must not be the empty string "". This value is not copied, so it's essential the string stays valid.
  * @param parser The parser function to be used with the format, or NULL, if no parsing is supported.
  * @param serializer The serializer function to be used with the format, or NULL if no serialization is supported.
  * @return Returns 0 on success, or the error that occurred on failure.
@@ -46,6 +46,17 @@ int io_register_format(const char *name, Parser parser, Serializer serializer);
  * @param name The name of the format to be removed.
  */
 void io_unregister_format(const char *name);
+
+int io_parser_nested_parse_and_insert(void *input, void *container, const CommonContainerBase *base, Parser nested_parser, struct ParserIdentity *type);
+
+/** The following are not serializers, but they are special functions for fast operations on Binary and C-string lists */
+StringList io_split_to_stringlist(IO input, const char *separator, int keep_empty);
+GenericList io_split_to_binarylist(IO input, const char *separator, size_t separator_len, int keep_empty);
+StringList io_divide_to_stringlist(IO input, size_t record_size, int keep_partial);
+GenericList io_divide_to_binarylist(IO input, size_t record_size, int keep_partial);
+int io_join_stringlist(IO output, StringList list, const char *separator);
+int io_join_genericlist(IO output, GenericList list, const char *separator);
+int io_join_genericlist_n(IO output, GenericList list, const char *separator, size_t separator_len);
 
 /** Default "UTF-8" parsers for known types */
 int io_parse_boolean(IO input, void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
@@ -86,8 +97,10 @@ int io_serialize_cstring(IO output, const void *data, const CommonContainerBase 
 int io_serialize_binary(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 int io_serialize_variant(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 
-/* Serializer format specifies the separator with which to join elements. */
+/** Serialize a generic container, the serializer format specifies the separator with which to join elements. */
 int io_serialize_list_join(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
+
+/** Serialize a container for debugging */
 int io_serialize_utf8(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
 
 int io_serialize_clock_t(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
@@ -106,14 +119,5 @@ int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct 
  *             regardless of this flag's existence. This allows simple UTF-8 decoders to decode to the same byte sequence as the source.
  */
 int io_serialize_json(IO output, const void *data, const CommonContainerBase *base, struct SerializerIdentity *type);
-
-/** The following are not serializers, but they are special functions for fast operations on Binary and C-string lists */
-StringList stringlist_split_io(IO input, const char *separator, int keep_empty);
-GenericList binarylist_split_io(IO input, const char *separator, size_t separator_len, int keep_empty);
-StringList stringlist_divide_io(IO input, size_t record_size, int keep_partial);
-GenericList binarylist_divide_io(IO input, size_t record_size, int keep_partial);
-int io_join_stringlist(IO output, StringList list, const char *separator);
-int io_join_genericlist(IO output, GenericList list, const char *separator);
-int io_join_genericlist_n(IO output, GenericList list, const char *separator, size_t separator_len);
 
 #endif // CONTAINER_IO_H
