@@ -287,8 +287,16 @@ int main(int argc, char **argv, const char **envp)
     Binary b = {.data = "\b880fajzkk文章和新聞報導😂\x80\x90\x20"};
     b.length = strlen(b.data);
 
+    GenericList intlist_parsed = NULL;
+    io_printf(io_stdout, "%s", error_description(io_parse_json(io_open_cstring("[12,143,0,-1,\"\"]", "r"), &intlist_parsed, io_get_registered_type("intlist", 7), NULL)));
+    if (intlist_parsed) {
+        if (io_printf(io_stdout, "Intlist: %{intlist[JSON]}\n\n", intlist_parsed) < 0)
+            io_printf(io_stdout, "intlist print failed");
+        genericlist_destroy(intlist_parsed);
+    }
+
     Variant parsed = NULL;
-    io_printf(io_stdout, "%s", error_description(io_parse_json(io_open_cstring("[\"A string \n1232\",10e12,\"Another string\",null]", "r"), &parsed, container_base_variant_recipe(), NULL)));
+    io_printf(io_stdout, "%s", error_description(io_parse_json(io_open_cstring("[\"A string \n1232\",10e12,\"Another string\",null,{\"test\":null,\"2\":true},\"My string\"]", "r"), &parsed, container_base_variant_recipe(), NULL)));
     if (parsed) {
         switch (variant_get_type(parsed)) {
             case VariantUndefined: io_printf(io_stdout, "undefined\n"); break;
@@ -301,7 +309,7 @@ int main(int argc, char **argv, const char **envp)
             case VariantBinary: io_printf(io_stdout, "binary(%zu)\n", variant_get_binary(parsed).length); break;
             case VariantCustom: io_printf(io_stdout, "custom\n"); break;
         }
-        if (io_printf(io_stdout, "%{[JSON]}\n\n", parsed) < 0)
+        if (io_printf(io_stdout, "Variant: %{[JSON]}\n\n", parsed) < 0)
             io_printf(io_stdout, "variant print failed\n");
         variant_destroy(parsed);
     }

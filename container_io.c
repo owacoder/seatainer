@@ -14,7 +14,7 @@
 #include <time.h>
 
 int io_parser_nested_parse_and_list_insert(void *input, void *container, const CommonContainerBase *base, Parser nested_parser, struct ParserIdentity *type) {
-    if (base->size > sizeof(void*)) { /* Large POD type */
+    if (base->value_child->size > sizeof(void*)) { /* Large POD type */
         if (base->collection_insert.list.copy == NULL)
             return CC_EINVAL;
 
@@ -29,7 +29,7 @@ int io_parser_nested_parse_and_list_insert(void *input, void *container, const C
         FREE(item);
         if (err)
             return err;
-    } else if (base->size) { /* Small POD type */
+    } else if (base->value_child->size) { /* Small POD type */
         if (base->collection_insert.list.copy == NULL)
             return CC_EINVAL;
 
@@ -1304,7 +1304,7 @@ int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct 
             if (container == NULL)
                 return CC_ENOMEM;
 
-            int err = io_parse_json(input, container, base, type);
+            int err = io_parse_json(input, &container, base, type);
             if (!err)
                 *((void **) data) = container;
             else if (base->deleter)
@@ -1336,7 +1336,49 @@ int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct 
             if (ch != '"')
                 goto cleanup;
 
+            io_ungetc(ch, input);
+            has_item = 1;
+
             /* Parse key of pair */
+            int err = 0;
+            AllocatedSpace key = allocated_space_for_type(base->key_child);
+            AllocatedSpace value = allocated_space_for_type(base->value_child);
+
+            if (!key || !value)
+                goto object_cleanup;
+
+            err = io_parse_json(input, key, base->key_child, type);
+            if (err)
+                goto object_cleanup;
+
+            do {
+                ch = io_getc(input);
+                if (ch == EOF)
+                    goto cleanup;
+            } while (strchr(" \n\r\t", ch));
+
+            if (ch != ':')
+                goto cleanup;
+
+            err = io_parse_json(input, value, base->value_child, type);
+            if (err)
+                goto object_cleanup;
+
+            err = base->collection_insert.key_value(container,
+                                                    allocated_space_get_object(key, base->key_child),
+                                                    allocated_space_get_object(value, base->value_child));
+            if (err)
+                goto object_cleanup;
+
+            /* Then destroy just the allocated space */
+            allocated_space_destroy_after_object_move(key, base->key_child);
+            allocated_space_destroy_after_object_move(value, base->value_child);
+
+            continue;
+object_cleanup:
+            allocated_space_destroy(key, base->key_child);
+            allocated_space_destroy(value, base->value_child);
+            return err? err: CC_EBADMSG;
         }
 
         /* Parse object into recipient type */
@@ -1358,7 +1400,7 @@ int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct 
             if (container == NULL)
                 return CC_ENOMEM;
 
-            int err = io_parse_json(input, container, base, type);
+            int err = io_parse_json(input, &container, base, type);
             if (!err)
                 *((void **) data) = container;
             else if (base->deleter)

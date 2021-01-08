@@ -1171,7 +1171,9 @@ Iterator genericlist_next(GenericList list, Iterator it) {
 
 /* Pointer subtractions greater than PTRDIFF_MAX are UB in C, so adjust the offset until it fits within range */
 size_t genericlist_index_of(GenericList list, Iterator it) {
-    if (list->base->size && list->base->size <= sizeof(void*)) {
+    if (it == NULL)
+        return list->array_size;
+    else if (list->base->size && list->base->size <= sizeof(void*)) {
         const char *ptr_offset = list->array;
         size_t size_left = list->array_size;
         size_t index_offset = 0;

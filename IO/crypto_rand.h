@@ -22,20 +22,6 @@ extern "C" {
 IO io_open_crypto_rand();
 
 #ifdef __cplusplus
-class CryptoRandIO : public IODevice {
-    void closing() {}
-
-public:
-    int open() {
-        if (isOpen())
-            return AlreadyOpen;
-
-        m_io = io_open_crypto_rand();
-
-        return m_io? 0: GenericError;
-    }
-};
-
 }
 #endif
 

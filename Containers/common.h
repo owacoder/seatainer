@@ -136,7 +136,9 @@ struct ParserIdentity {
  *
  * @param base The type of the custom container or datatype to parse.
  * @param type A pointer to a `struct ParserIdentity` that contains extra information regarding the input and output of the parser. Required to always be non-NULL. If an error occurs, the output values placed in @p type are undefined.
- * @return An error that occurred while parsing or identifying the parser, or 0 on success. If an error occurs, the value in @p data is valid, but unspecified. All implementations *MUST* comply with these specifications.
+ * @return An error that occurred while parsing or identifying the parser, or 0 on success.
+ *         If an error occurs, the value in @p data is well-defined, but unspecified, unless @p data points to a NULL handle, in which case it is not modified if an error occurs (i.e. it stays NULL)
+ *         All implementations *MUST* comply with these specifications.
  */
 typedef int (*Parser)(void *input, void *data, const CommonContainerBase *base, struct ParserIdentity *type);
 
@@ -420,6 +422,18 @@ CommonContainerBase *container_base_build_key_value_container(const CommonContai
  * this one is called this solely to keep its operation unambiguous
  */
 void container_base_destroy_if_dynamic(CommonContainerBase *base);
+
+typedef void *AllocatedSpace;
+
+/* Allocates space big enough to hold a POD type or handle
+ *
+ * The memory returned by this function should be destroyed with
+ * container_base_destroy_space_for_type()
+ */
+AllocatedSpace allocated_space_for_type(const CommonContainerBase *base);
+void *allocated_space_get_object(AllocatedSpace space, const CommonContainerBase *base);
+void allocated_space_destroy_after_object_move(AllocatedSpace space, const CommonContainerBase *base);
+void allocated_space_destroy(AllocatedSpace space, const CommonContainerBase *base);
 
 int generic_types_compatible_compare(const CommonContainerBase *lhs, const CommonContainerBase *rhs);
 

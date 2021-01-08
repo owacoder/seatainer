@@ -182,6 +182,42 @@ void container_base_destroy_if_dynamic(CommonContainerBase *base) {
     }
 }
 
+AllocatedSpace allocated_space_for_type(const CommonContainerBase *base) {
+    if (base == NULL)
+        return NULL;
+    else if (base->size)
+        return CALLOC(1, base->size);
+    else {
+        void **p = MALLOC(sizeof(void*));
+        if (p == NULL)
+            return NULL;
+
+        *p = NULL;
+        return p;
+    }
+}
+
+void *allocated_space_get_object(AllocatedSpace space, const CommonContainerBase *base) {
+    if (space == NULL)
+        return NULL;
+    else if (base->size)
+        return space;
+    else
+        return *((void **) space);
+}
+
+void allocated_space_destroy_after_object_move(AllocatedSpace space, const CommonContainerBase *base) {
+    if (!base->size)
+        FREE(space);
+}
+
+void allocated_space_destroy(AllocatedSpace space, const CommonContainerBase *base) {
+    if (!base->size && space && base->deleter)
+        base->deleter(*((void **) space));
+
+    FREE(space);
+}
+
 int generic_types_compatible_compare(const CommonContainerBase *lhs, const CommonContainerBase *rhs) {
     if (lhs == rhs || (lhs == NULL && rhs == NULL))
         return 0;
