@@ -288,7 +288,7 @@ int main(int argc, char **argv, const char **envp)
     b.length = strlen(b.data);
 
     GenericList intlist_parsed = NULL;
-    io_printf(io_stdout, "%s", error_description(io_parse_json(io_open_cstring("[12,143,0,-1,\"\"]", "r"), &intlist_parsed, io_get_registered_type("intlist", 7), NULL)));
+    io_printf(io_stdout, "%s", error_description(io_parse_json(io_open_cstring("[12,143,0.1e1,-1e3,-2147483648]", "r"), &intlist_parsed, io_get_registered_type("intlist", 7), NULL)));
     if (intlist_parsed) {
         if (io_printf(io_stdout, "Intlist: %{intlist[JSON]}\n\n", intlist_parsed) < 0)
             io_printf(io_stdout, "intlist print failed");
@@ -296,7 +296,7 @@ int main(int argc, char **argv, const char **envp)
     }
 
     Variant parsed = NULL;
-    io_printf(io_stdout, "%s", error_description(io_parse_json(io_open_cstring("[\"A string \n1232\",10e12,\"Another string\",null,{\"test\":null,\"2\":true},\"My string\"]", "r"), &parsed, container_base_variant_recipe(), NULL)));
+    io_printf(io_stdout, "%s", error_description(io_parse_json(io_open_cstring("[\"A string \n1232\",10e12,\"Another string\",null,{\"test\":null,\"2\":2.33e-10},\"My \\u0000string\"]", "r"), &parsed, container_base_variant_recipe(), NULL)));
     if (parsed) {
         switch (variant_get_type(parsed)) {
             case VariantUndefined: io_printf(io_stdout, "undefined\n"); break;

@@ -1038,7 +1038,7 @@ int io_parse_json_string(IO input, Binary *b) {
 
                     size_t len = sizeof(buf);
                     utf8append(buf, codepoint & UTF8_MASK, &len);
-                    err = buffer_append(&buffer, buf);
+                    err = buffer_append_n(&buffer, buf, sizeof(buf)-len);
                     if (err)
                         goto cleanup;
 
@@ -1459,83 +1459,76 @@ object_cleanup:
 
         _Bool *b = (_Bool *) data;
         *b = ch == 't';
-    } else if (generic_types_compatible_compare(base, container_base_short_recipe()) == 0) {
+    } else if (generic_types_compatible_compare(base, container_base_short_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_ushort_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_int_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_uint_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_long_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_ulong_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_long_long_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_ulong_long_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_float_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_double_recipe()) == 0 ||
+               generic_types_compatible_compare(base, container_base_long_double_recipe()) == 0) {
         if (ch != '-' && !isdigit(ch))
             goto cleanup;
         io_ungetc(ch, input);
 
-        if (io_scanf(input, "%hd", data) != 1)
-            goto cleanup;
-    } else if (generic_types_compatible_compare(base, container_base_ushort_recipe()) == 0) {
-        if (ch != '-' && !isdigit(ch))
-            goto cleanup;
-        io_ungetc(ch, input);
+        double d = 0.0;
+        long long i = 0;
+        unsigned long long u = 0;
+        int err = io_parse_json_number(input, &d, &i, &u);
+        if (err)
+            return err;
 
-        if (io_scanf(input, "%hu", data) != 1)
-            goto cleanup;
-    } else if (generic_types_compatible_compare(base, container_base_int_recipe()) == 0) {
-        if (ch != '-' && !isdigit(ch))
-            goto cleanup;
-        io_ungetc(ch, input);
+        if (generic_types_compatible_compare(base, container_base_short_recipe()) == 0) {
+            if (!isnan(d) || u > SHRT_MAX || i > SHRT_MAX || i < SHRT_MIN)
+                goto cleanup;
 
-        if (io_scanf(input, "%d", data) != 1)
-            goto cleanup;
-    } else if (generic_types_compatible_compare(base, container_base_uint_recipe()) == 0) {
-        if (ch != '-' && !isdigit(ch))
-            goto cleanup;
-        io_ungetc(ch, input);
+            *((short *) data) = i? (short) i: (short) u;
+        } else if (generic_types_compatible_compare(base, container_base_ushort_recipe()) == 0) {
+            if (!isnan(d) || u > USHRT_MAX || i > USHRT_MAX || i < 0)
+                goto cleanup;
 
-        if (io_scanf(input, "%u", data) != 1)
-            goto cleanup;
-    } else if (generic_types_compatible_compare(base, container_base_long_recipe()) == 0) {
-        if (ch != '-' && !isdigit(ch))
-            goto cleanup;
-        io_ungetc(ch, input);
+            *((unsigned short *) data) = i? (unsigned short) i: (unsigned short) u;
+        } else if (generic_types_compatible_compare(base, container_base_int_recipe()) == 0) {
+            if (!isnan(d) || u > INT_MAX || i > INT_MAX || i < INT_MIN)
+                goto cleanup;
 
-        if (io_scanf(input, "%ld", data) != 1)
-            goto cleanup;
-    } else if (generic_types_compatible_compare(base, container_base_ulong_recipe()) == 0) {
-        if (ch != '-' && !isdigit(ch))
-            goto cleanup;
-        io_ungetc(ch, input);
+            *((int *) data) = i? (int) i: (int) u;
+        } else if (generic_types_compatible_compare(base, container_base_uint_recipe()) == 0) {
+            if (!isnan(d) || u > UINT_MAX || i > UINT_MAX || i < 0)
+                goto cleanup;
 
-        if (io_scanf(input, "%lu", data) != 1)
-            goto cleanup;
-    } else if (generic_types_compatible_compare(base, container_base_long_long_recipe()) == 0) {
-        if (ch != '-' && !isdigit(ch))
-            goto cleanup;
-        io_ungetc(ch, input);
+            *((unsigned int *) data) = i? (unsigned int) i: (unsigned int) u;
+        } else if (generic_types_compatible_compare(base, container_base_long_recipe()) == 0) {
+            if (!isnan(d) || u > LONG_MAX || i > LONG_MAX || i < LONG_MIN)
+                goto cleanup;
 
-        if (io_scanf(input, "%lld", data) != 1)
-            goto cleanup;
-    } else if (generic_types_compatible_compare(base, container_base_ulong_long_recipe()) == 0) {
-        if (ch != '-' && !isdigit(ch))
-            goto cleanup;
-        io_ungetc(ch, input);
+            *((long *) data) = i? (long) i: (long) u;
+        } else if (generic_types_compatible_compare(base, container_base_ulong_recipe()) == 0) {
+            if (!isnan(d) || u > ULONG_MAX || i > ULONG_MAX || i < 0)
+                goto cleanup;
 
-        if (io_scanf(input, "%llu", data) != 1)
-            goto cleanup;
-    } else if (generic_types_compatible_compare(base, container_base_float_recipe()) == 0) {
-        if (ch != '-' && !isdigit(ch))
-            goto cleanup;
-        io_ungetc(ch, input);
+            *((unsigned long *) data) = i? (unsigned long) i: (unsigned long) u;
+        }
+        else if (generic_types_compatible_compare(base, container_base_long_long_recipe()) == 0) {
+            if (!isnan(d) || u > LLONG_MAX)
+                goto cleanup;
 
-        if (io_scanf(input, "%g", data) != 1)
-            goto cleanup;
-    } else if (generic_types_compatible_compare(base, container_base_double_recipe()) == 0) {
-        if (ch != '-' && !isdigit(ch))
-            goto cleanup;
-        io_ungetc(ch, input);
+            *((long long *) data) = i? i: (long long) u;
+        } else if (generic_types_compatible_compare(base, container_base_ulong_long_recipe()) == 0) {
+            if (!isnan(d) || i < 0)
+                goto cleanup;
 
-        if (io_scanf(input, "%lg", data) != 1)
-            goto cleanup;
-    } else if (generic_types_compatible_compare(base, container_base_long_double_recipe()) == 0) {
-        if (ch != '-' && !isdigit(ch))
-            goto cleanup;
-        io_ungetc(ch, input);
-
-        if (io_scanf(input, "%Lg", data) != 1)
-            goto cleanup;
+            *((unsigned long long *) data) = i? (unsigned long long) i: u;
+        } else if (generic_types_compatible_compare(base, container_base_float_recipe()) == 0) {
+            *((float *) data) = isnan(d)? i? (float) i: (float) u: (float) d;
+        } else if (generic_types_compatible_compare(base, container_base_double_recipe()) == 0) {
+            *((double *) data) = isnan(d)? i? (double) i: (double) u: d;
+        } else if (generic_types_compatible_compare(base, container_base_long_double_recipe()) == 0) {
+            *((long double *) data) = isnan(d)? i? (long double) i: (long double) u: d;
+        }
     } else if (generic_types_compatible_compare(base, container_base_empty_recipe()) == 0) {
         if (ch != 'n' || io_match(input, "ull"))
             goto cleanup;
@@ -1576,7 +1569,7 @@ static size_t serialize_json_stringpart(int ascii_only, const char *data, size_t
                         buffer[4] = alphabet[c >> 4];
                         buffer[5] = alphabet[c & 0xf];
                         buffer_size = 6;
-                    } else if (ascii_only) {
+                    } else if (ascii_only || codepoint == 0) {
                         if (codepoint > 0xffff) {
                             unsigned int high, low;
                             utf16surrogates(codepoint, &high, &low);
