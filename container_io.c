@@ -1562,27 +1562,23 @@ static size_t serialize_json_stringpart(int ascii_only, const char *data, size_t
                     const char *data_save = data;
                     unsigned long codepoint = utf8next_n(data, &length, &data);
 
-                    if (codepoint > UTF8_MAX) { /* TODO: shouldn't map to a unicode escape since that will be decoded to more than one byte */
-                        buffer[1] = 'u';
-                        buffer[2] = '0';
-                        buffer[3] = '0';
-                        buffer[4] = alphabet[c >> 4];
-                        buffer[5] = alphabet[c & 0xf];
-                        buffer_size = 6;
+                    if (codepoint > UTF8_MAX) { /* shouldn't map to a unicode escape since that will be decoded to more than one byte */
+                        io_set_error(io, CC_EINVAL);
+                        return written;
                     } else if (ascii_only || codepoint == 0) {
                         if (codepoint > 0xffff) {
                             unsigned int high, low;
                             utf16surrogates(codepoint, &high, &low);
 
-                            buffer[1] = 'u';
-                            buffer[2] = alphabet[(high >> 12) & 0xf];
-                            buffer[3] = alphabet[(high >>  8) & 0xf];
-                            buffer[4] = alphabet[(high >>  4) & 0xf];
-                            buffer[5] = alphabet[(high >>  0) & 0xf];
-                            buffer[6] = '\\';
-                            buffer[7] = 'u';
-                            buffer[8] = alphabet[(low >> 12) & 0xf];
-                            buffer[9] = alphabet[(low >>  8) & 0xf];
+                            buffer[ 1] = 'u';
+                            buffer[ 2] = alphabet[(high >> 12) & 0xf];
+                            buffer[ 3] = alphabet[(high >>  8) & 0xf];
+                            buffer[ 4] = alphabet[(high >>  4) & 0xf];
+                            buffer[ 5] = alphabet[(high >>  0) & 0xf];
+                            buffer[ 6] = '\\';
+                            buffer[ 7] = 'u';
+                            buffer[ 8] = alphabet[(low >> 12) & 0xf];
+                            buffer[ 9] = alphabet[(low >>  8) & 0xf];
                             buffer[10] = alphabet[(low >>  4) & 0xf];
                             buffer[11] = alphabet[(low >>  0) & 0xf];
                             buffer_size = 12;

@@ -284,7 +284,7 @@ int main(int argc, char **argv, const char **envp)
     io_register_format("JSON", NULL, io_serialize_json);
     io_register_format("join", NULL, io_serialize_list_join);
 
-    Binary b = {.data = "\b880fajzkk文章和新聞報導😂\x80\x90\x20"};
+    Binary b = {.data = "\b880fajzkk文章和新聞報導😂\x20"};
     b.length = strlen(b.data);
 
     GenericList intlist_parsed = NULL;
@@ -309,7 +309,7 @@ int main(int argc, char **argv, const char **envp)
             case VariantBinary: io_printf(io_stdout, "binary(%zu)\n", variant_get_binary(parsed).length); break;
             case VariantCustom: io_printf(io_stdout, "custom\n"); break;
         }
-        if (io_printf(io_stdout, "Variant: %{[JSON]}\n\n", parsed) < 0)
+        if (io_printf(io_stdout, "Variant: %{[JSON:ASCII]}\n\n", parsed) < 0)
             io_printf(io_stdout, "variant print failed\n");
         variant_destroy(parsed);
     }
