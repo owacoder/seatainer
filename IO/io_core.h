@@ -802,7 +802,11 @@ long long io_write_timeout(IO io);
 IO io_reopen(const char *filename, const char *mode, IO io);
 
 int io_vscanf(IO io, const char *fmt, va_list args);
-int io_scanf(IO io, const char *fmt, ...);
+int io_scanf(IO io, const char *fmt, ...)
+#if !WINDOWS_OS && (GCC_COMPILER | CLANG_COMPILER)
+__attribute__((format(scanf, 2, 3)))
+#endif
+;
 
 int io_seek(IO io, long int offset, int origin);
 int io_seek64(IO io, long long int offset, int origin);

@@ -812,6 +812,12 @@ const CommonContainerBase *container_base_genericmap_recipe() {
     return &container_base_genericmap_recipe_;
 }
 
+static Iterator genericset_collection_find(GenericSet set, const void *item, Iterator it) {
+    UNUSED(it)
+
+    return genericset_find(set, item);
+}
+
 static int genericset_collection_insert_move(GenericSet set, void *item, Iterator it) {
     UNUSED(it)
 
@@ -845,7 +851,7 @@ static const CommonContainerBase container_base_genericset_recipe_ = {
     .collection_next = (CollectionNext) genericset_next,
     .collection_get_key = NULL,
     .collection_get_value = (CollectionValue) genericset_value_of,
-    .collection_find.list = (CollectionListFind) genericset_find,
+    .collection_find.list = (CollectionListFind) genericset_collection_find,
     .collection_insert.list.move = (CollectionListInsertMove) genericset_collection_insert_move,
     .collection_insert.list.copy = (CollectionListInsertCopy) genericset_collection_insert_copy,
     .collection_erase = (CollectionErase) genericset_collection_erase,
@@ -967,7 +973,7 @@ static const CommonContainerBase container_base_variantset_recipe_ = {
     .collection_next = (CollectionNext) genericset_next,
     .collection_get_key = NULL,
     .collection_get_value = (CollectionValue) genericset_value_of,
-    .collection_find.list = (CollectionListFind) genericset_find,
+    .collection_find.list = (CollectionListFind) genericset_collection_find,
     .collection_insert.list.move = (CollectionListInsertMove) genericset_collection_insert_move,
     .collection_insert.list.copy = (CollectionListInsertCopy) genericset_collection_insert_copy,
     .collection_erase = (CollectionErase) genericset_collection_erase,
@@ -1044,7 +1050,7 @@ static const CommonContainerBase container_base_stringset_recipe_ = {
     .collection_next = (CollectionNext) stringset_next,
     .collection_get_key = NULL,
     .collection_get_value = (CollectionValue) stringset_value_of,
-    .collection_find.list = (CollectionListFind) genericset_find,
+    .collection_find.list = (CollectionListFind) genericset_collection_find,
     .collection_insert.list.move = (CollectionListInsertMove) genericset_collection_insert_move,
     .collection_insert.list.copy = (CollectionListInsertCopy) genericset_collection_insert_copy,
     .collection_erase = (CollectionErase) genericset_collection_erase,

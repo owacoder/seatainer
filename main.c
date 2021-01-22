@@ -271,6 +271,8 @@ void test_c_io() {
 
 int main(int argc, char **argv, const char **envp)
 {
+    char *percent_encoded_url = url_percent_encoded_from_utf8("https://owacoder.com");
+
     char buffer[100];
     srand(time(NULL));
 

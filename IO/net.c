@@ -47,12 +47,74 @@ struct UrlStruct {
     char url_buffer[];
 };
 
+#define URL_UNRESERVED "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
+
+typedef enum {
+    UrlScheme,
+    UrlUsername,
+    UrlPassword,
+    UrlHost,
+    UrlPort,
+    UrlPath,
+    UrlQuery,
+    UrlFragment
+} UrlState;
+
+static const char *url_acceptable_chars_for_state[] = {
+    /* 0, scheme */ URL_UNRESERVED "+.-",
+    /* 1, username */ URL_UNRESERVED "%-._~!$&'()*+,;=",
+    /* 2, password */ URL_UNRESERVED "%-._~!$&'()*+,;=:",
+    /* 3, hostname */ URL_UNRESERVED "%-._~!$&'()*+,;=",
+    /* 4, port */ "0123456789",
+    /* 5, path */ URL_UNRESERVED "%-._~!$&'()*+,;=:@",
+    /* 6, query */ URL_UNRESERVED "%-._~!$&'()*+,;=:@/?",
+    /* 7, fragment */ URL_UNRESERVED "%-._~!$&'()*+,;=:@/?"
+};
+
 void url_destroy(Url url) {
     FREE(url);
 }
 
 char *url_percent_encoded_from_utf8(const char *url) {
+    const char alphabet[] = "0123456789ABCDEF";
+    UrlState state = UrlScheme;
+    Buffer buffer;
 
+    buffer_init(&buffer);
+
+    for (const char *urlstep = url; *urlstep;) {
+        const char *urlstep_save = urlstep;
+        unsigned long codepoint = utf8next(urlstep, &urlstep);
+
+        /* TODO: modify state in loop here dependent on what part of the URL we're parsing */
+
+        if (codepoint > UTF8_MAX)
+            goto cleanup;
+        else if (codepoint > 0xff) {
+            unsigned size = utf8size(codepoint);
+
+            for (unsigned i = 0; i < size; ++i) {
+                if (buffer_append_chr(&buffer, '%') ||
+                    buffer_append_chr(&buffer, alphabet[(unsigned char) urlstep_save[i] >> 4]) ||
+                    buffer_append_chr(&buffer, alphabet[(unsigned char) urlstep_save[i] & 0xf]))
+                    goto cleanup;
+            }
+        } else if (strchr(url_acceptable_chars_for_state[state], (unsigned char) codepoint)) {
+            if (buffer_append_chr(&buffer, (unsigned char) codepoint))
+                goto cleanup;
+        } else {
+            if (buffer_append_chr(&buffer, '%') ||
+                buffer_append_chr(&buffer, alphabet[codepoint >> 4]) ||
+                buffer_append_chr(&buffer, alphabet[codepoint & 0xf]))
+                goto cleanup;
+        }
+    }
+
+    return buffer_take(&buffer);
+
+cleanup:
+    buffer_destroy(&buffer);
+    return NULL;
 }
 
 static int url_verify(const char *portion, const char *acceptableChars) {

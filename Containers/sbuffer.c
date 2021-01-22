@@ -41,7 +41,7 @@ int buffer_append_chr(Buffer *buf, int chr) {
         return CC_EINVAL;
 
     unsigned char c = chr;
-    return buffer_append_n(buf, &c, 1);
+    return buffer_append_n(buf, (const char *) &c, 1);
 }
 
 int buffer_append_n(Buffer *buf, const char *str, size_t len) {

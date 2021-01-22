@@ -10,6 +10,7 @@
 #include "utility.h"
 #include <float.h>
 #include <math.h>
+#include <ctype.h>
 
 #include <time.h>
 
@@ -342,7 +343,7 @@ int io_serialize_char(IO output, const void *data, const CommonContainerBase *ba
     if (generic_types_compatible_compare(base, container_base_char_recipe()) != 0)
         return CC_ENOTSUP;
 
-    int result = io_printf(output, "%.1s", data) < 0;
+    int result = io_printf(output, "%.1s", (const char *) data) < 0;
     if (result < 0)
         return io_error(output);
 
@@ -1017,7 +1018,7 @@ int io_parse_json_string(IO input, Binary *b) {
                 case 't': ch = '\t'; break;
                 case 'u': {
                     unsigned long codepoint = 0;
-                    unsigned char buf[16];
+                    char buf[16];
 
                     err = io_parse_json_unicode_escape(input, &codepoint);
                     if (err)
@@ -1148,7 +1149,6 @@ int io_parse_json(IO input, void *data, const CommonContainerBase *base, struct 
                     break;
                 }
                 case JsonNumber: {
-                    int negative = 0;
                     double d = 0.0;
                     signed long long i = 0;
                     unsigned long long u = 0;
@@ -1426,7 +1426,7 @@ object_cleanup:
             }
             has_item = 1;
 
-            int err = io_parser_nested_parse_and_list_insert(input, container, base, io_parse_json, type);
+            int err = io_parser_nested_parse_and_list_insert(input, container, base, (Parser) io_parse_json, type);
             if (err)
                 return err;
         }
@@ -1507,7 +1507,7 @@ object_cleanup:
 
             *((long *) data) = i? (long) i: (long) u;
         } else if (generic_types_compatible_compare(base, container_base_ulong_recipe()) == 0) {
-            if (!isnan(d) || u > ULONG_MAX || i > ULONG_MAX || i < 0)
+            if (!isnan(d) || u > ULONG_MAX || i < 0 || (unsigned long long) i > ULONG_MAX)
                 goto cleanup;
 
             *((unsigned long *) data) = i? (unsigned long) i: (unsigned long) u;

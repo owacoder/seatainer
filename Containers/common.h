@@ -8,6 +8,7 @@
 #define COMMON_H
 
 #include "../seaerror.h"
+#include <limits.h>
 
 /* Basic container operations needed:
  *  - Creation, initialization, and copying

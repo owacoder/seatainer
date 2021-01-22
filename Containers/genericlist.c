@@ -1194,7 +1194,7 @@ size_t genericlist_index_of(GenericList list, Iterator it) {
             size_left -= PTRDIFF_MAX / sizeof(void*);
         }
 
-        return ((void **) it - ptr_offset) + index_offset;
+        return ((const void **) it - ptr_offset) + index_offset;
     }
 }
 
