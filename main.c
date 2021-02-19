@@ -275,7 +275,7 @@ struct ThreadArgs {
 };
 
 int thread_main(struct ThreadArgs *args) {
-    for (int i = 0; i < 1000000; ++i) {
+    for (int i = 0; i < 100000; ++i) {
         io_printf(args->message_back, "Thread %d: %d Too long Too long Too long\n", args->thrd_id, i);
     }
 
@@ -290,7 +290,7 @@ void test_thread_buffer() {
     struct ThreadArgs a[5];
     Thread t[5];
 
-    IO thread_buf = io_open_thread_buffer(10, 5, 1);
+    IO thread_buf = io_open_thread_buffer(100000, 5, 1);
 
     for (size_t i = 0; i < sizeof(t)/sizeof(*t); ++i) {
         a[i].message_back = thread_buf;

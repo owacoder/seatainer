@@ -617,6 +617,8 @@ static int io_begin_read(IO io) {
 static void io_end_read(IO io) {
     if (io->type == IO_ThreadBuffer) {
         io->data.thread_buffer.is_reading = 0;
+
+        condition_variable_wakeall(&io->data.thread_buffer.consumer_condition);
     }
 }
 
@@ -645,7 +647,6 @@ static void io_end_write(IO io) {
         io->data.thread_buffer.is_writing = 0;
 
         condition_variable_wakeall(&io->data.thread_buffer.producer_condition);
-        condition_variable_wakeall(&io->data.thread_buffer.consumer_condition);
     }
 }
 
