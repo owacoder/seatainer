@@ -445,6 +445,31 @@ void mutex_destroy(Mutex mutex) {
     FREE(mutex);
 }
 
+void condition_variable_init(ConditionVariable *cv) {
+#if WINDOWS_OS
+    InitializeConditionVariable(cv);
+#endif
+}
+
+void condition_variable_sleep(ConditionVariable *cv, Mutex mutex) {
+#if WINDOWS_OS
+    struct MutexStruct *m = mutex;
+    SleepConditionVariableCS(cv, &m->critical_section, INFINITE);
+#endif
+}
+
+void condition_variable_wake(ConditionVariable *cv) {
+#if WINDOWS_OS
+    WakeConditionVariable(cv);
+#endif
+}
+
+void condition_variable_wakeall(ConditionVariable *cv) {
+#if WINDOWS_OS
+    WakeAllConditionVariable(cv);
+#endif
+}
+
 #if LINUX_OS
 struct ThreadStart {
     ThreadStartFn fn;
@@ -526,6 +551,39 @@ Thread thread_create_no_args(ThreadStartFnNoArgs fn) {
         return NULL;
 
     return thread_create((ThreadStartFn) thread_run_no_args, (void *) fn);
+}
+
+NativeThread thread_current() {
+#if LINUX_OS
+    return pthread_self();
+#elif WINDOWS_OS
+    return GetCurrentThread();
+#else
+    return 0;
+#endif
+}
+
+NativeThread thread_native_handle(Thread t) {
+#if LINUX_OS
+    struct ThreadStruct *ts = t;
+    return ts->thread;
+#elif WINDOWS_OS
+    return t;
+#else
+    UNUSED(t)
+    return 0;
+#endif
+}
+
+int thread_native_is_current(NativeThread t) {
+#if LINUX_OS
+    return pthread_equal(t, pthread_self());
+#elif WINDOWS_OS
+    return GetCurrentThread() == t;
+#else
+    UNUSED(t)
+    return 1;
+#endif
 }
 
 int thread_is_current(Thread t) {

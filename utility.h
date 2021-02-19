@@ -163,6 +163,22 @@ void mutex_unlock(Mutex mutex);
  */
 void mutex_destroy(Mutex mutex);
 
+#if WINDOWS_OS
+typedef CONDITION_VARIABLE ConditionVariable;
+typedef HANDLE NativeThread;
+#elif LINUX_OS
+typedef pthread_cond_t ConditionVariable;
+typedef pthread_t NativeThread;
+#else
+typedef int ConditionVariable;
+typedef int NativeThread;
+#endif
+
+void condition_variable_init(ConditionVariable *cv);
+void condition_variable_sleep(ConditionVariable *cv, Mutex mutex);
+void condition_variable_wake(ConditionVariable *cv);
+void condition_variable_wakeall(ConditionVariable *cv);
+
 typedef void *Thread;
 
 typedef int (*ThreadStartFn)(void *);
@@ -171,6 +187,10 @@ typedef int (*ThreadStartFnNoArgs)(void);
 Thread thread_create(ThreadStartFn fn, void *args);
 Thread thread_create_no_args(ThreadStartFnNoArgs fn);
 
+NativeThread thread_current();
+NativeThread thread_native_handle(Thread t);
+
+int thread_native_is_current(NativeThread t);
 int thread_is_current(Thread t);
 
 void thread_yield(void);

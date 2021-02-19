@@ -47,74 +47,12 @@ struct UrlStruct {
     char url_buffer[];
 };
 
-#define URL_UNRESERVED "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
-
-typedef enum {
-    UrlScheme,
-    UrlUsername,
-    UrlPassword,
-    UrlHost,
-    UrlPort,
-    UrlPath,
-    UrlQuery,
-    UrlFragment
-} UrlState;
-
-static const char *url_acceptable_chars_for_state[] = {
-    /* 0, scheme */ URL_UNRESERVED "+.-",
-    /* 1, username */ URL_UNRESERVED "%-._~!$&'()*+,;=",
-    /* 2, password */ URL_UNRESERVED "%-._~!$&'()*+,;=:",
-    /* 3, hostname */ URL_UNRESERVED "%-._~!$&'()*+,;=",
-    /* 4, port */ "0123456789",
-    /* 5, path */ URL_UNRESERVED "%-._~!$&'()*+,;=:@",
-    /* 6, query */ URL_UNRESERVED "%-._~!$&'()*+,;=:@/?",
-    /* 7, fragment */ URL_UNRESERVED "%-._~!$&'()*+,;=:@/?"
-};
-
 void url_destroy(Url url) {
     FREE(url);
 }
 
 char *url_percent_encoded_from_utf8(const char *url) {
-    const char alphabet[] = "0123456789ABCDEF";
-    UrlState state = UrlScheme;
-    Buffer buffer;
 
-    buffer_init(&buffer);
-
-    for (const char *urlstep = url; *urlstep;) {
-        const char *urlstep_save = urlstep;
-        unsigned long codepoint = utf8next(urlstep, &urlstep);
-
-        /* TODO: modify state in loop here dependent on what part of the URL we're parsing */
-
-        if (codepoint > UTF8_MAX)
-            goto cleanup;
-        else if (codepoint > 0xff) {
-            unsigned size = utf8size(codepoint);
-
-            for (unsigned i = 0; i < size; ++i) {
-                if (buffer_append_chr(&buffer, '%') ||
-                    buffer_append_chr(&buffer, alphabet[(unsigned char) urlstep_save[i] >> 4]) ||
-                    buffer_append_chr(&buffer, alphabet[(unsigned char) urlstep_save[i] & 0xf]))
-                    goto cleanup;
-            }
-        } else if (strchr(url_acceptable_chars_for_state[state], (unsigned char) codepoint)) {
-            if (buffer_append_chr(&buffer, (unsigned char) codepoint))
-                goto cleanup;
-        } else {
-            if (buffer_append_chr(&buffer, '%') ||
-                buffer_append_chr(&buffer, alphabet[codepoint >> 4]) ||
-                buffer_append_chr(&buffer, alphabet[codepoint & 0xf]))
-                goto cleanup;
-        }
-    }
-
-    return buffer_take(&buffer);
-
-cleanup:
-    buffer_destroy(&buffer);
-    return NULL;
 }
 
 static int url_verify(const char *portion, const char *acceptableChars) {
@@ -475,6 +413,9 @@ struct NetContext {
 static int net_upgrade_to_ssl(const char *host, void *userdata, IO io) {
     struct NetContext *context = userdata;
 
+    if (io_flush(io))
+        return io_error(io);
+
     /* Build a context, if no context is assigned by the user */
     if (context->ctx == NULL) {
         context->ownsCtx = 1;
@@ -527,7 +468,25 @@ static int net_upgrade_to_ssl(const char *host, void *userdata, IO io) {
         return 0;
     }
 
+    io_set_error(io, err < 0? CC_EPIPE: CC_EPROTO);
     return err < 0? CC_EPIPE: CC_EPROTO;
+}
+
+static int net_downgrade_from_ssl(void *userdata, IO io) {
+    UNUSED(io)
+    struct NetContext *context = userdata;
+
+    if (io_flush(io))
+        return io_error(io);
+
+    int result = SSL_shutdown(context->socket);
+    if (result == 0)
+        result = SSL_shutdown(context->socket);
+
+    if (result < 0)
+        return SSL_get_error(context->socket, result) == SSL_ERROR_SYSCALL? CC_EPIPE: CC_EPROTO;
+
+    return 0;
 }
 #else
 struct NetContext {
@@ -818,24 +777,24 @@ cleanup:
 }
 
 static int net_close(void *userdata, IO io) {
-    UNUSED(io)
     struct NetContext *context = userdata;
 
     int result = 0;
 
 #ifdef CC_INCLUDE_SSL
-    if (io_error(io) != CC_EPROTO) {
-        result = SSL_shutdown(context->socket);
+    if (CC_SOCKET_TYPE(io) == CC_SSL_SOCKET) {
+        if (io_error(io) != CC_EPROTO) {
+            result = SSL_shutdown(context->socket);
 
-        /* If result == 0, the server didn't send a close_notify yet, but we don't care because we're just going to shutdown anyway */
-        if (result < 0)
-            result = CC_EPROTO;
-        else
-            result = 0;
-    }
+            /* If result == 0, the server didn't send a close_notify yet, but we don't care because we're just going to shutdown anyway */
+            if (result < 0)
+                result = SSL_get_error(context->socket, result) == SSL_ERROR_SYSCALL? CC_EPIPE: CC_EPROTO;
+            else
+                result = 0;
+        }
 
-    if (context->socket)
         SSL_free(context->socket);
+    }
 
     if (context->ownsCtx)
         SSL_CTX_free(context->ctx);
@@ -863,6 +822,39 @@ static unsigned long net_flags(void *userdata, IO io) {
     return IO_FLAG_SUPPORTS_NO_STATE_SWITCH;
 }
 
+static int net_shutdown(void *userdata, IO io, int how) {
+    struct NetContext *context = userdata;
+
+#ifdef CC_INCLUDE_SSL
+    if (CC_SOCKET_TYPE(io) == CC_SSL_SOCKET) {
+        if (how != IO_SHUTDOWN_READWRITE) {
+            io_set_error(io, CC_ENOTSUP);
+            return EOF;
+        }
+
+        int err = net_downgrade_from_ssl(userdata, io);
+        if (err) {
+            io_set_error(io, err);
+            return EOF;
+        }
+
+        SSL_free(context->socket);
+        CC_SOCKET_TYPE(io) = CC_TCP_SOCKET;
+    }
+#endif
+
+    if (shutdown(context->fd, how)) {
+#if WINDOWS_OS
+        io_set_error(io, WSAGetLastError());
+#else
+        io_set_error(io, errno);
+#endif
+        return EOF;
+    }
+
+    return 0;
+}
+
 static const char *net_what(void *userdata, IO io) {
     UNUSED(userdata)
 
@@ -887,6 +879,7 @@ static const struct InputOutputDeviceCallbacks net_callbacks = {
     .seek = NULL,
     .seek64 = NULL,
     .flags = net_flags,
+    .shutdown = net_shutdown,
     .what = net_what
 };
 

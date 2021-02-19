@@ -269,9 +269,57 @@ void test_c_io() {
             printf("An error occurred of some sort\n");
 }
 
+struct ThreadArgs {
+    IO message_back;
+    int thrd_id;
+};
+
+int thread_main(struct ThreadArgs *args) {
+    for (int i = 0; i < 1000000; ++i) {
+        io_printf(args->message_back, "Thread %d: %d Too long Too long Too long\n", args->thrd_id, i);
+    }
+
+    io_printf(args->message_back, "Thread %d done\n", args->thrd_id);
+
+    io_shutdown(args->message_back, IO_SHUTDOWN_WRITE);
+
+    return 0;
+}
+
+void test_thread_buffer() {
+    struct ThreadArgs a[5];
+    Thread t[5];
+
+    IO thread_buf = io_open_thread_buffer(10, 5, 1);
+
+    for (size_t i = 0; i < sizeof(t)/sizeof(*t); ++i) {
+        a[i].message_back = thread_buf;
+        a[i].thrd_id = i;
+        t[i] = thread_create(thread_main, &a[i]);
+    }
+
+    // io_setvbuf(io_stdout, NULL, _IONBF, 0);
+    // io_shutdown(thread_buf, IO_SHUTDOWN_READ);
+    io_copy(thread_buf, io_stdout);
+    io_flush(io_stdout);
+
+    for (size_t i = 0; i < sizeof(t)/sizeof(*t); ++i) {
+        int result;
+        thread_join(t[i], &result);
+        printf("Thread %zu returned %d\n", i, result);
+    }
+
+    printf("Thread buffer size: %zu\n", io_underlying_buffer_size(thread_buf));
+    printf("Thread buffer capacity: %zu\n", io_underlying_buffer_capacity(thread_buf));
+    printf("Error: %s\n", error_description(io_error(thread_buf)));
+
+    io_close(thread_buf);
+}
+
 int main(int argc, char **argv, const char **envp)
 {
-    char *percent_encoded_url = url_percent_encoded_from_utf8("https://owacoder.com");
+    test_thread_buffer();
+    return 0;
 
     char buffer[100];
     srand(time(NULL));

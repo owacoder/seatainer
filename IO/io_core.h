@@ -199,6 +199,19 @@ struct InputOutputDeviceCallbacks {
      */
     void (*clearerr)(void *userdata, IO io);
 
+    /** @brief Requests shutdown of one or more device channels.
+     *
+     * This callback is a simple passthrough of `io_shutdown()` and any calls to `io_shutdown()` will fail with `CC_ENOTSUP` if this function is not defined.
+     *
+     * The callback must set the `io` parameter's error code with `io_set_error()`.
+     *
+     * @param The userdata stored in @p io.
+     * @param io The IO device being acted on. Reads from or writes to the device are allowed to finalize the stream.
+     * @param how Which channels to shutdown on the device, one of IO_SHUTDOWN_READ, IO_SHUTDOWN_WRITE, or IO_SHUTDOWN_READWRITE.
+     * @return Zero on success, or non-zero on error.
+     */
+    int (*shutdown)(void *userdata, IO io, int how);
+
     /** @brief Requests the current position of the read/write pointer.
      *
      * This callback must not call a seek function, but can call any other function.
@@ -338,6 +351,28 @@ IO io_get_stderr(void);
  * @param io The device to clear error flags on.
  */
 void io_clearerr(IO io);
+
+#if LINUX_OS
+# include <sys/socket.h>
+# define IO_SHUTDOWN_READ SHUT_RD
+# define IO_SHUTDOWN_WRITE SHUT_WR
+# define IO_SHUTDOWN_READWRITE SHUT_RDWR
+#elif WINDOWS_OS
+# define IO_SHUTDOWN_READ SD_RECEIVE
+# define IO_SHUTDOWN_WRITE SD_SEND
+# define IO_SHUTDOWN_READWRITE SD_BOTH
+#else
+# define IO_SHUTDOWN_READ 0
+# define IO_SHUTDOWN_WRITE 1
+# define IO_SHUTDOWN_READWRITE 2
+#endif
+/** @brief Shuts down read and/or write channels on a device.
+ *
+ * @param io The device to shutdown.
+ * @param how Which channels to shutdown. One of IO_SHUTDOWN_READ, IO_SHUTDOWN_WRITE, or IO_SHUTDOWN_READWRITE
+ * @return 0 on success, non-zero on failure. Call io_error() to get the actual error.
+ */
+int io_shutdown(IO io, int how);
 
 /** @brief Closes a device.
  *
@@ -599,14 +634,20 @@ int io_getpos(IO io, IO_Pos *pos);
  */
 char *io_gets(char *str, int num, IO io);
 
-/** @brief Opens a file with the provided mode.
+/** @brief Opens a file with the provided mode using the C FILE object.
  *
- * @param The name of the local file to open.
+ * @param filename The name of the local file to open.
  * @param mode The mode with which to open the file.
  * @return A new IO device referencing the opened file, or NULL if an error occurred.
  */
 IO io_open(const char *filename, const char *mode);
-/* If `mode` contains "@ncp" on Windows, the [n]ative [c]ode [p]age is used, instead of UTF-8 */
+
+/** @brief Opens a file with the provided mode natively, using OS-specific file descriptors
+ *
+ * @param filename The name of the local file to open.
+ * @param mode The mode with which to open the file. If `mode` contains "@ncp" on Windows, the [n]ative [c]ode [p]age is used, instead of UTF-8
+ * @return A new IO device referencing the opened native file, or NULL if an error occurred.
+ */
 IO io_open_native(const char *filename, const char *mode);
 
 #if WINDOWS_OS
@@ -617,13 +658,71 @@ typedef int IONativeFileHandle;
 #define IO_INVALID_FILE_HANDLE (-1)
 #endif
 
+/** @brief Creates an IO device on top of a native OS file descriptor
+ *
+ * @param descriptor The native OS file descriptor to use for underlying IO.
+ * @param mode The mode with which to open the file.
+ * @return A new IO device referencing the opened native file IO device, or NULL if an error occurred.
+ */
 IO io_open_native_file(IONativeFileHandle descriptor, const char *mode);
+
+/** @brief Creates an IO device on top of the C FILE object
+ *
+ * No mode can be specified because there is no portable way to determine what mode a FILE device was opened with. "rwb" is assumed.
+ *
+ * @param file The C FILE object to use for underlying IO
+ * @return A new IO device referencing the opened native file IO device, or NULL if an error occurred.
+ */
 IO io_open_file(FILE *file);
 IO io_open_empty(void); /* No input is read (i.e. the first read returns EOF) and all writes fail to this device */
+
+/** @brief Creates an IO device on top of a C-style string.
+ *
+ * Writing to a C-style string device is not allowed and attempts to create a writable IO device will this function will fail.
+ *
+ * @param str The C-style string to use as the underlying buffer to read from. This buffer must be valid for the lifetime of the IO device as the data is not copied.
+ * @param mode The mode with which to open the device. The mode cannot include writable attributes.
+ * @return A new IO device referencing the opened C-style string device, or NULL if an error occurred.
+ */
 IO io_open_cstring(const char *str, const char *mode);
+
+/** @brief Creates an IO device on top of a const buffer.
+ *
+ * Writing to a const buffer device is not allowed and attempts to create a writable IO device will this function will fail.
+ *
+ * @param str The const buffer to use as the underlying buffer to read from. This buffer must be valid for the lifetime of the IO device as the data is not copied.
+ * @param mode The mode with which to open the device. The mode cannot include writable attributes.
+ * @return A new IO device referencing the opened const buffer device, or NULL if an error occurred.
+ */
 IO io_open_const_buffer(const char *buf, size_t size, const char *mode);
+
+/** @brief Creates an IO device on top of a writable statically-sized buffer.
+ *
+ * Writing to a statically-sized buffer succeeds unless the write would overrun the end of the buffer.
+ *
+ * @param str The buffer to use as the underlying buffer to read from. This buffer must be valid for the lifetime of the IO device as the data is not copied.
+ * @param mode The mode with which to open the device.
+ * @return A new IO device referencing the opened buffer device, or NULL if an error occurred.
+ */
 IO io_open_buffer(char *buf, size_t size, const char *mode);
-IO io_open_minimal_buffer(const char *mode);
+
+/** @brief Creates a thread-buffer IO device.
+ *
+ * This is a input -> output buffer that is thread safe and can be used from multiple producers and consumers at once.
+ * The size of the buffer can be set on construction, or allowed to grow unbounded dynamically.
+ * Growing dynamically could be useful if you don't want to ever block on writes and it's not likely that the consumer would get behind.
+ *
+ * If the thread_buffer has a fixed size, writes will block until there is enough space to write the rest of the data.
+ * If the thread_buffer has no size set, writes will never block and will grow the internal buffer accordingly.
+ *
+ * Reads will block until the data is available, or until EOF, which occurs when all the producers have closed their write connection to the thread_buffer with io_shutdown.
+ *
+ * @param buffer_size The fixed size of the underlying thread buffer. If set to 0, the size is allowed to grow dynamically.
+ * @param initial_producers The initial number of producers (usually 1 per write thread) for this IO device.
+ * @param initial_consumers The initial number of consumers (usually 1 per read thread) for this IO device.
+ * @return A new IO device referencing the opened thread buffer device, or NULL if an error occurred.
+ */
+IO io_open_thread_buffer(size_t buffer_size, size_t initial_producers, size_t initial_consumers /* TODO: new parameter: int close_on_last_shutdown */);
 IO io_open_dynamic_buffer(const char *mode);
 IO io_open_custom(const struct InputOutputDeviceCallbacks *custom, void *userdata, const char *mode);
 /** @brief Reads all data from `in` and pushes it to `out`, one character at a time.
@@ -802,11 +901,7 @@ long long io_write_timeout(IO io);
 IO io_reopen(const char *filename, const char *mode, IO io);
 
 int io_vscanf(IO io, const char *fmt, va_list args);
-int io_scanf(IO io, const char *fmt, ...)
-#if !WINDOWS_OS && (GCC_COMPILER | CLANG_COMPILER)
-__attribute__((format(scanf, 2, 3)))
-#endif
-;
+int io_scanf(IO io, const char *fmt, ...);
 
 int io_seek(IO io, long int offset, int origin);
 int io_seek64(IO io, long long int offset, int origin);

@@ -337,8 +337,15 @@ struct IODynamicBufferState {
     size_t buffer_pos;
 };
 
+/* IO_FLAG_APPEND is used to determine if the buffer is growable. If set, the buffer is growable, if not, the buffer is fixed-size */
 struct IOThreadBufferState {
     Mutex mutex;
+    size_t producers; /* Number of writer threads to this thread buffer. If this number ever is zero, EOF has been reached after the buffer is read */
+    size_t consumers; /* Number of reader threads to this thread buffer. If this number ever is zero, the pipe is broken for any further data written */
+    ConditionVariable producer_condition;
+    ConditionVariable consumer_condition;
+    int is_reading; /* Non-zero if `reader` references an actual thread */
+    int is_writing; /* Non-zero if `writer` references an actual thread */
     unsigned char *buffer; /* Circular buffer for efficient thread communication */
     size_t buffer_pos; /* Pointer to first character in buffer */
     size_t buffer_endpos; /* Pointer to one-after the last character in buffer. If equal to buffer_pos, buffer is empty */
@@ -597,7 +604,20 @@ static int io_begin_read(IO io) {
 
     io->flags |= IO_FLAG_HAS_JUST_READ;
 
+    if (io->type == IO_ThreadBuffer) {
+        while (io->data.thread_buffer.is_reading)
+            condition_variable_sleep(&io->data.thread_buffer.consumer_condition, io->data.thread_buffer.mutex);
+
+        io->data.thread_buffer.is_reading = 1;
+    }
+
     return 0;
+}
+
+static void io_end_read(IO io) {
+    if (io->type == IO_ThreadBuffer) {
+        io->data.thread_buffer.is_reading = 0;
+    }
 }
 
 static int io_begin_write(IO io) {
@@ -610,7 +630,23 @@ static int io_begin_write(IO io) {
 
     io->flags |= IO_FLAG_HAS_JUST_WRITTEN;
 
+    if (io->type == IO_ThreadBuffer) {
+        while (io->data.thread_buffer.is_writing)
+            condition_variable_sleep(&io->data.thread_buffer.producer_condition, io->data.thread_buffer.mutex);
+
+        io->data.thread_buffer.is_writing = 1;
+    }
+
     return 0;
+}
+
+static void io_end_write(IO io) {
+    if (io->type == IO_ThreadBuffer) {
+        io->data.thread_buffer.is_writing = 0;
+
+        condition_variable_wakeall(&io->data.thread_buffer.producer_condition);
+        condition_variable_wakeall(&io->data.thread_buffer.consumer_condition);
+    }
 }
 
 static void io_lock(IO io) {
@@ -689,16 +725,22 @@ static int io_close_without_destroying(IO io) {
             break;
 #endif
         case IO_SizedBuffer:
-            if (io->flags & IO_FLAG_OWNS_BUFFER)
+            if (io->flags & IO_FLAG_OWNS_BUFFER) {
                 FREE(io->data.sized_buffer.buffer);
+                io->flags &= ~IO_FLAG_OWNS_BUFFER;
+            }
             break;
         case IO_ThreadBuffer:
-            if (io->flags & IO_FLAG_OWNS_BUFFER)
+            if (io->flags & IO_FLAG_OWNS_BUFFER) {
                 FREE(io->data.thread_buffer.buffer);
+                io->flags &= ~IO_FLAG_OWNS_BUFFER;
+            }
             break;
         case IO_DynamicBuffer:
-            if (io->flags & IO_FLAG_OWNS_BUFFER)
+            if (io->flags & IO_FLAG_OWNS_BUFFER) {
                 FREE(io->data.dynamic_buffer.buffer);
+                io->flags &= ~IO_FLAG_OWNS_BUFFER;
+            }
             break;
         case IO_Custom:
             if (io->data.custom.callbacks->close == NULL)
@@ -902,7 +944,7 @@ static size_t io_thread_buffer_size(IO io) {
 
 /* Total unused space in the circular thread buffer */
 static size_t io_thread_buffer_empty_size(IO io) {
-    return io->data.thread_buffer.buffer_capacity - io_thread_buffer_size(io);
+    return io->data.thread_buffer.buffer_capacity - io_thread_buffer_size(io) - !!io->data.thread_buffer.buffer_capacity;
 }
 
 /* Maximum unused contiguous space after buffer_endpos in the circular thread buffer */
@@ -934,17 +976,17 @@ size_t io_underlying_buffer_capacity(IO io) {
     switch (io->type) {
         default: return 0;
         case IO_SizedBuffer: return io->data.sized_buffer.buffer_size;
-        case IO_ThreadBuffer: io_lock(io); return io_unlockz(io, io->data.thread_buffer.buffer_capacity);
+        case IO_ThreadBuffer: io_lock(io); return io_unlockz(io, io->data.thread_buffer.buffer_capacity - (io->data.thread_buffer.buffer_capacity? 1: 0));
         case IO_DynamicBuffer: return io->data.dynamic_buffer.buffer_capacity;
     }
 }
 
-/* Attempts to grow the dynamic buffer stored in `io` to at least `size` capacity */
-/* Returns 0 on success, EOF on failure */
+/* Attempts to grow the dynamic buffer stored in `io` to hold at least `size_of_data_to_append` more bytes */
+/* Returns 0 on success, an error that occurred on failure */
 static int io_grow_threadbuf(IO io, size_t size_of_data_to_append) {
-    size_of_data_to_append += 1;
-
     if (io_thread_buffer_empty_size(io) < size_of_data_to_append) {
+        size_of_data_to_append += 1; /* Add one because there's always an extra byte in the circular buffer */
+
         const size_t currently_used = io_thread_buffer_size(io);
         const size_t new_size = MAX(io->data.thread_buffer.buffer_capacity + (io->data.thread_buffer.buffer_capacity >> 1), currently_used + size_of_data_to_append);
 
@@ -1197,7 +1239,7 @@ int io_slow_copy(IO in, IO out) {
 int io_copy(IO in, IO out) {
     const size_t size = IO_COPY_SIZE;
     char data[IO_COPY_SIZE];
-    size_t read = size;
+    size_t read = 0;
     int err = 0;
 
     do {
@@ -1239,7 +1281,10 @@ int io_getc(IO io) {
     if (io_begin_read(io))
         return io_unlocki(io, EOF);
 
-    return io_unlocki(io, io_getc_internal(io));
+    int result = io_getc_internal(io);
+
+    io_end_read(io);
+    return io_unlocki(io, result);
 }
 
 int io_match_n_internal(IO io, const char *str, size_t len) {
@@ -1258,7 +1303,10 @@ int io_match_n(IO io, const char *str, size_t len) {
     if (io_begin_read(io))
         return io_unlocki(io, EOF);
 
-    return io_unlocki(io, io_match_n_internal(io, str, len));
+    int result = io_match_n_internal(io, str, len);
+
+    io_end_read(io);
+    return io_unlocki(io, result);
 }
 
 int io_match(IO io, const char *str) {
@@ -1284,6 +1332,7 @@ int io_getpos(IO io, IO_Pos *pos) {
 char *io_gets(char *str, int num, IO io) {
     char *oldstr = str;
     int oldnum = num;
+    char *result = NULL;
 
     io_lock(io);
 
@@ -1291,9 +1340,9 @@ char *io_gets(char *str, int num, IO io) {
         return io_unlockp(io, NULL);
 
     switch (io->type) {
-        case IO_Empty: io->flags |= IO_FLAG_EOF; return NULL;
+        case IO_Empty: io->flags |= IO_FLAG_EOF; break;
         case IO_File:
-        case IO_OwnFile: return fgets(str, num, io->data.file.fptr);
+        case IO_OwnFile: result = fgets(str, num, io->data.file.fptr); break;
         default:
         {
             int ch = 0;
@@ -1302,14 +1351,17 @@ char *io_gets(char *str, int num, IO io) {
                 *str++ = (char) ch;
 
             if (ch == EOF && num == oldnum - 1)
-                return io_unlockp(io, NULL);
+                break;
 
             if (oldnum > 0)
                 *str = 0;
 
-            return io_unlockp(io, io_error_internal(io)? NULL: oldstr);
+            result = io_error_internal(io)? NULL: oldstr;
         }
     }
+
+    io_end_read(io);
+    return io_unlockp(io, result);
 }
 
 static int io_set_flags_for_mode(IO io, const char *mode, unsigned int *flags_) {
@@ -1336,6 +1388,60 @@ static int io_set_flags_for_mode(IO io, const char *mode, unsigned int *flags_) 
         *flags_ = flags;
 
     return 0;
+}
+
+int io_shutdown_internal(IO io, int how) {
+    switch (io->type) {
+        default:
+            io_set_error_internal(io, CC_ENOTSUP);
+            return EOF;
+        case IO_Custom:
+            if (io->data.custom.callbacks->shutdown != NULL && io->data.custom.callbacks->shutdown(io->data.custom.ptr, io, how)) {
+                io->flags |= IO_FLAG_ERROR;
+                return EOF;
+            }
+            break;
+        case IO_ThreadBuffer:
+            switch (how) {
+                case IO_SHUTDOWN_WRITE:
+                    if (io->data.thread_buffer.producers == 0)
+                        return CC_EINVAL;
+
+                    --io->data.thread_buffer.producers;
+
+                    condition_variable_wakeall(&io->data.thread_buffer.consumer_condition);
+
+                    break;
+                case IO_SHUTDOWN_READ:
+                    if (io->data.thread_buffer.consumers == 0)
+                        return CC_EINVAL;
+
+                    --io->data.thread_buffer.consumers;
+
+                    condition_variable_wakeall(&io->data.thread_buffer.producer_condition);
+                    break;
+                case IO_SHUTDOWN_READWRITE:
+                    if (io->data.thread_buffer.producers == 0 ||
+                        io->data.thread_buffer.consumers == 0)
+                        return CC_EINVAL;
+
+                    --io->data.thread_buffer.producers;
+                    --io->data.thread_buffer.consumers;
+
+                    condition_variable_wakeall(&io->data.thread_buffer.consumer_condition);
+                    condition_variable_wakeall(&io->data.thread_buffer.producer_condition);
+                    break;
+            }
+
+            break;
+    }
+
+    return 0;
+}
+
+int io_shutdown(IO io, int how) {
+    io_lock(io);
+    return io_unlocki(io, io_shutdown_internal(io, how));
 }
 
 IO io_open(const char *filename, const char *mode) {
@@ -1564,15 +1670,23 @@ IO io_open_buffer(char *buf, size_t size, const char *mode) {
     return io;
 }
 
-IO io_open_thread_buffer() {
+IO io_open_thread_buffer(size_t buffer_size, size_t initial_producers, size_t initial_consumers) {
     IO io = io_alloc(IO_ThreadBuffer);
-    if (io == NULL || (io->data.thread_buffer.mutex = mutex_create_recursive()) == NULL) {
+    if (io == NULL || (io->data.thread_buffer.mutex = mutex_create()) == NULL) {
         io_destroy(io);
         return NULL;
     }
 
     io->data.thread_buffer.buffer = NULL;
+    io->data.thread_buffer.producers = initial_producers;
+    io->data.thread_buffer.consumers = initial_consumers;
     io->flags |= IO_FLAG_READABLE | IO_FLAG_WRITABLE | IO_FLAG_SUPPORTS_NO_STATE_SWITCH;
+    if (!buffer_size)
+        io->flags |= IO_FLAG_APPEND;
+    else if (io_grow_threadbuf(io, buffer_size)) {
+        io_destroy(io);
+        return NULL;
+    }
 
     return io;
 }
@@ -1651,7 +1765,10 @@ int io_putc(int ch, IO io) {
     if (io_begin_write(io))
         return io_unlocki(io, EOF);
 
-    return io_unlocki(io, io_putc_internal(ch, io));
+    int result = io_putc_internal(ch, io);
+
+    io_end_write(io);
+    return io_unlocki(io, result);
 }
 
 int io_putc_n(int ch, size_t count, IO io) {
@@ -1660,7 +1777,10 @@ int io_putc_n(int ch, size_t count, IO io) {
     if (io_begin_write(io))
         return io_unlocki(io, EOF);
 
-    return io_unlocki(io, io_putc_n_internal(ch, count, io));
+    int result = io_putc_n_internal(ch, count, io);
+
+    io_end_write(io);
+    return io_unlocki(io, result);
 }
 
 int io_puts(const char *str, IO io) {
@@ -3762,6 +3882,7 @@ cleanup:
 
     positional_argument_list_free(&positional_args_list);
 
+    io_end_write(io);
     return io_unlocki(io, result);
 }
 
@@ -3932,7 +4053,7 @@ static size_t io_read_internal_helper(void *ptr, size_t size, size_t count, IO i
 
                 /* Pull greater-than-buffer-size chunk directly into output, skipping the buffer entirely */
                 if (max >= io->data.native_file.buffer_size)
-                    return (read + io_native_unbuffered_read(cptr, 1, max, io)) / size;
+                    return (read / size) + io_native_unbuffered_read(cptr, 1, max, io);
                 else {
                     /* Refill read buffer */
                     /* However, be careful since io_native_unbuffered_read() can set EOF long before we actually read to it
@@ -3990,11 +4111,20 @@ static size_t io_read_internal_helper(void *ptr, size_t size, size_t count, IO i
             unsigned char *cptr = ptr;
             size_t max = size*count;
             size_t avail = io_thread_buffer_size(io);
-            size_t contiguous = io_thread_buffer_contiguous_stored_at_end(io);
 
             /* not enough to cover reading the requested blocks */
-            if (avail < max)
-                max = avail / size * size;
+            for (; avail < max; avail = io_thread_buffer_size(io)) {
+                if (io->data.thread_buffer.producers == 0 || (io->flags & IO_FLAG_EOF)) { /* Nobody to write to us */
+                    io->flags |= IO_FLAG_EOF;
+
+                    max = avail - avail % size;
+                    break;
+                }
+
+                condition_variable_sleep(&io->data.thread_buffer.consumer_condition, io->data.thread_buffer.mutex);
+            }
+
+            const size_t contiguous = io_thread_buffer_contiguous_stored_at_end(io);
 
             if (max <= contiguous) {
                 memcpy(cptr, io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_pos, max);
@@ -4006,6 +4136,8 @@ static size_t io_read_internal_helper(void *ptr, size_t size, size_t count, IO i
 
                 io->data.thread_buffer.buffer_pos = max - contiguous;
             }
+
+            condition_variable_wakeall(&io->data.thread_buffer.producer_condition);
 
             return max / size;
         }
@@ -4085,7 +4217,10 @@ size_t io_read(void *ptr, size_t size, size_t count, IO io) {
     if (io_begin_read(io))
         return io_unlockz(io, 0);
 
-    return io_unlockz(io, io_read_internal(ptr, size, count, io));
+    size_t result = io_read_internal(ptr, size, count, io);
+
+    io_end_read(io);
+    return io_unlockz(io, result);
 }
 
 IO io_reopen(const char *filename, const char *mode, IO io) {
@@ -4135,7 +4270,7 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
     va_copy(args_copy.args, args);
 
     if (io_begin_read(io))
-        goto cleanup;
+        goto cleanup_without_ending_read;
 
     for (; *fmt; ++fmt) {
         unsigned char chr = *fmt;
@@ -4445,6 +4580,9 @@ int io_vscanf(IO io, const char *fmt, va_list args) {
     }
 
 cleanup:
+    io_end_read(io);
+
+cleanup_without_ending_read:
     va_end(args_copy.args);
 
     return io_unlocki(io, bytes == 0? EOF: items);
@@ -5040,7 +5178,7 @@ static size_t io_write_internal_helper(const void *ptr, size_t size, size_t coun
                 /* Push greater-than-buffer-size chunk directly into output, skipping the buffer entirely */
                 if (max >= io->data.native_file.buffer_size) {
                     io->data.native_file.buffer_bytes = 0;
-                    return (initialAvailable + io_native_unbuffered_write(cptr, 1, max, io)) / size;
+                    return (initialAvailable / size) + io_native_unbuffered_write(cptr, 1, max, io);
                 }
                 else {
                     memcpy(io->data.native_file.buffer, cptr, max);
@@ -5073,24 +5211,70 @@ static size_t io_write_internal_helper(const void *ptr, size_t size, size_t coun
         case IO_ThreadBuffer: {
             const char *cptr = ptr;
             size_t max = size*count;
-            const size_t contiguous_to_end = io_thread_buffer_contiguous_empty_at_end(io);
 
-            int err = io_grow_threadbuf(io, max);
-            if (err) {
-                io_set_error_internal(io, err);
-                return 0;
-            }
+            if (io->flags & IO_FLAG_APPEND) {
+                /* Pipe is broken if no consumers present to read */
+                if (io->data.thread_buffer.consumers == 0) {
+                    io_set_error_internal(io, CC_EPIPE);
+                    return 0;
+                }
 
-            if (contiguous_to_end >= max) {
-                memcpy(io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_endpos, cptr, max);
-                io->data.thread_buffer.buffer_endpos += size;
-                io->data.thread_buffer.buffer_endpos %= io->data.thread_buffer.buffer_capacity;
+                /* Dynamically growable thread buffer, just grow and append */
+                int err = io_grow_threadbuf(io, max);
+                if (err) {
+                    io_set_error_internal(io, err);
+                    return 0;
+                }
+
+                const size_t contiguous_to_end = io_thread_buffer_contiguous_empty_at_end(io);
+
+                if (contiguous_to_end >= max) {
+                    memcpy(io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_endpos, cptr, max);
+                    io->data.thread_buffer.buffer_endpos += max;
+                    io->data.thread_buffer.buffer_endpos %= io->data.thread_buffer.buffer_capacity;
+                } else {
+                    memcpy(io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_endpos, cptr, contiguous_to_end);
+                    max -= contiguous_to_end;
+
+                    memcpy(io->data.thread_buffer.buffer, cptr + contiguous_to_end, max);
+                    io->data.thread_buffer.buffer_endpos = max;
+                }
             } else {
-                memcpy(io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_endpos, cptr, contiguous_to_end);
-                max -= contiguous_to_end;
+                /* Fixed size thread buffer. Writes have to wait until buffer has enough space before inserting */
+                while (max) {
+                    size_t avail;
 
-                memcpy(io->data.thread_buffer.buffer, cptr + contiguous_to_end, max);
-                io->data.thread_buffer.buffer_endpos = max;
+                    while ((avail = io_thread_buffer_empty_size(io)) == 0) {
+                        /* Pipe is broken if no consumers present to read */
+                        if (io->data.thread_buffer.consumers == 0) {
+                            io_set_error_internal(io, CC_EPIPE);
+                            return 0;
+                        }
+
+                        condition_variable_sleep(&io->data.thread_buffer.producer_condition, io->data.thread_buffer.mutex);
+                    }
+
+                    if (avail > max)
+                        avail = max;
+
+                    const size_t contiguous_to_end = io_thread_buffer_contiguous_empty_at_end(io);
+
+                    if (contiguous_to_end >= avail) {
+                        memcpy(io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_endpos, cptr, avail);
+                        io->data.thread_buffer.buffer_endpos += avail;
+                        io->data.thread_buffer.buffer_endpos %= io->data.thread_buffer.buffer_capacity;
+                    } else {
+                        memcpy(io->data.thread_buffer.buffer + io->data.thread_buffer.buffer_endpos, cptr, contiguous_to_end);
+
+                        memcpy(io->data.thread_buffer.buffer, cptr + contiguous_to_end, avail - contiguous_to_end);
+                        io->data.thread_buffer.buffer_endpos = avail - contiguous_to_end;
+                    }
+
+                    cptr += avail;
+                    max -= avail;
+
+                    condition_variable_wakeall(&io->data.thread_buffer.consumer_condition);
+                }
             }
 
             return count;
@@ -5171,7 +5355,7 @@ static size_t io_write_internal(const void *ptr, size_t size, size_t count, IO i
                 next_n = memchr(ptr, '\n', length);
             } while (next_n != NULL);
 
-            return (written + io_write_internal_helper(ptr, 1, length, io)) / size;
+            return (written / size) + io_write_internal_helper(ptr, 1, length, io);
         }
 #endif
     }
@@ -5195,7 +5379,10 @@ size_t io_write(const void *ptr, size_t size, size_t count, IO io) {
     if (io_begin_write(io))
         return io_unlockz(io, 0);
 
-    return io_unlockz(io, io_write_internal(ptr, size, count, io));
+    size_t result = io_write_internal(ptr, size, count, io);
+
+    io_end_write(io);
+    return io_unlockz(io, result);
 }
 
 void io_rewind(IO io) {
