@@ -178,6 +178,7 @@ void condition_variable_init(ConditionVariable *cv);
 void condition_variable_sleep(ConditionVariable *cv, Mutex mutex);
 void condition_variable_wake(ConditionVariable *cv);
 void condition_variable_wakeall(ConditionVariable *cv);
+void condition_variable_destroy(ConditionVariable *cv);
 
 typedef void *Thread;
 

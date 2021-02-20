@@ -548,12 +548,17 @@ static void io_destroy(IO io) {
                 break;
             case IO_ThreadBuffer:
                 FREE(io->data.thread_buffer.buffer);
-                mutex_destroy(io->data.thread_buffer.mutex);
                 break;
             default: break;
         }
 
         io->flags &= ~IO_FLAG_OWNS_BUFFER;
+    }
+
+    if (io->type == IO_ThreadBuffer) {
+        condition_variable_destroy(&io->data.thread_buffer.producer_condition);
+        condition_variable_destroy(&io->data.thread_buffer.consumer_condition);
+        mutex_destroy(io->data.thread_buffer.mutex);
     }
 
     if (io->flags & IO_FLAG_DYNAMIC)
@@ -618,7 +623,7 @@ static void io_end_read(IO io) {
     if (io->type == IO_ThreadBuffer) {
         io->data.thread_buffer.is_reading = 0;
 
-        condition_variable_wakeall(&io->data.thread_buffer.consumer_condition);
+        condition_variable_wake(&io->data.thread_buffer.consumer_condition);
     }
 }
 
@@ -646,7 +651,7 @@ static void io_end_write(IO io) {
     if (io->type == IO_ThreadBuffer) {
         io->data.thread_buffer.is_writing = 0;
 
-        condition_variable_wakeall(&io->data.thread_buffer.producer_condition);
+        condition_variable_wake(&io->data.thread_buffer.producer_condition);
     }
 }
 

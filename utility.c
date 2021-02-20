@@ -446,27 +446,45 @@ void mutex_destroy(Mutex mutex) {
 }
 
 void condition_variable_init(ConditionVariable *cv) {
-#if WINDOWS_OS
+#if LINUX_OS
+    pthread_cond_init(cv, NULL);
+#elif WINDOWS_OS
     InitializeConditionVariable(cv);
 #endif
 }
 
 void condition_variable_sleep(ConditionVariable *cv, Mutex mutex) {
-#if WINDOWS_OS
+#if LINUX_OS
+    struct MutexStruct *m = mutex;
+    pthread_cond_wait(cv, &m->mutex);
+#elif WINDOWS_OS
     struct MutexStruct *m = mutex;
     SleepConditionVariableCS(cv, &m->critical_section, INFINITE);
 #endif
 }
 
 void condition_variable_wake(ConditionVariable *cv) {
-#if WINDOWS_OS
+#if LINUX_OS
+    pthread_cond_signal(cv);
+#elif WINDOWS_OS
     WakeConditionVariable(cv);
 #endif
 }
 
 void condition_variable_wakeall(ConditionVariable *cv) {
-#if WINDOWS_OS
+#if LINUX_OS
+    pthread_cond_broadcast(cv);
+#elif WINDOWS_OS
     WakeAllConditionVariable(cv);
+#endif
+}
+
+void condition_variable_destroy(ConditionVariable *cv) {
+    if (cv == NULL)
+        return;
+
+#if LINUX_OS
+    pthread_cond_destroy(cv);
 #endif
 }
 
